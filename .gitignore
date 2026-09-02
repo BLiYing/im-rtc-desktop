@@ -1,0 +1,41 @@
+# ── 构建产物 ──
+build/
+out/
+cmake-build-*/
+CMakeUserPresets.json
+CMakeCache.txt
+CMakeFiles/
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+*.exe
+*.pdb
+compile_commands.json
+
+# ── Qt ──
+*.pro.user
+*.qmlc
+*.jsc
+moc_*.cpp
+ui_*.h
+qrc_*.cpp
+
+# ── 第三方预编译包（体积大，按 README 自行下载）──
+third_party/webrtc/
+third_party/*.tar.gz
+third_party/*.zip
+
+# ── 本地配置与密钥（绝不入库）──
+.env
+.env.*
+!.env.example
+
+# ── 编辑器 / 系统 ──
+.DS_Store
+.idea/
+.vscode/
+*.swp
