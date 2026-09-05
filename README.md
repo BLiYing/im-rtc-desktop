@@ -14,8 +14,8 @@
 
 ## 跨平台策略（已定）
 
-四端**不共享代码，共享「协议 + 状态机 + 一致性测试向量」**。
-iOS 用 Swift、Web 用 TS、桌面用 C++17，靠 `im-rtc-server/docs/conformance/*.json` 钉死行为一致。
+五端**不共享代码，共享「协议 + 状态机 + 一致性测试向量」**。
+iOS 用 Swift、Web 用 TS、桌面用 C++17、Android 用 Kotlin，靠 `im-rtc-server/docs/conformance/*.json` 钉死行为一致。
 
 ## 边界
 

@@ -34,14 +34,17 @@ P0 定协议时如果发现某个设计 C++ 侧别扭，**现在就提，别等 
 - **Qt 版本**：Qt 6 为主；是否兼容 Qt 5.15 取决于集成方现状，**P5 开工前要问清楚**。
 - **裸指针回调是 C++ 端最常见的崩因**（对象先死、回调后到）。观察者一律 weak_ptr 或显式注销，
   见 CONVENTIONS §4。
-- **跨平台策略已定，别再翻案**：四端不共享代码，共享「协议 + 状态机 + 测试向量」。
+- **跨平台策略已定，别再翻案**：五端不共享代码，共享「协议 + 状态机 + 测试向量」。
 
 ## 关联工程 / 常用命令
 
-- 四仓（本地同级 `/Users/liying/IOSProject/im-rtc/`）：
+- **各端能力对照表：`../im-rtc-server/docs/CLIENT_PARITY.md`**（逐端逐特性状态的**单一真相源**，✅ 只写在那里，本文件不重复）。
+
+- 五仓（本地同级 `/Users/liying/IOSProject/im-rtc/`）：
   [im-rtc-server](https://github.com/BLiYing/im-rtc-server)（**协议契约在这里，只读引用**）·
   [im-rtc-ios](https://github.com/BLiYing/im-rtc-ios) · [im-rtc-web](https://github.com/BLiYing/im-rtc-web) ·
-  **im-rtc-desktop**（本仓）。
+  **im-rtc-desktop**（本仓）·
+  [im-rtc-android](https://github.com/BLiYing/im-rtc-android)。
 - 集成方：公司现有 Windows/Mac Qt 项目（不在本机，需对方配合）。
 - 常用命令（脚本随 P5 落地）：
   ```bash

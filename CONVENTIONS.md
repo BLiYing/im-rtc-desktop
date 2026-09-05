@@ -100,7 +100,7 @@ engine 内部：`CallEngine（门面）→ signaling / state / media / devices`�
 ## 9. 测试与「完成的定义」
 
 - **每加一个功能就配单测**。状态机与帧编解码是**必须**有测试的部分。
-- 状态机跑 `im-rtc-server/docs/conformance/*.json` 的**一致性向量**，与另外三端同一份。
+- 状态机跑 `im-rtc-server/docs/conformance/*.json` 的**一致性向量**，与另外四端同一份。
 - 纯逻辑（状态机、帧编解码、布局计算）不需要摄像头也不需要 Qt GUI，直接测。
 - 媒体链路要真机/真设备验证，且写清楚测了什么。
 - `./scripts/test.sh` 是唯一测试入口。
@@ -116,6 +116,7 @@ engine 内部：`CallEngine（门面）→ signaling / state / media / devices`�
 
 - **不做宿主业务界面**：集成方（公司 Qt 项目）有自己的视觉体系，UI 由他们自画。
   本仓的 Qt Demo 是**参考实现**，不是要求他们照抄。
-- **不做 Android**：暂不考虑。若将来要做，再评估把本仓的 C++ Engine 抽成共享核心。
+- **不做 Android**：Android 是独立的 [im-rtc-android](https://github.com/BLiYing/im-rtc-android) 仓，
+  **Kotlin 独立实现，不共享本仓的 C++ 核心**（2026-09-05 拍板，理由见设计文档 §8）。
 - **engine 不认业务概念**：只认 `userId` / `roomId` / `callId`，不认「群」「会话」「好友」。
 - **不引重型第三方框架**：boost 之类除非有不可替代的理由。

@@ -12,8 +12,8 @@
 腾讯等厂商**没有桌面版含 UI 通话组件**，所以桌面端只能「媒体用 libwebrtc + 信令接我们自己的协议」——
 这正是整个方案选择**自建信令 + 自建 SFU** 的直接原因之一。
 
-**跨平台策略（已定，别再翻案）**：四端**不共享代码，共享「协议 + 状态机 + 测试向量」**。
-iOS 用 Swift、Web 用 TS、桌面用 C++17，各写各的，靠 `im-rtc-server/docs/conformance/*.json`
+**跨平台策略（已定，别再翻案）**：五端**不共享代码，共享「协议 + 状态机 + 测试向量」**。
+iOS 用 Swift、Web 用 TS、桌面用 C++17、Android 用 Kotlin，各写各的，靠 `im-rtc-server/docs/conformance/*.json`
 的一致性向量钉死行为一致。真要选一门统一语言，答案是 C++17（Qt 与 libwebrtc 都是它），
 但在「iOS 独立 + Web 必 TS + 桌面本就 C++」的组合下，Rust/KMP 都是净负担。
 
@@ -48,7 +48,7 @@ im-rtc-desktop/
 - **`current_task.md` 是「活快照」不是流水账**：固定四节，**就地覆盖、禁止追加 Status 块**。
 - **工程规范见 [CONVENTIONS.md](CONVENTIONS.md)**（分层 / 体量 / RAII / 线程 / 日志 / 跨平台 / 测试）。
 - **协议契约在 `im-rtc-server/docs/RTC_PROTOCOL.md`，本仓只读引用**，不得单方面加字段。
-  改协议 = 改四个仓 + 同步一致性向量。
+  改协议 = 改五个仓 + 同步一致性向量。
 - **单文件体量红线**：非测试 `.cpp`/`.h` **> 600 行**要按职责拆分。
   硬闸：`scripts/check-file-size.sh`（pre-commit + `test.sh` 第 1 步）。新 clone 跑 `./scripts/install-hooks.sh`。
 - 文档引用代码**不写行号**，写文件路径 + 符号名：`engine/src/media/WebRTCAdapter.cpp` 的 `attachView()`。
@@ -85,6 +85,7 @@ cmake --preset macos-clang && cmake --build --preset macos-clang
 | [im-rtc-ios](https://github.com/BLiYing/im-rtc-ios) | Engine + Kit + Demo（Swift） |
 | [im-rtc-web](https://github.com/BLiYing/im-rtc-web) | engine + uikit + Demo（TS/React） |
 | **im-rtc-desktop**（本仓） | C++17 Engine + Qt Demo |
+| [im-rtc-android](https://github.com/BLiYing/im-rtc-android) | Engine + UIKit + Demo（Kotlin） |
 
 **本仓在分期里是 P5**，排在协议、SFU、Web、iOS 之后。
 在此之前它的价值是**接收契约**：协议与一致性向量必须从第一天就考虑 C++ 端能实现
