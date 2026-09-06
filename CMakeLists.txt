@@ -30,6 +30,10 @@ option(IMRTC_ASAN "打开 AddressSanitizer（本机排查用，不进发布）" 
 # 真实的 WS Transport 是**唯一**需要第三方依赖的部分。离线机器上关掉它，
 # engine 与全部测试照样能编能跑（它们用的是假 Transport）。
 option(IMRTC_WITH_IX_TRANSPORT "构建基于 IXWebSocket 的真实 Transport" ON)
+# Qt Demo **默认不构建**：engine 与全部测试必须在一台只装了 CMake + 编译器的
+# 机器上就能跑通，不能因为一个 Demo 就把 Qt 变成必需品。
+#   cmake --preset macos-clang -DIMRTC_BUILD_DEMO=ON -DCMAKE_PREFIX_PATH=$ENV{HOME}/Qt/6.8.3/macos
+option(IMRTC_BUILD_DEMO "构建 Qt 6 Demo（需要 Qt 6）" OFF)
 
 if(IMRTC_ASAN AND NOT MSVC)
   add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer -g)
@@ -43,6 +47,11 @@ if(IMRTC_WITH_IX_TRANSPORT)
   # capi 是对外交付物，它带的是**能真的连上服务端**的那个 Transport。
   add_subdirectory(capi)
   add_subdirectory(tools)
+  if(IMRTC_BUILD_DEMO)
+    add_subdirectory(demo)
+  endif()
+elseif(IMRTC_BUILD_DEMO)
+  message(FATAL_ERROR "Demo 要经 C ABI 调引擎，所以需要 IMRTC_WITH_IX_TRANSPORT=ON")
 endif()
 
 if(IMRTC_BUILD_TESTS)
