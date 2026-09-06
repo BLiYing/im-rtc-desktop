@@ -9,6 +9,8 @@
 #include "imrtc/CallEngineObserver.h"
 #include "imrtc/Connection.h"
 #include "imrtc/EngineMachine.h"
+#include "imrtc/MediaAdapter.h"
+#include "imrtc/MediaPlane.h"
 #include "imrtc/Transport.h"
 
 namespace imrtc {
@@ -35,6 +37,11 @@ struct CallEngineOptions {
   Random01 random;
   /** 时钟。留空用系统时钟；测试注入假的。 */
   Clock clock;
+  /**
+   * 媒体适配器。**留空 = 纯信令模式**：能登录、能拨号、能收发所有帧，
+   * 就是没有声音画面。第四刀之前的全部测试都跑在这个模式下。
+   */
+  std::shared_ptr<MediaAdapter> mediaAdapter;
 };
 
 /**
@@ -113,6 +120,29 @@ public:
   /** leaveRoom 离房。 */
   void leaveRoom();
 
+  // ---- 媒体（`mediaAdapter` 为空时全部是空操作）----
+
+  /**
+   * probeMicrophone **只探麦克风权限**，拿到即放。
+   *
+   * 时机是硬要求（交互稿 §01）：主叫在 `call()` **之前**、被叫在 `accept()` **之前**
+   * 调——拿不到就不该去响别人的铃。
+   */
+  void probeMicrophone(VoidCompletion done);
+  /** startLocalPreview 只起采集不发布，拨出中就能让人看见自己（草图 §03-E）。 */
+  void startLocalPreview(TrackCompletion done);
+  /** openMic / closeMic 开关麦克风。**不是 unpublish**，轨道与协商都保留。 */
+  void openMic();
+  void closeMic();
+  /** openCamera / closeCamera 开关摄像头。 */
+  void openCamera();
+  void closeCamera();
+  /**
+   * attachView 把某个 uid 的远端画面挂到宿主的原生窗口上（设计 §8.3 渲染路径 A）。
+   * Windows 传 `HWND`、macOS 传 `NSView*`；传 nullptr 卸载。
+   */
+  void attachView(const std::string& uid, void* nativeHandle);
+
   /**
    * notifyMediaReady 由媒体层在「`room.join.ok` 到手 + sub PC 的 ICE 连通」时调用，
    * 通话状态机据此从 connecting 走到 connected（§5.1）。
@@ -132,8 +162,21 @@ public:
 
 private:
   void apply(const MachineInput& input, const std::string& replyReqId);
+  /**
+   * handleIncoming 是**所有下行帧的唯一入口**：先给媒体面看一眼，再喂状态机。
+   *
+   * 「唯一」很重要——下行帧从两条路进来（服务端主动事件、我们请求的应答），
+   * 漏掉一条的后果是静默的：pub offer 的应答是 `room.answer`（它没有 `.ok`，§3.3），
+   * 走的正是应答那条路；只在事件那条路上接媒体面的话，上行协商永远完不成，
+   * 而且不报错。
+   */
+  void handleIncoming(const std::string& type, const std::string& reqId, const Json& data);
   void dispatchOutput(EngineOutput output, const std::string& replyReqId);
   void emitEvent(const EmittedEvent& event);
+  /** reactToEvents 让媒体面跟着通话/房间的生命周期走（进房推流、终局归零）。 */
+  void reactToEvents(const std::vector<EmittedEvent>& events);
+  /** videoTrackOf 找某个 uid 的远端视频轨道；没有则空串。 */
+  std::string videoTrackOf(const std::string& uid) const;
   void sendOne(const OutgoingFrame& frame, const std::string& replyReqId);
   /**
    * onRequestFailed 处理一次请求的失败。
@@ -148,6 +191,7 @@ private:
   std::weak_ptr<CallEngineObserver> observer_;
   EngineContext context_;
   std::unique_ptr<Connection> connection_;
+  std::unique_ptr<MediaPlane> media_;
   /**
    * Connection 的 onKickedOut 一定先于 onDisconnected 抛出（被踢与鉴权用尽两条路
    * 都是），所以用一个一次性标记把两者合成状态机认识的 `ws_closed_4403`。

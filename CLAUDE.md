@@ -28,7 +28,10 @@ iOS 用 Swift、Web 用 TS、桌面用 C++17、Android 用 Kotlin，各写各的
 - 语言：**C++17**。**engine 零 Qt 依赖（含 QtCore）**；Qt 6 只用于 `demo/`
   （于是「是否兼容 Qt 5.15」这个悬案作废——宿主用 Qt 几与引擎无关）
 - 对外边界：**纯 C ABI 动态库**，符号 `imrtc_v1_*`，`visibility=hidden`
-- 媒体：**libwebrtc 预编译包**（`shiguredo-webrtc-build`，或自建），原生 C++ API，**静态链进动态库内部**
+- 媒体：**libwebrtc 预编译包**（`shiguredo-webrtc-build`，打算锁 m150.7871.3.2），
+  原生 C++ API，**静态链进动态库内部**。
+  **⚠️ 它没有 macOS x86_64 的产物**——只有 macos_arm64 与 windows_x86_64。
+  本机是 Intel Mac，所以 `WebRTCAdapter` 要换机器做，出路见 current_task 的已知坑
 - 信令：**IXWebSocket v12.0.1**（BSD-3-Clause，**不用 QWebSocket**），锁死版本。
   TLS 走平台自带（macOS SecureTransport / Windows mbedTLS）——**不是**原先设想的
   「复用 libwebrtc 的 BoringSSL」，那条路要换 Boost.Beast 才走得通，代价是引入 boost。
@@ -47,7 +50,8 @@ im-rtc-desktop/
 │   │   ├── Json.h Errors.h Enums.h Reasons.h *
 │   │   ├── Envelope.h FieldSpec.h Frames.h Registry.h Transport.h Connection.h *
 │   │   ├── MachineTypes.h CallMachine.h RoomMachine.h EngineMachine.h *
-│   │   └── CallEngine.h CallEngineObserver.h *   # **门面与 §7.5 回调总表**
+│   │   ├── CallEngine.h CallEngineObserver.h *   # **门面与 §7.5 回调总表**
+│   │   └── MediaAdapter.h MediaPlane.h *         # 媒体面的契约与接线
 │   └── src/
 │       ├── json/ *                    # 手写 JSON：数字**按值**判定（1e3 是整数、15e-1 不是）
 │       ├── signaling/ *               # 信封 + 编码硬规则 + 声明式帧表 + 注册表
@@ -58,8 +62,9 @@ im-rtc-desktop/
 │       ├── state/ *                   # 通话机 / 房间机 / 合成层，纯逻辑、跑一致性向量
 │       ├── CallEngine.cpp *           # 门面：宿主方法 ↔ 状态机 ↔ 连接。**时钟在这里收口**
 │       ├── CallEngineEvents.cpp *     # 回调名 → 观察者方法的纯映射表
-│       ├── media/                     # MediaAdapter 接口 + WebRTCAdapter（P5 第四刀）
-│       └── devices/                   # 麦克风/摄像头/扬声器枚举与切换（P5 第四刀）
+│       ├── media/ *                   # MediaPlane：信令 ↔ 媒体的接线（**不做决策**）
+│       │   └── （WebRTCAdapter —— 要 libwebrtc，见技术栈里的平台问题）
+│       └── devices/                   # 麦克风/摄像头/扬声器枚举与切换（待做）
 ├── capi/                              # **对外唯一边界**（P5 第五刀）
 │   ├── include/imrtc/imrtc_c.h        # 纯 C 头：不透明句柄 + POD + 函数指针回调
 │   ├── include/imrtc/CallEngine.hpp   # header-only C++ RAII 包装（自己也走 C ABI）

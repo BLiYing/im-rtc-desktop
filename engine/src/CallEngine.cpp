@@ -29,6 +29,49 @@ std::int64_t systemClock() {
 
 CallEngine::CallEngine(CallEngineOptions options) : options_(std::move(options)) {
   if (!options_.clock) options_.clock = &systemClock;
+  if (!options_.mediaAdapter) return;
+
+  MediaPlane::Deps deps;
+  deps.send = [this](const std::string& type, const std::string& reqId, const Json& data) {
+    if (!connection_) return;
+    const std::int64_t now = options_.clock();
+    // 媒体面产出的帧里，pub offer 是**我们发起的请求**，其余（answer / 候选）是应答
+    // 或单向通知（§3.3）。这里的判断与 sendOne 里那条是同一条规则。
+    if (type == frame::kRoomOffer && str(data, "pc") == "pub") {
+      const std::string offerType = type;
+      connection_->request(offerType, data, now, [this, offerType](const RequestResult& result) {
+        if (!result.ok) {
+          onRequestFailed(offerType, result);
+          return;
+        }
+        handleIncoming(result.envelope.type, "", result.data);
+      });
+      return;
+    }
+    connection_->sendFrame(type, reqId, data, now);
+  };
+  deps.dispatchInternal = [this](const std::string& name) {
+    apply(MachineInput::internal(name), "");
+  };
+  deps.dispatchAct = [this](const std::string& op, const Json& args) {
+    apply(MachineInput::act(op, args), "");
+  };
+  deps.reportError = [this](std::int32_t code, const std::string& forType) {
+    if (tearingDown_) return;
+    if (const std::shared_ptr<CallEngineObserver> target = observer()) {
+      target->onError(code, errorName(code), forType);
+    }
+  };
+  deps.uidOf = [this](const std::string& trackId) {
+    const auto it = context_.room.remoteTracks.find(trackId);
+    return it == context_.room.remoteTracks.end() ? std::string() : it->second.uid;
+  };
+  deps.onFirstVideoFrame = [](const std::string&, const std::string&) {
+    // onFirstVideoFrame 还没进 CallEngineObserver（§7.5 里有，但要等渲染路径定下来
+    // 一起加，否则宿主拿到一个自己没法用的事件）。留着接口，第五刀补。
+  };
+
+  media_.reset(new MediaPlane(options_.mediaAdapter, std::move(deps)));
 }
 
 CallEngine::~CallEngine() = default;
@@ -72,9 +115,7 @@ void CallEngine::login(const std::string& token) {
     apply(MachineInput::internal(kicked ? "ws_closed_4403" : "disconnected"), "");
   };
   events.onEvent = [this](const std::string& type, const Json& data, const Envelope& envelope) {
-    // **非请求帧的应答要回显对方的 req_id**：sub 侧的 offer 是服务端发起的请求，
-    // 我们的 room.answer 就是它的应答（§3.3）。状态机不记 req_id，由这里带上。
-    apply(MachineInput::recv(type, data), envelope.reqId);
+    handleIncoming(type, envelope.reqId, data);
   };
   events.onError = [this](std::int32_t code, const std::string& name, const std::string& forType) {
     if (tearingDown_) return;
@@ -84,6 +125,7 @@ void CallEngine::login(const std::string& token) {
   };
 
   connection_.reset(new Connection(connectionOptions, events));
+  if (media_) media_->attach();
   connection_->connect(options_.clock());
 }
 
@@ -109,6 +151,7 @@ void CallEngine::logout() {
     reset 只清状态，并在通话中时本地合成一条 onCallEnd。
   */
   tearingDown_ = false;
+  if (media_) media_->close();
   apply(MachineInput::internal("reset"), "");
 }
 
@@ -154,7 +197,69 @@ void CallEngine::leaveRoom() { apply(MachineInput::act("leave"), ""); }
 void CallEngine::notifyMediaReady() { apply(MachineInput::internal("media_ready"), ""); }
 
 void CallEngine::tick() {
+  if (media_) media_->poll();
   if (connection_) connection_->tick(options_.clock());
+}
+
+void CallEngine::probeMicrophone(VoidCompletion done) {
+  if (!options_.mediaAdapter) {
+    if (done) done(false, codeValue(ErrorCode::DeviceNotFound));
+    return;
+  }
+  options_.mediaAdapter->probeMicrophone(std::move(done));
+}
+
+void CallEngine::startLocalPreview(TrackCompletion done) {
+  if (!options_.mediaAdapter) {
+    if (done) done(false, LocalTrack{}, codeValue(ErrorCode::DeviceNotFound));
+    return;
+  }
+  options_.mediaAdapter->startLocalPreview(std::move(done));
+}
+
+void CallEngine::openMic() {
+  if (media_) media_->setMuted(MediaKind::Audio, false);
+}
+void CallEngine::closeMic() {
+  if (media_) media_->setMuted(MediaKind::Audio, true);
+}
+void CallEngine::openCamera() {
+  if (media_) media_->setMuted(MediaKind::Video, false);
+}
+void CallEngine::closeCamera() {
+  if (media_) media_->setMuted(MediaKind::Video, true);
+}
+
+void CallEngine::attachView(const std::string& uid, void* nativeHandle) {
+  if (!options_.mediaAdapter) return;
+  const std::string trackId = videoTrackOf(uid);
+  // 挂一个还不存在的轨道不是错误：宿主在 onUserEnter 就把格子建好是最自然的写法，
+  // 而那个人的视频轨可能几百毫秒后才发布。轨道到了再挂由宿主重调一次。
+  if (trackId.empty()) return;
+  options_.mediaAdapter->attachView(trackId, nativeHandle);
+}
+
+std::string CallEngine::videoTrackOf(const std::string& uid) const {
+  for (const auto& entry : context_.room.remoteTracks) {
+    if (entry.second.uid == uid && entry.second.kind == "video") return entry.first;
+  }
+  return {};
+}
+
+void CallEngine::reactToEvents(const std::vector<EmittedEvent>& events) {
+  if (!media_) return;
+  for (const EmittedEvent& event : events) {
+    if (event.cb == "onRoomJoined") {
+      // 语音通话不开摄像头：协议上 media_type 只在 call.invite 时定死，
+      // 而拍板 §11-10 说语音通话里**根本没有**摄像头按钮。
+      media_->onRoomJoined(context_.call.mediaType == "video");
+    } else if (event.cb == "onCallEnd" || event.cb == "onRoomLeft" ||
+               event.cb == "onRoomClosed" || event.cb == "onKickedOut") {
+      // 一轮结束就重建 PC：它是**跟着房间走**的，不重建的话上一轮的 transceiver
+      // 还挂着，下一轮的 offer 会多出几条服务端不认识的 m-line（表现为黑屏）。
+      media_->reset();
+    }
+  }
 }
 
 ConnectionState CallEngine::connectionState() const {
@@ -163,6 +268,19 @@ ConnectionState CallEngine::connectionState() const {
 
 const std::string& CallEngine::sessionId() const {
   return connection_ ? connection_->sessionId() : kEmptyString;
+}
+
+void CallEngine::handleIncoming(const std::string& type, const std::string& reqId,
+                                const Json& data) {
+  /*
+    **媒体面先看一眼**，理由有两个：
+    - 服务端的 sub offer 要在状态机产出那条空 SDP 的 room.answer **之前**被记下来，
+      否则轮到填 SDP 时手里没有 offer；
+    - pub offer 的应答（room.answer，没有 .ok）要落到 pub PC 上才算协商完成。
+  */
+  if (media_) media_->onSignalingFrame(type, reqId, data);
+  // **非请求帧的应答要回显对方的 req_id**（§3.3）。状态机不记 req_id，由这里带上。
+  apply(MachineInput::recv(type, data), reqId);
 }
 
 void CallEngine::apply(const MachineInput& input, const std::string& replyReqId) {
@@ -175,7 +293,16 @@ void CallEngine::dispatchOutput(EngineOutput output, const std::string& replyReq
   // **先发帧再抛回调**：回调里宿主很可能立刻再调 Engine（比如 onCallBegin 里就开麦），
   // 那时状态已经是新的、该发的帧也已经在路上，不会出现「回调看到的状态比线路超前」。
   for (const OutgoingFrame& frame : output.send) sendOne(frame, replyReqId);
+  /*
+    **先把事件抛给宿主，再让媒体面动**。反过来的话，采集失败的 onError 会跑到
+    onRoomJoined 前面——宿主还不知道自己进了房，就先收到一条「麦克风被拒」，
+    界面上没有任何上下文可以挂这条错误。
+
+    「媒体面动得晚了会不会影响宿主在 onRoomJoined 里调 openCamera」不成立：
+    采集本来就是异步的，那时候轨道无论如何还没到手。
+  */
   for (const EmittedEvent& event : output.emit) emitEvent(event);
+  reactToEvents(output.emit);
 }
 
 /**
@@ -194,6 +321,10 @@ bool isOutgoingRequest(const OutgoingFrame& frame) {
 void CallEngine::sendOne(const OutgoingFrame& frame, const std::string& replyReqId) {
   if (!connection_) return;
   const std::int64_t now = options_.clock();
+
+  // 状态机产出的 SDP 帧里 sdp 是空串——它不认识 libwebrtc。媒体面把它接管过去，
+  // 异步拿到真正的 SDP 再发（见 MediaPlane::fillSdp）。
+  if (media_ && media_->fillSdp(frame.type, replyReqId, frame.data)) return;
 
   if (!isOutgoingRequest(frame)) {
     // 不是请求就是「别人请求的应答」（当前只有 sub 侧的 room.answer），回显对方的 req_id。
@@ -218,7 +349,7 @@ void CallEngine::sendOne(const OutgoingFrame& frame, const std::string& replyReq
           replyReqId 传空串：这是**我们自己请求的应答**，状态机若因此再发帧，
           那是一次新的请求，不该回显我们自己的 req_id。
         */
-        apply(MachineInput::recv(result.envelope.type, result.data), "");
+        handleIncoming(result.envelope.type, "", result.data);
       });
   if (!sent) {
     // 连接不可用时 request 不会回调，但状态机已经把状态推过去了。这一帧**根本没上线路**，

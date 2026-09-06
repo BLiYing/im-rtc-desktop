@@ -27,6 +27,8 @@ add_library(im_rtc_engine STATIC
   src/state/RoomRecv.cpp
   src/state/EngineMachine.cpp
   src/CallEngine.cpp
+  src/media/MediaEnums.cpp
+  src/media/MediaPlane.cpp
   src/CallEngineEvents.cpp
 )
 
