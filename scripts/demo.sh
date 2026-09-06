@@ -7,6 +7,11 @@
 #   ./scripts/demo.sh alice bob video      # …视频
 #   RTC_HTTP=http://192.168.1.12:8787 ./scripts/demo.sh alice
 #
+# 同机开两个实例互打时，各自的设置与通话记录靠 --profile 隔离
+# （macOS 的 QStandardPaths 不理会 $HOME，换环境变量隔离不了）：
+#   ./scripts/demo.sh alice &   # profile 自动取用户名
+#   ./scripts/demo.sh bob
+#
 # 服务端起法见 ../im-rtc-server/scripts/dev.sh。
 # Qt 装法见 demo/CMakeLists.txt 顶部注释。
 set -euo pipefail
@@ -29,7 +34,7 @@ if [ ! -x "$BIN" ]; then
 fi
 
 ARGS=(--server "$RTC_HTTP")
-[ -n "$USERNAME" ] && ARGS+=(--user "$USERNAME")
+[ -n "$USERNAME" ] && ARGS+=(--user "$USERNAME" --profile "$USERNAME")
 [ -n "$CALLEE" ] && ARGS+=(--call "$CALLEE")
 [ "$MEDIA" = "video" ] && ARGS+=(--video)
 

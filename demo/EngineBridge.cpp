@@ -231,6 +231,9 @@ void EngineBridge::onCallReceived(const std::string& callId, const std::string& 
                                   const std::vector<std::string>& calleeIds,
                                   const std::string& mediaType, bool isGroup) {
   assertOnGuiThread("onCallReceived");
+  // 通话生命周期的三条日志：联调时「到底谁没收到」全靠它们定位。
+  qCInfo(lcBridge, "onCallReceived call=%s caller=%s media=%s group=%d", callId.c_str(),
+         caller.c_str(), mediaType.c_str(), isGroup ? 1 : 0);
   QStringList ids;
   ids.reserve(static_cast<qsizetype>(calleeIds.size()));
   for (const std::string& id : calleeIds) ids << qs(id);
@@ -240,12 +243,16 @@ void EngineBridge::onCallReceived(const std::string& callId, const std::string& 
 void EngineBridge::onCallBegin(const std::string& callId, const std::string& roomId,
                                const std::string& role) {
   assertOnGuiThread("onCallBegin");
+  qCInfo(lcBridge, "onCallBegin call=%s room=%s role=%s", callId.c_str(), roomId.c_str(),
+         role.c_str());
   emit callBegan(qs(callId), qs(roomId), qs(role));
 }
 
 void EngineBridge::onCallEnd(const std::string& callId, const std::string& reason,
                              std::int64_t durationSec, const std::string& endedBy) {
   assertOnGuiThread("onCallEnd");
+  qCInfo(lcBridge, "onCallEnd call=%s reason=%s duration=%lld", callId.c_str(), reason.c_str(),
+         static_cast<long long>(durationSec));
   emit callEnded(qs(callId), qs(reason), durationSec, qs(endedBy));
 }
 

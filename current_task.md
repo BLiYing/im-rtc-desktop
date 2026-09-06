@@ -25,8 +25,11 @@
 官方包是 universal（`x86_64 arm64`），Intel Mac 上正常。
 
 **第六刀已落地**：`demo/` 四屏（登录 / 拨号 / 记录 / 设置）+ 通话浮窗四态 + 九宫格，
-**经 C ABI 调引擎**；已对着真服务端跑通一轮（自动登录 → 拨不在线的人 →
-`call.ended{offline}` → 落一条带真 `call_id` 的记录）。
+**经 C ABI 调引擎**。已对着真服务端**两端互打验过四条终局分支**（2026-09-06）：
+`offline`（拨不在线的人）、`no_answer`（振铃 30s 超时，两侧各落一条记录）、
+`hangup`（真接通 → 计时 → 挂断，两侧 `connected=true` 且时长一致）、
+`busy`（第三方拨通话中的人 → 对方 `onCallBusy`，被拨方落一条 `on_call_missed` 的未接记录）。
+**时长是服务端给的**：设了 6 秒挂断，记录里是 5 秒——正是不变量 I8 要防的那个差。
 《接入指南》在 [docs/INTEGRATION_GUIDE.md](docs/INTEGRATION_GUIDE.md)。
 `IMRTC_BUILD_DEMO` 默认 OFF——engine 与测试不依赖 Qt 这条不能破。
 
@@ -35,9 +38,9 @@
 
 ## 下一步
 
-1. **两端互打一轮**：起两个 Demo（`./scripts/demo.sh alice` / `./scripts/demo.sh bob`），
-   真的拨通一次 1v1 与一次群通话，把成员事件、九宫格状态、通话记录都过一遍。
-   现在只验过「拨不在线的人」这一条终局分支。
+1. **群通话与会议房走一遍真的**：1v1 的四条终局分支已验，但**群通话与
+   `join_room` 那两条路只在假数据下看过界面**——成员事件（`onUserEnter/Accept/Reject`）、
+   九宫格状态翻转、`invite_more`、会议房的 REST 换票，都还没对着真服务端跑过。
 2. ~~**P5 第四刀下半 · `WebRTCAdapter`**~~ —— **已推迟，不在当前排期内**（2026-09-06 定）。
    等 Apple Silicon 或 Windows 机器到手再做，做完与 Web/iOS 各互打一次。
 3. **按需**：C# / P&#8203;Invoke 绑定（C ABI 已经定型，这一层是薄的）。
@@ -88,6 +91,13 @@
   **手工维护**的，132 条；`lrelease` 只依赖 QtCore，构建正常。
   装了 qtdeclarative 的机器上 `--target update_translations` 就能接管。
   **加了新的 tr() 之后记得同步 .ts**，否则那条在英文下会退回中文（不会报错）。
+- **提示不许用 `QMessageBox` 静态函数**。它开一个嵌套事件循环并**等人点确定**，
+  在没人看着的场合会把后面的动作全挡住——实测中它挡掉过一次自动挂断，
+  害我以为是引擎少发了 `onCallEnd`。`MainWindow::toast()` 现在是非模态自动消失的提示条。
+  只有「清空通话记录」这类破坏性操作才该用模态。
+- **同机开两个实例要加 `--profile`**。macOS 的 `QStandardPaths` **不理会 `$HOME`**
+  （它走密码库里的真实家目录），所以靠环境变量隔离不了，两个实例会写同一份
+  `call-history.json` 互相覆盖。`scripts/demo.sh` 已自动按用户名传 `--profile`。
 - **静音 / 摄像头按钮在 Demo 里是禁用态**：没接媒体适配器时引擎的 `openMic()`
   是**静默空操作**，留个假开关比画成禁用更糟。`WebRTCAdapter` 落地后
   把 `CallOverlay` 里的 `setBlocked({})` 打开即可。

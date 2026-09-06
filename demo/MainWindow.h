@@ -20,7 +20,9 @@ class EngineBridge;
 class HistoryPage;
 class LoginPage;
 class SettingsPage;
+class QLabel;
 class QStackedWidget;
+class QTimer;
 
 class MainWindow : public QWidget {
   Q_OBJECT
@@ -34,6 +36,15 @@ public:
    */
   void autoLogin(const QString& httpBase, const QString& username, const QString& autoCallee,
                  const QString& mediaType);
+
+  /**
+   * 联调开关，**只由命令行打开**：
+   *   autoAccept    —— 收到来电就接。省掉「找第二个人点接听」这件事。
+   *   hangupAfterSec —— 接通 N 秒后自动挂断（0 = 不自动挂）。
+   * 生产宿主当然不该这么干，这两个开关的存在是为了让「接通 → 计时 → 挂断 →
+   * 落记录」这条完整回路能被一条命令跑完。
+   */
+  void setAutomation(bool autoAccept, int hangupAfterSec);
 
 protected:
   void resizeEvent(QResizeEvent* event) override;
@@ -50,6 +61,12 @@ private:
   void showOverlay();
   void hideOverlay();
   void centerOverlay();
+  /**
+   * 非模态提示条。**刻意不用 QMessageBox**：静态的 QMessageBox 会开一个
+   * 嵌套事件循环并等人点确定，在没人看着的场合（自动化联调、连续来了两条提示）
+   * 会把后面的动作全挡住——实测中它挡掉过一次自动挂断。
+   * 提示本来就是「说一声」，不该要求用户响应。
+   */
   void toast(const QString& message);
   /** 把手上这通电话的信息落成一条记录。只在 onCallEnd 里调。 */
   void commitRecord(const QString& callId, const QString& reason, qint64 durationSec);
@@ -63,6 +80,8 @@ private:
   DialPage* dial_ = nullptr;
   HistoryPage* historyPage_ = nullptr;
   CallOverlay* overlay_ = nullptr;
+  QLabel* toast_ = nullptr;
+  QTimer* toastTimer_ = nullptr;
 
   QString httpBase_;
   QString wsUrl_;
@@ -76,4 +95,7 @@ private:
   /** 手上这通电话。onCallEnd 之后清空。 */
   CallRecord pending_;
   bool hasPending_ = false;
+
+  bool autoAccept_ = false;
+  int hangupAfterSec_ = 0;
 };

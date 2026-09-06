@@ -39,3 +39,5 @@ third_party/*.zip
 .idea/
 .vscode/
 *.swp
+# demo-shots.sh 的产物
+build/demo-shots/

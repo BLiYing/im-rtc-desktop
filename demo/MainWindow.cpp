@@ -4,10 +4,11 @@
 #include <QDialog>
 #include <QEvent>
 #include <QHBoxLayout>
-#include <QMessageBox>
+#include <QLabel>
 #include <QResizeEvent>
 #include <QSplitter>
 #include <QStackedWidget>
+#include <QTimer>
 #include <QVBoxLayout>
 
 #include "CallOverlay.h"
@@ -17,6 +18,7 @@
 #include "HistoryPage.h"
 #include "LoginPage.h"
 #include "SettingsPage.h"
+#include "Theme.h"
 
 MainWindow::MainWindow(QWidget* parent) : QWidget(parent) {
   bridge_ = new EngineBridge(this);
@@ -38,6 +40,11 @@ void MainWindow::autoLogin(const QString& httpBase, const QString& username,
   autoCallMediaType_ = mediaType;
   login_->prefill(httpBase, username);
   login_->submit();
+}
+
+void MainWindow::setAutomation(bool autoAccept, int hangupAfterSec) {
+  autoAccept_ = autoAccept;
+  hangupAfterSec_ = hangupAfterSec;
 }
 
 void MainWindow::buildUi() {
@@ -70,6 +77,20 @@ void MainWindow::buildUi() {
   // 那一批还没做，做的时候要连同关闭语义、Dock 角标一起做，不适合零敲碎打。
   overlay_ = new CallOverlay(this);
   overlay_->hide();
+
+  toast_ = new QLabel(this);
+  toast_->setWordWrap(true);
+  toast_->setAlignment(Qt::AlignCenter);
+  toast_->setMargin(10);
+  toast_->setFont(theme::type::b2());
+  toast_->setStyleSheet(QStringLiteral("background: rgba(18,20,24,235);"
+                                       "color: #FFFFFF; border-radius: 10px;"));
+  toast_->hide();
+
+  toastTimer_ = new QTimer(this);
+  toastTimer_->setSingleShot(true);
+  toastTimer_->setInterval(4000);
+  connect(toastTimer_, &QTimer::timeout, toast_, &QLabel::hide);
 }
 
 void MainWindow::wireLogin() {
@@ -213,6 +234,7 @@ void MainWindow::wireCall() {
             overlay_->beginIncoming(caller, callees, mediaType, isGroup);
             showOverlay();
             dial_->setDialingEnabled(false);
+            if (autoAccept_) bridge_->accept();
           });
 
   connect(bridge_, &EngineBridge::callBegan, this,
@@ -221,6 +243,16 @@ void MainWindow::wireCall() {
             pending_.callId = callId;
             pending_.connected = true;
             overlay_->markConnected(role);
+            if (hangupAfterSec_ > 0) {
+              QTimer::singleShot(hangupAfterSec_ * 1000, this, [this] {
+                // 群 / 会议房是 leaveRoom，1v1 才是 hangup——与红按钮同一条分叉。
+                if (pending_.isGroup) {
+                  bridge_->leaveRoom();
+                } else {
+                  bridge_->hangup();
+                }
+              });
+            }
           });
 
   connect(bridge_, &EngineBridge::callEnded, this,
@@ -233,15 +265,18 @@ void MainWindow::wireCall() {
           });
 
   // 便利回调**只在 1v1 抛**（不变量 I7），群通话看成员事件。
-  // 它们不是终局——终局永远是 onCallEnd，所以这里只弹提示、不写记录。
+  // 它们**不是终局**——终局永远是 onCallEnd。所以这里既不写记录，也不弹模态：
+  // 浮窗的结束态已经由 onCallEnd 显示了「对方忙线中 / 无人接听 / 对方已拒绝」，
+  // 再弹一个模态就是同一件事说两遍，还挡住浮窗。宿主要单独用它们当然可以，
+  // 那是宿主的选择——这里只把它们记进日志，证明确实收到了。
   connect(bridge_, &EngineBridge::callBusy, this,
-          [this](const QString& uid) { toast(tr("%1 忙线中").arg(uid)); });
+          [](const QString& uid) { qInfo("onCallBusy %s", qUtf8Printable(uid)); });
   connect(bridge_, &EngineBridge::callNoAnswer, this,
-          [this](const QString& uid) { toast(tr("%1 无人接听").arg(uid)); });
+          [](const QString& uid) { qInfo("onCallNoAnswer %s", qUtf8Printable(uid)); });
   connect(bridge_, &EngineBridge::callRejected, this,
-          [this](const QString& uid) { toast(tr("%1 已拒绝").arg(uid)); });
+          [](const QString& uid) { qInfo("onCallRejected %s", qUtf8Printable(uid)); });
   connect(bridge_, &EngineBridge::callCancelled, this,
-          [this](const QString& by) { toast(tr("%1 取消了通话").arg(by)); });
+          [](const QString& by) { qInfo("onCallCancelled %s", qUtf8Printable(by)); });
   connect(bridge_, &EngineBridge::callMissed, this,
           [this](const QString& callId, const QString& caller, const QString& reason) {
             // 通话中被第三个人呼叫，服务端已经替我们回了忙线——**不要弹来电页**。
@@ -356,13 +391,22 @@ void MainWindow::centerOverlay() {
 }
 
 void MainWindow::toast(const QString& message) {
-  // Demo 用最朴素的提示。真宿主该用自己的 toast——这一层本来就该由宿主决定。
-  QMessageBox::information(this, tr("im-rtc Demo"), message);
+  // 后来的提示直接替换前一条：连着弹三条模态是最容易惹人烦的做法之一。
+  toast_->setText(message);
+  toast_->adjustSize();
+  const int maxWidth = qMin(420, width() - 40);
+  toast_->setFixedWidth(qMin(toast_->width(), maxWidth));
+  toast_->adjustSize();
+  toast_->move((width() - toast_->width()) / 2, 16);
+  toast_->show();
+  toast_->raise();
+  toastTimer_->start();
 }
 
 void MainWindow::resizeEvent(QResizeEvent* event) {
   QWidget::resizeEvent(event);
   centerOverlay();
+  if (toast_->isVisible()) toast_->move((width() - toast_->width()) / 2, 16);
 }
 
 void MainWindow::changeEvent(QEvent* event) {

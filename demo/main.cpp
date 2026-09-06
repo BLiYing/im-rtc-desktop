@@ -10,6 +10,14 @@
  *   --user   alice                   预填用户 ID，并**自动登录**
  *   --call   bob                     连上之后自动拨一次
  *   --video                          --call 用视频（默认语音）
+ *   --profile bob                    独立的设置与通话记录
+ *   --auto-accept                    收到来电就接（联调用）
+ *   --hangup-after 5                 接通 5 秒后自动挂断（联调用）
+ *
+ * `--profile` 是给「同一台机器上开两个实例互打」用的。macOS 的
+ * QStandardPaths **不理会 $HOME**（它走的是密码库里的真实家目录），
+ * 所以靠环境变量隔离不了——两个实例会写同一份 call-history.json 互相覆盖。
+ * 换 applicationName 才是有效的隔离方式。
  */
 
 #include <QApplication>
@@ -24,7 +32,6 @@ int main(int argc, char** argv) {
   // QSettings 要靠这三项定位存储路径（设备 id、上次填的服务器、语言都存在那）。
   QCoreApplication::setOrganizationName(QStringLiteral("im-rtc"));
   QCoreApplication::setOrganizationDomain(QStringLiteral("imrtc.dev"));
-  QCoreApplication::setApplicationName(QStringLiteral("Desktop Demo"));
   QCoreApplication::setApplicationVersion(QStringLiteral("0.1.0"));
 
   QCommandLineParser parser;
@@ -44,16 +51,39 @@ int main(int argc, char** argv) {
       QStringLiteral("uid"));
   const QCommandLineOption videoOption(
       QStringLiteral("video"), QCoreApplication::translate("main", "--call 用视频，默认语音。"));
+  const QCommandLineOption profileOption(
+      QStringLiteral("profile"),
+      QCoreApplication::translate("main", "独立的设置与通话记录，用于同机开两个实例互打。"),
+      QStringLiteral("name"));
   parser.addOption(serverOption);
   parser.addOption(userOption);
   parser.addOption(callOption);
   parser.addOption(videoOption);
+  const QCommandLineOption autoAcceptOption(
+      QStringLiteral("auto-accept"),
+      QCoreApplication::translate("main", "收到来电就接，联调用。"));
+  const QCommandLineOption hangupAfterOption(
+      QStringLiteral("hangup-after"),
+      QCoreApplication::translate("main", "接通 N 秒后自动挂断，联调用。"),
+      QStringLiteral("sec"));
+  parser.addOption(profileOption);
+  parser.addOption(autoAcceptOption);
+  parser.addOption(hangupAfterOption);
   parser.process(app);
+
+  // applicationName 决定 QSettings 与 AppDataLocation 的位置，所以要在
+  // 建任何界面（会读 QSettings）**之前**定下来。
+  const QString profile = parser.value(profileOption);
+  QCoreApplication::setApplicationName(
+      profile.isEmpty() ? QStringLiteral("Desktop Demo")
+                        : QStringLiteral("Desktop Demo [%1]").arg(profile));
 
   // 语言要在建界面**之前**装好，否则第一屏是源语言（中文）、切换后才对。
   language::apply(language::current());
 
   MainWindow window;
+  window.setAutomation(parser.isSet(autoAcceptOption),
+                       parser.value(hangupAfterOption).toInt());
   window.show();
 
   if (parser.isSet(userOption)) {
