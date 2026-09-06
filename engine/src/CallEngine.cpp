@@ -319,7 +319,18 @@ bool isOutgoingRequest(const OutgoingFrame& frame) {
 }
 
 void CallEngine::sendOne(const OutgoingFrame& frame, const std::string& replyReqId) {
-  if (!connection_) return;
+  if (!connection_) {
+    /*
+      还没 login 就调了业务方法。状态机已经把状态推过去了（比如进了 inviting），
+      而这一帧根本没地方发——**必须补一次失败**，否则通话永远停在 inviting，
+      界面「正在呼叫…」转个不停，之后每次挂断都发向一个不存在的 call。
+
+      早先这里是 `if (!connection_) return;`，静默吞掉。ABI 冒烟测试
+      「没登录就拨号」把它抓了出来。
+    */
+    failLocally(frame.type, codeValue(ErrorCode::NotLoggedIn));
+    return;
+  }
   const std::int64_t now = options_.clock();
 
   // 状态机产出的 SDP 帧里 sdp 是空串——它不认识 libwebrtc。媒体面把它接管过去，

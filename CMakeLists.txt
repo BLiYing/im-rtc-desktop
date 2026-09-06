@@ -40,6 +40,8 @@ add_subdirectory(engine)
 
 if(IMRTC_WITH_IX_TRANSPORT)
   add_subdirectory(transport)
+  # capi 是对外交付物，它带的是**能真的连上服务端**的那个 Transport。
+  add_subdirectory(capi)
   add_subdirectory(tools)
 endif()
 

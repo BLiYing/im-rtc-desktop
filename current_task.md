@@ -6,23 +6,29 @@
 
 ## 当前焦点
 
-**P5 进行中。第一~三刀 + 门面 + 媒体面接线已落地**，`./scripts/test.sh` 58 个用例全绿（macOS），
-并且**对着真服务端跑通过一整轮**：握手 → 拨号 → `onCallEnd(offline)`（`./scripts/smoke.sh`）。
-约 8700 行 C++17。落地明细见 [current_task.archive.md](current_task.archive.md)。
+**P5 进行中。第一~三刀 + 门面 + 媒体面接线 + 第五刀 capi 已落地。**
+`./scripts/test.sh` **65 个用例全绿**（macOS），约 10100 行 C++17。
+落地明细见 [current_task.archive.md](current_task.archive.md)。
+
+**对外交付物已经成立**：`libim_rtc_engine_capi.dylib` + 一个 C 头，
+**导出面只有 25 个 `imrtc_v1_*` 符号**（`scripts/check-abi.sh` 守着，已进 test.sh）。
+联调工具 `scripts/smoke.sh` **改成经 C ABI 走**——与 Qt / C# 宿主同一条路，
+对着真服务端跑通：握手 → 拨号 → `onCallEnd(offline)`。
 
 **现在卡在一个平台问题上**：libwebrtc 桌面预编译包**没有 macOS x86_64**，而本机是 Intel Mac。
 所以第四刀只做了上半——`MediaAdapter` 接口 + `MediaPlane` 接线，用假适配器测全；
 真正的 `WebRTCAdapter` 要换机器。出路见「已知坑」第一条。
 
-**还没有的**：真实媒体（没有 SDP、没有 ICE、没有声音画面）、设备枚举、C ABI 层、Qt Demo。
+**还没有的**：真实媒体（没有 SDP、没有 ICE、没有声音画面）、设备枚举、Qt Demo。
 **Windows 一次都没编译过。**
 
 ## 下一步
 
-1. **P5 第四刀下半 · `WebRTCAdapter`**：libwebrtc C++ API 的真实实现。
+1. **P5 第六刀 · Qt Demo + 《接入指南》**：四屏，**经 capi 调引擎**。这一刀要装 Qt 6，
+   但不需要 libwebrtc——纯信令模式下四屏的状态流转都能演。
+2. **P5 第四刀下半 · `WebRTCAdapter`**：libwebrtc C++ API 的真实实现。
    **换机器才能做**（见已知坑第一条）。做完与 Web/iOS 各互打一次。
-2. **P5 第五刀 · capi**：C 头定形 + 转换层 + header-only C++ 包装 + **ABI 冒烟测试（ASan）**。
-3. **P5 第六刀 · Qt Demo**：四屏 + 《接入指南》，**经 capi 调引擎**。这一刀才需要装 Qt。
+3. **按需**：C# / P&#8203;Invoke 绑定（C ABI 已经定型，这一层是薄的）。
 
 ## 已知坑 / 限制
 
@@ -60,6 +66,13 @@
   但那条 `call.ended` 到不了我们手里。不合成的话中途登出的通话会从宿主的记录里凭空消失
   （记录只由 onCallEnd 拼出来）。**待与协议确认**：§5.1 的 I8 目前只写了「重连恢复失败」
   一个例外，logout 是第二个——要么写进 I8，要么给 reason 加一个值。
+- **C ABI 的三条要写进《接入指南》第一页**：① 回调在 Engine 的线程上抛，切 UI 线程是宿主的事；
+  ② 回调里给出的指针只在该次回调期间有效；③ `imrtc_v1_engine_destroy` 阻塞到回调静默，
+  返回之后绝不会再有回调——宿主是 C# / Java 这类 GC 语言时尤其要紧。
+- **导出面靠脚本守，不靠自觉**：`-fvisibility=hidden` **挡不住 libc++ 的 RTTI**
+  （weak-def，实测漏 42 个 `std::function` 的 typeinfo）。白名单在
+  `capi/exported_symbols.txt`，守门的是 `scripts/check-abi.sh`（test.sh 第 5 步）。
+  Windows 侧由 `__declspec(dllexport)` 天然收口，但仍应在集成方那边用 `dumpbin /exports` 核一次。
 - **`Connection` 不是线程安全的**：所有方法（含 `tick`）要在同一个线程上调用。
   `IxTransport` 已经替它把 IX 后台线程的回调排队投递到 `poll()`（`tick()` 里调），
   但**宿主自己也必须在同一个线程上调 Engine 的方法**。这条要写进《接入指南》。

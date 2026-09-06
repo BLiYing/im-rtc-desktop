@@ -1,0 +1,9 @@
+# 导出符号白名单（macOS 的 -exported_symbols_list）。
+#
+# **红线 1 的机器执行版**（CONVENTIONS §2）：不写这份清单的话，libc++ 的
+# std::function RTTI 会以 weak-def 的形式跟着漏出去 42 个符号。它们弱符号、
+# 会与宿主的合并，实践上不出事——但「实践上不出事」不是 ABI 契约。
+#
+# C 名字在 Mach-O 里带前导下划线，所以是 _imrtc_v1_*。
+# Windows 那边不需要这份：__declspec(dllexport) 本来就只放行标了的那些。
+_imrtc_v1_*

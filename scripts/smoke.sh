@@ -12,9 +12,13 @@ cd "$(dirname "$0")/.."
 
 RTC_HTTP=${RTC_HTTP:-http://127.0.0.1:8787}
 RTC_WS=${RTC_WS:-ws://${RTC_HTTP#*://}/v1/ws}
-USERNAME=${USERNAME:-alice}
+# **每轮用一个独立身份**。共用 alice/mac-smoke-1 的话，上一轮没善终的通话会让
+# 这一轮的 call.invite 换回 1408 already_in_call——第一次跑就撞上了。
+# 想复现某一轮就显式传 USERNAME / DEVICE_ID。
+RUN_ID=${RUN_ID:-$$}
+USERNAME=${USERNAME:-smoke-$RUN_ID}
 CALLEE=${CALLEE:-nobody-offline}   # 必然不在线 → 服务端立刻回 offline
-DEVICE_ID=${DEVICE_ID:-mac-smoke-1}
+DEVICE_ID=${DEVICE_ID:-mac-smoke-$RUN_ID}
 
 case "$(uname -s)" in
   Darwin) PRESET="${IMRTC_PRESET:-macos-clang}" ;;

@@ -77,7 +77,7 @@ engine 与 31 个用例照样能编能跑（少掉的 5 个是 IxTransport 的�
 
 ## 状态
 
-**P5 进行中（2026-09-06 开工）。** 第一、二刀已落地：
+**P5 进行中（2026-09-06 开工）。** 已落地：
 
 - **协议层**：JSON（数字按值判定）、信封、§2.4 编码硬规则、声明式帧表、41 个帧类型
 - **状态机**：通话（§5.1）+ 房间（§5.3）+ 只有合起来才说得清的那一层
@@ -85,17 +85,22 @@ engine 与 31 个用例照样能编能跑（少掉的 5 个是 IxTransport 的�
   **不持有定时器**（时间由 `tick(nowMs)` 喂），socket 藏在 `Transport` 接口后
 - **真实 WS Transport**：IXWebSocket v12.0.1，回调跨线程投递到宿主线程
 - **门面 `CallEngine`**：§7.5 的回调总表，宿主实现 `CallEngineObserver` 就能自画 UI
+- **媒体面接线**：`MediaAdapter` 契约 + `MediaPlane`（进房推流、SDP 填充、候选双向、
+  媒体就绪、终局归零）。**真适配器还没有**——见上面的 libwebrtc 平台问题
+- **C ABI 交付物**：`libim_rtc_engine_capi.dylib` + `imrtc_c.h` + header-only C++ 包装。
+  **导出面只有 25 个 `imrtc_v1_*` 符号**，`scripts/check-abi.sh` 守着（已进 test.sh）
 
-约 7600 行 C++17。`./scripts/test.sh` **45 个用例全绿**（macOS），
+约 10100 行 C++17。`./scripts/test.sh` **65 个用例全绿**（macOS），
 ASan / UBSan / TSan 都干净。
 
-**已经对着真服务端跑通一整轮**：握手 → 拨号 → `onCallEnd(offline)`。
+**已经对着真服务端跑通一整轮，且全程经 C ABI**（与 Qt / C# 宿主同一条路）：
+握手 → 拨号 → `onCallEnd(offline)`。
 
 ```bash
 cd ../im-rtc-server && ./scripts/dev.sh     # 起本地服务端
 cd -                && ./scripts/smoke.sh   # 跑一轮
 ```
 
-**还没有的**：媒体（没有 SDP、没有 ICE、没有声音画面）、设备、C ABI 层、Qt Demo。
+**还没有的**：真实媒体实现（`WebRTCAdapter`）、设备枚举、Qt Demo。
 **Windows 一次都没编译过。**
 逐层状态见 `im-rtc-server/docs/CLIENT_PARITY.md` §1.1，本文不重复。

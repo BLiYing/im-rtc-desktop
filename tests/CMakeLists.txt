@@ -24,8 +24,11 @@ target_compile_definitions(im_rtc_engine_tests
 # transport_ix 已经 PUBLIC 链了 engine，这里再列一次 engine 会让链接器报
 # duplicate libraries，所以两条分支各链各的。
 if(TARGET imrtc::transport_ix)
-  target_sources(im_rtc_engine_tests PRIVATE IxTransportTest.cpp)
-  target_link_libraries(im_rtc_engine_tests PRIVATE imrtc::transport_ix imrtc_warnings)
+  # capi 的冒烟测试链的是**静态**那份：省一次装载，而且 ASan 能看穿整条链路。
+  # 导出面本身由 scripts/check-abi.sh 对**动态库**验（那是宿主真正拿到的东西）。
+  target_sources(im_rtc_engine_tests PRIVATE IxTransportTest.cpp CapiTest.cpp)
+  target_link_libraries(im_rtc_engine_tests PRIVATE imrtc::capi_static imrtc::transport_ix
+                        imrtc_warnings)
 else()
   target_link_libraries(im_rtc_engine_tests PRIVATE imrtc::engine imrtc_warnings)
 endif()
