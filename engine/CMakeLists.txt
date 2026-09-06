@@ -29,6 +29,7 @@ add_library(im_rtc_engine STATIC
 )
 
 target_include_directories(im_rtc_engine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(im_rtc_engine PRIVATE imrtc_warnings)
 
 # engine **不许**链接 Qt，也不许链接任何 GUI 库（CONVENTIONS §1）。
 # 这里刻意什么都不 link——将来加依赖时，加什么会在 review 里一眼看见。

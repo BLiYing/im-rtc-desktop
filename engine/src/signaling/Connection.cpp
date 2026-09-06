@@ -280,6 +280,10 @@ void Connection::scheduleReconnect(std::int64_t nowMs) {
 
 void Connection::tick(std::int64_t nowMs) {
   nowMs_ = nowMs;
+  // 先把底层攒下的事件放出来：真实 WS 库在自己的线程上收帧，投递必须发生在
+  // 宿主线程（也就是这里）。放在最前面是为了「刚收到的帧」能立刻参与本次 tick
+  // 的判活与超时计算。
+  if (transport_) transport_->poll();
   pending_.expire(nowMs);
 
   switch (heartbeat_.tick(nowMs)) {

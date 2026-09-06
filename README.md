@@ -46,6 +46,21 @@ Rust 要另写一层 C++ shim 才能桥 libwebrtc，是净负担。
 | [current_task.md](current_task.md) | 当前进度活快照 |
 | 协议契约 | 在 [im-rtc-server](https://github.com/BLiYing/im-rtc-server) 的 `docs/RTC_PROTOCOL.md`，本仓只读引用 |
 
+## 依赖（锁死版本，两平台同一版本号）
+
+| 依赖 | 版本 | 许可 | 谁用 |
+|---|---|---|---|
+| [IXWebSocket](https://github.com/machinezone/IXWebSocket) | **v12.0.1** | BSD-3-Clause | 只有 `transport/` 用。TLS 走平台自带：macOS SecureTransport、Windows mbedTLS |
+
+**engine 与全部测试零第三方依赖**——它们用的是假 Transport。
+FetchContent 在**配置期**下载 IXWebSocket；离线时：
+
+```bash
+cmake --preset macos-clang -DIMRTC_WITH_IX_TRANSPORT=OFF
+```
+
+engine 与 31 个用例照样能编能跑（少掉的 5 个是 IxTransport 的契约测试）。
+
 ## 开发
 
 ```bash
@@ -66,9 +81,13 @@ Rust 要另写一层 C++ shim 才能桥 libwebrtc，是净负担。
 
 - **协议层**：JSON（数字按值判定）、信封、§2.4 编码硬规则、声明式帧表、41 个帧类型
 - **状态机**：通话（§5.1）+ 房间（§5.3）+ 只有合起来才说得清的那一层
-- **一致性向量五份全过**（macOS）：`./scripts/test.sh` 14 个用例全绿，ASan/UBSan 干净
+- **信令连接**：握手、心跳、按 `req_id` 配对、超时、退避重连、关闭码处置。
+  **不持有定时器**（时间由 `tick(nowMs)` 喂），socket 藏在 `Transport` 接口后
+- **真实 WS Transport**：IXWebSocket v12.0.1，回调跨线程投递到宿主线程
 
-约 4700 行 C++17，**零第三方依赖**——不需要 Qt、不需要 libwebrtc 就能编译和跑测试。
+约 6800 行 C++17。`./scripts/test.sh` **36 个用例全绿**（macOS），
+ASan / UBSan / TSan 都干净。
 
-**还没有的**：WS 连接、媒体、设备、C ABI 层、Qt Demo。**Windows 一次都没编译过。**
+**还没有的**：门面（Connection ↔ 状态机的缝合）、媒体、设备、C ABI 层、Qt Demo。
+**Windows 一次都没编译过**，也**还没连过真服务端**。
 逐层状态见 `im-rtc-server/docs/CLIENT_PARITY.md` §1.1，本文不重复。

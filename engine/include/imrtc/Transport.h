@@ -73,6 +73,15 @@ public:
   virtual void close(int code, const std::string& reason) = 0;
   /** isOpen 报告底层是不是可写。 */
   virtual bool isOpen() const = 0;
+
+  /**
+   * poll 把攒下的底层事件投递给 listener，由 `Connection::tick()` 调用。
+   *
+   * **真实的 WS 库在自己的线程上回调**（IXWebSocket 就是），而 Connection
+   * 不是线程安全的。所以真实实现把事件排进队列，在这里于宿主线程上放出来。
+   * 同步的实现（测试用的假 Transport）什么都不用做。
+   */
+  virtual void poll() {}
 };
 
 /** TransportFactory 造一条新连接。测试注入假的，运行期注入真的 WS 实现。 */

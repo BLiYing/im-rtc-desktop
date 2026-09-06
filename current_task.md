@@ -6,9 +6,10 @@
 
 ## 当前焦点
 
-**P5 已开工（2026-09-06）。第一~三刀落地：CMake 骨架 + 协议层 + 两台状态机 + 信令连接层。**
-约 6000 行 C++17，**零第三方依赖**——一份 CMake + 一个编译器就能配置、编译、跑测试，
-不需要 Qt、不需要 libwebrtc、不需要网络。
+**P5 已开工（2026-09-06）。第一~三刀落地：CMake 骨架 + 协议层 + 两台状态机 + 信令连接层 + 真实 WS Transport。**
+约 6800 行 C++17。**engine 与全部状态机测试仍是零第三方依赖**——唯一需要下载依赖的是
+`transport/` 那一个目标（IXWebSocket v12.0.1，BSD-3-Clause），离线时
+`-DIMRTC_WITH_IX_TRANSPORT=OFF` 关掉，其余照编照跑。
 
 已落地：
 
@@ -19,7 +20,18 @@
 | 帧 | `signaling/FieldSpec.cpp` · `Frames*.cpp` · `Registry.cpp` | 声明式字段表 + 默认值填充 + 枚举兜底 + 41 个帧类型 |
 | 状态机 | `state/CallMachine` · `CallRecv` · `RoomMachine` · `RoomRecv` · `EngineMachine` | §5.1 通话机、§5.3 房间机，以及只有合起来才说得清的四件事 |
 | 连接 | `signaling/Connection` · `Heartbeat` · `PendingRequests` · `Backoff` | 握手、心跳、请求应答配对、超时、退避重连、关闭码处置 |
-| 测试 | `tests/` | 自制 harness + 五份向量的 runner + 假 Transport 的时序测试 |
+| 真实 WS | `transport/src/IxTransport.cpp` | IXWebSocket v12.0.1。三件必须做对的事见下 |
+| 测试 | `tests/` | 自制 harness + 五份向量的 runner + 假 Transport 的时序测试 + IxTransport 契约测试 |
+
+**IxTransport 的三件必须做对的事**（都有测试钉着）：
+
+1. **关掉 IXWebSocket 自带的自动重连**——重连策略只能有一份。两层同时跑，退避档以
+   两倍速度往上走，关闭码规则（4403 不重连）完全失效。测试从行为上验：
+   连一个必然被拒的端口，1.5 秒里只该报一次 closed。
+2. **不用它的 WS 层 ping**——协议 §1.3 的心跳是业务帧 `sys.ping`，判活条件是
+   「收到对端任何一帧」，WS 层 ping/pong 满足不了。
+3. **回调跨线程投递**——IX 在自己的后台线程收帧，`Connection` 不是线程安全的。
+   事件排队，`poll()`（`tick()` 调用）在宿主线程上放出来。
 
 **连接层的三个设计取舍**（决定了它今天就能测）：
 
@@ -30,23 +42,22 @@
 3. **socket 藏在 `Transport` 接口后面**。engine 零 Qt，也不该把某个 WS 库焊死在信令逻辑里；
    换库只动一个实现文件。
 
-**验证到什么程度**（别夸大）：`./scripts/test.sh` 在 macOS 全绿，**31 个用例**；
-ASan + UBSan 干净；五次故意破坏（I7 便利回调、R2 意图缓存、hello 丢 session_id、4403 也重连、
-心跳只认 pong）都被当场抓住。
-**Windows 一次都没编译过**；**还没有真的 WS 实现**（只有接口与假实现），媒体、设备、capi、Demo 都还没有。
+**验证到什么程度**（别夸大）：`./scripts/test.sh` 在 macOS 全绿，**36 个用例**；
+ASan、UBSan、**TSan** 都干净（TSan 是因为 IxTransport 是本仓第一处真正的多线程代码）；
+六次故意破坏（I7 便利回调、R2 意图缓存、hello 丢 session_id、4403 也重连、心跳只认 pong、
+IX 回调不排队）都被当场抓住——第七次（不关 IX 自动重连）**当时没抓住，已补上一条测试**。
+**Windows 一次都没编译过**；**还没连过真服务端**（IxTransport 只验了连不上的路径）；
+门面、媒体、设备、capi、Demo 都还没有。
 
 ## 下一步
 
-1. **接一个真的 WS 实现**（`Transport` 的唯一实现类）。**这是个待拍板的选型**：
-   IXWebSocket（小、好接、Apache-2.0）vs Boost.Beast（重、但很多项目已经有 boost）
-   vs 自己写。选定后要锁版本写进 README，并决定 vendor 还是 FetchContent。
-   接完就能**无 GUI 连真服务端跑进房离房**——本地联调从这里开始。
-2. **门面 `CallEngine`**：把 Connection 与 EngineMachine 缝起来（帧 → 回调、宿主调用 → 帧）。
-   这一步不需要第三方库，可以先于上一条做。
-3. **P5 第四刀 · 媒体**：`MediaAdapter` 接口 + `WebRTCAdapter`（libwebrtc C++ API）+ 1v1 语音/视频，
+1. **门面 `CallEngine`**：把 Connection 与 EngineMachine 缝起来（帧 → 回调、宿主调用 → 帧），
+   并决定**谁来喂时钟**（宿主线程 vs engine 自己起一条）。做完就能**无 GUI 连真服务端
+   跑通登录 → 拨号 → 进房离房**——本地联调从这里开始，也是第一次真的连上服务端。
+2. **P5 第四刀 · 媒体**：`MediaAdapter` 接口 + `WebRTCAdapter`（libwebrtc C++ API）+ 1v1 语音/视频，
    与 Web/iOS 各互打一次。**这一刀开始需要 libwebrtc 预编译包，要先锁版本号。**
-4. **P5 第五刀 · capi**：C 头定形 + 转换层 + header-only C++ 包装 + **ABI 冒烟测试（ASan）**。
-5. **P5 第六刀 · Qt Demo**：四屏 + 《接入指南》，**经 capi 调引擎**。这一刀才需要装 Qt。
+3. **P5 第五刀 · capi**：C 头定形 + 转换层 + header-only C++ 包装 + **ABI 冒烟测试（ASan）**。
+4. **P5 第六刀 · Qt Demo**：四屏 + 《接入指南》，**经 capi 调引擎**。这一刀才需要装 Qt。
 
 ## 已知坑 / 限制
 
@@ -61,8 +72,13 @@ ASan + UBSan 干净；五次故意破坏（I7 便利回调、R2 意图缓存、h
 - **状态机与连接层都不读时钟**：状态机是不变量 I4 的要求，连接层是为了可测。
   `reduceEngine(ctx, input, nowMs)` 与 `Connection::tick(nowMs)` 的时间都由调用方喂。
   将来门面里谁来喂这个时钟（宿主线程还是 engine 自己起一条）要一并想清楚。
-- **`Connection` 不是线程安全的**：所有方法（含 `tick`）要在同一个线程上调用，
-  Transport 的回调也必须投递到那个线程。这条要写进《接入指南》。
+- **`Connection` 不是线程安全的**：所有方法（含 `tick`）要在同一个线程上调用。
+  `IxTransport` 已经替它把 IX 后台线程的回调排队投递到 `poll()`（`tick()` 里调），
+  但**宿主自己也必须在同一个线程上调 Engine 的方法**。这条要写进《接入指南》。
+- **包里会有两份 TLS 实现**：信令走平台 TLS（macOS SecureTransport / Windows mbedTLS），
+  媒体那一刀引入的 libwebrtc 自带 BoringSSL。原先设想的「TLS 只有一份」要换 Boost.Beast
+  才走得通，代价是引入 boost。信令是低频小帧，这个代价当前可以接受——
+  **但打包体积与 Windows 侧的 mbedTLS 依赖要在第四刀复核一次。**
 - **4401 必须有重试上限**：重连带的是同一枚 token，没有上限就是拿同一把坏钥匙永远敲同一扇门
   （Web 端实测重试到第 19 次还在敲）。连续 3 次后抛 `onKickedOut` 回登录页换票。
 - **libwebrtc 桌面预编译包**（`shiguredo-webrtc-build`）随 Chromium 里程碑更新，两平台同一版本号；

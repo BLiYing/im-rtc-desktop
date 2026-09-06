@@ -13,9 +13,19 @@ add_executable(im_rtc_engine_tests
   ReconnectTest.cpp
 )
 
-target_link_libraries(im_rtc_engine_tests PRIVATE imrtc::engine)
 target_include_directories(im_rtc_engine_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(im_rtc_engine_tests
   PRIVATE IMRTC_CONFORMANCE_DIR="${IMRTC_CONFORMANCE_DIR}")
+
+# IxTransport 的契约测试只在真实 Transport 被构建时才编——离线机器关掉那个开关，
+# 其余测试照跑。
+# transport_ix 已经 PUBLIC 链了 engine，这里再列一次 engine 会让链接器报
+# duplicate libraries，所以两条分支各链各的。
+if(TARGET imrtc::transport_ix)
+  target_sources(im_rtc_engine_tests PRIVATE IxTransportTest.cpp)
+  target_link_libraries(im_rtc_engine_tests PRIVATE imrtc::transport_ix imrtc_warnings)
+else()
+  target_link_libraries(im_rtc_engine_tests PRIVATE imrtc::engine imrtc_warnings)
+endif()
 
 add_test(NAME engine COMMAND im_rtc_engine_tests)

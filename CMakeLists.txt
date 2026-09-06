@@ -16,14 +16,20 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 
+# 警告选项挂在 interface 目标上，**不用 add_compile_options**：后者是目录级的，
+# 会连同 FetchContent 拉进来的第三方源码一起管，别人的代码用别人的标准。
+add_library(imrtc_warnings INTERFACE)
 if(MSVC)
-  add_compile_options(/W4 /permissive- /utf-8)
+  target_compile_options(imrtc_warnings INTERFACE /W4 /permissive- /utf-8)
 else()
-  add_compile_options(-Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+  target_compile_options(imrtc_warnings INTERFACE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
 endif()
 
 option(IMRTC_BUILD_TESTS "构建单元测试与一致性向量 runner" ON)
 option(IMRTC_ASAN "打开 AddressSanitizer（本机排查用，不进发布）" OFF)
+# 真实的 WS Transport 是**唯一**需要第三方依赖的部分。离线机器上关掉它，
+# engine 与全部测试照样能编能跑（它们用的是假 Transport）。
+option(IMRTC_WITH_IX_TRANSPORT "构建基于 IXWebSocket 的真实 Transport" ON)
 
 if(IMRTC_ASAN AND NOT MSVC)
   add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer -g)
@@ -31,6 +37,10 @@ if(IMRTC_ASAN AND NOT MSVC)
 endif()
 
 add_subdirectory(engine)
+
+if(IMRTC_WITH_IX_TRANSPORT)
+  add_subdirectory(transport)
+endif()
 
 if(IMRTC_BUILD_TESTS)
   enable_testing()

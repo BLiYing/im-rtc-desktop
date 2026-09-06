@@ -29,8 +29,10 @@ iOS 用 Swift、Web 用 TS、桌面用 C++17、Android 用 Kotlin，各写各的
   （于是「是否兼容 Qt 5.15」这个悬案作废——宿主用 Qt 几与引擎无关）
 - 对外边界：**纯 C ABI 动态库**，符号 `imrtc_v1_*`，`visibility=hidden`
 - 媒体：**libwebrtc 预编译包**（`shiguredo-webrtc-build`，或自建），原生 C++ API，**静态链进动态库内部**
-- 信令：**独立 WS 库**（IXWebSocket / Boost.Beast 一类，**不用 QWebSocket**），
-  TLS **复用 libwebrtc 自带的 BoringSSL**，不再引第二份 OpenSSL
+- 信令：**IXWebSocket v12.0.1**（BSD-3-Clause，**不用 QWebSocket**），锁死版本。
+  TLS 走平台自带（macOS SecureTransport / Windows mbedTLS）——**不是**原先设想的
+  「复用 libwebrtc 的 BoringSSL」，那条路要换 Boost.Beast 才走得通，代价是引入 boost。
+  信令是低频小帧，包里有两份 TLS 实现这个代价可以接受；决定见 current_task
 - 构建：**CMake**（`CMakePresets.json` 覆盖 Windows/macOS 两套工具链）
 - 测试：Catch2 或 GoogleTest（P5 定）+ C ABI 冒烟 + Python ctypes 跑一致性向量
 - 目标系统：**Windows 10+ / macOS 11+**；macOS 产物 x86_64 + arm64 universal
@@ -49,7 +51,9 @@ im-rtc-desktop/
 │       ├── json/ *                    # 手写 JSON：数字**按值**判定（1e3 是整数、15e-1 不是）
 │       ├── signaling/ *               # 信封 + 编码硬规则 + 声明式帧表 + 注册表
 │       │   ├── Connection *           # 握手/心跳/应答配对/退避重连。**不持有定时器**
-│       │   └── （Transport 的真实 WS 实现 —— 待选型，见 current_task）
+│       │   └── （Transport 接口在 engine/include/imrtc/Transport.h）
+├── transport/ *                       # **唯一需要第三方依赖的目标**（IXWebSocket）
+│   └── src/IxTransport.cpp *          # 回调跨线程投递：IX 在自己的线程收帧，poll() 里放出来
 │       ├── state/ *                   # 通话机 / 房间机 / 合成层，纯逻辑、跑一致性向量
 │       ├── media/                     # MediaAdapter 接口 + WebRTCAdapter（P5 第四刀）
 │       └── devices/                   # 麦克风/摄像头/扬声器枚举与切换（P5 第四刀）
