@@ -6,7 +6,8 @@
 
 ## 当前焦点
 
-**P5 已开工（2026-09-06）。第一~三刀落地：CMake 骨架 + 协议层 + 两台状态机 + 信令连接层 + 真实 WS Transport。**
+**P5 已开工（2026-09-06）。第一~三刀 + 门面全部落地，并且——**
+**已经对着真服务端跑通了一整轮：握手 → 拨号 → `onCallEnd(offline)`。**
 约 6800 行 C++17。**engine 与全部状态机测试仍是零第三方依赖**——唯一需要下载依赖的是
 `transport/` 那一个目标（IXWebSocket v12.0.1，BSD-3-Clause），离线时
 `-DIMRTC_WITH_IX_TRANSPORT=OFF` 关掉，其余照编照跑。
@@ -21,6 +22,8 @@
 | 状态机 | `state/CallMachine` · `CallRecv` · `RoomMachine` · `RoomRecv` · `EngineMachine` | §5.1 通话机、§5.3 房间机，以及只有合起来才说得清的四件事 |
 | 连接 | `signaling/Connection` · `Heartbeat` · `PendingRequests` · `Backoff` | 握手、心跳、请求应答配对、超时、退避重连、关闭码处置 |
 | 真实 WS | `transport/src/IxTransport.cpp` | IXWebSocket v12.0.1。三件必须做对的事见下 |
+| **门面** | `src/CallEngine.cpp` · `CallEngineEvents.cpp` · `include/imrtc/CallEngineObserver.h` | 宿主方法 ↔ 状态机 ↔ 连接；§7.5 回调总表；**时钟在这一层收口** |
+| 联调工具 | `tools/Smoke.cpp` · `scripts/smoke.sh` | 对着真服务端跑一轮，**不进 test.sh** |
 | 测试 | `tests/` | 自制 harness + 五份向量的 runner + 假 Transport 的时序测试 + IxTransport 契约测试 |
 
 **IxTransport 的三件必须做对的事**（都有测试钉着）：
@@ -42,22 +45,43 @@
 3. **socket 藏在 `Transport` 接口后面**。engine 零 Qt，也不该把某个 WS 库焊死在信令逻辑里；
    换库只动一个实现文件。
 
-**验证到什么程度**（别夸大）：`./scripts/test.sh` 在 macOS 全绿，**36 个用例**；
-ASan、UBSan、**TSan** 都干净（TSan 是因为 IxTransport 是本仓第一处真正的多线程代码）；
-六次故意破坏（I7 便利回调、R2 意图缓存、hello 丢 session_id、4403 也重连、心跳只认 pong、
-IX 回调不排队）都被当场抓住——第七次（不关 IX 自动重连）**当时没抓住，已补上一条测试**。
-**Windows 一次都没编译过**；**还没连过真服务端**（IxTransport 只验了连不上的路径）；
-门面、媒体、设备、capi、Demo 都还没有。
+**真服务端跑通了**（2026-09-06，本机 `rtc-server :8787`）：
+
+```
+→ login ws://127.0.0.1:8787/v1/ws（device=mac-smoke-1）
+  ✓ onConnected      session=s-3f784ddcb1678838 resumed=false
+→ call [nobody-offline] audio 1v1
+  ✓ onCallEnd        reason=offline duration=0 endedBy=
+✓ 走通：握手 → 拨号 → 终局。
+```
+
+这一趟覆盖了 `sys.hello` 握手、`call.invite` 请求应答、`call.ended` 事件分发、
+以及连不上时的退避重连（`./scripts/smoke.sh` 指一个死端口会看到 1s/2s/4s 三次重试）。
+**媒体一行都没有**——没有 SDP、没有 ICE、没有声音画面。
+
+**验证到什么程度**（别夸大）：`./scripts/test.sh` 在 macOS 全绿，**45 个用例**；
+ASan、UBSan、**TSan** 都干净。变异测试八次，七次当场被抓；没抓住的那次
+（不关 IX 自带的自动重连）已补测试补上。
+**Windows 一次都没编译过**；媒体、设备、capi、Demo 都还没有。
+
+**门面这一刀里测试抓到的三个真 bug**（都补了用例钉住）：
+
+1. **断线时在途请求被当成了「这件事失败了」**——`call.invite` 在途时掉线，
+   会在 onDisconnected 之前先冒一条 onCallEnd(error)，界面当场收场；
+   而重连成功后那通电话其实还在。协议 §1.4 明说断开期间通话要保持。
+   现在断线导致的失败一律放过，成不成由 `sys.hello.ok` 的 resumed 裁决。
+2. **成功的应答没喂回状态机**——`room.join.ok` 被 Connection 当作请求的应答吃掉了，
+   房间机永远停在 joining。现在 `.ok` 也回喂。
+3. **`logout()` 抛了 onKickedOut**（真机 smoke 第一次跑就撞上）——用户自己点的退出，
+   却收到「您的账号在别处登录」。顺带还多抛了 error:2005 + roomLeft：
+   `close()` 结算在途请求时被当成了真失败。现在拆除期间连接层的东西一概不外传。
 
 ## 下一步
 
-1. **门面 `CallEngine`**：把 Connection 与 EngineMachine 缝起来（帧 → 回调、宿主调用 → 帧），
-   并决定**谁来喂时钟**（宿主线程 vs engine 自己起一条）。做完就能**无 GUI 连真服务端
-   跑通登录 → 拨号 → 进房离房**——本地联调从这里开始，也是第一次真的连上服务端。
-2. **P5 第四刀 · 媒体**：`MediaAdapter` 接口 + `WebRTCAdapter`（libwebrtc C++ API）+ 1v1 语音/视频，
+1. **P5 第四刀 · 媒体**：`MediaAdapter` 接口 + `WebRTCAdapter`（libwebrtc C++ API）+ 1v1 语音/视频，
    与 Web/iOS 各互打一次。**这一刀开始需要 libwebrtc 预编译包，要先锁版本号。**
-3. **P5 第五刀 · capi**：C 头定形 + 转换层 + header-only C++ 包装 + **ABI 冒烟测试（ASan）**。
-4. **P5 第六刀 · Qt Demo**：四屏 + 《接入指南》，**经 capi 调引擎**。这一刀才需要装 Qt。
+2. **P5 第五刀 · capi**：C 头定形 + 转换层 + header-only C++ 包装 + **ABI 冒烟测试（ASan）**。
+3. **P5 第六刀 · Qt Demo**：四屏 + 《接入指南》，**经 capi 调引擎**。这一刀才需要装 Qt。
 
 ## 已知坑 / 限制
 
@@ -69,9 +93,14 @@ IX 回调不排队）都被当场抓住——第七次（不关 IX 自动重连�
 - **C ABI 的头号崩因是生命周期**：`destroy` 必须阻塞到所有回调线程静默；宿主是 C#/Java 这类
   GC 语言时它没法帮你保活。见 CONVENTIONS §5。
 - **回调线程是宿主的责任**：engine 零 Qt，不认识宿主的事件循环，**切 UI 线程由宿主自己做**。
-- **状态机与连接层都不读时钟**：状态机是不变量 I4 的要求，连接层是为了可测。
-  `reduceEngine(ctx, input, nowMs)` 与 `Connection::tick(nowMs)` 的时间都由调用方喂。
-  将来门面里谁来喂这个时钟（宿主线程还是 engine 自己起一条）要一并想清楚。
+- **时钟在门面收口（已定）**：状态机与连接层都不读时钟（前者是不变量 I4，后者是为了可测），
+  `CallEngine` 持有 `Clock` 并在 `tick()` 里往下喂。**engine 不自己起线程**——
+  宿主的事件循环长什么样我们不知道，多起一条就等于把「回调在哪个线程」甩给宿主。
+  宿主按 ~200ms~1s 的粒度调 `tick()` 即可。
+- **`logout()` 会本地合成 `onCallEnd(reason=network)`**：服务端随后也会结束那通电话，
+  但那条 `call.ended` 到不了我们手里。不合成的话中途登出的通话会从宿主的记录里凭空消失
+  （记录只由 onCallEnd 拼出来）。**待与协议确认**：§5.1 的 I8 目前只写了「重连恢复失败」
+  一个例外，logout 是第二个——要么写进 I8，要么给 reason 加一个值。
 - **`Connection` 不是线程安全的**：所有方法（含 `tick`）要在同一个线程上调用。
   `IxTransport` 已经替它把 IX 后台线程的回调排队投递到 `poll()`（`tick()` 里调），
   但**宿主自己也必须在同一个线程上调 Engine 的方法**。这条要写进《接入指南》。

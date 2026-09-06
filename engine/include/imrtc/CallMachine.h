@@ -52,8 +52,14 @@ CallOutput callOut(CallContext state, std::vector<OutgoingFrame> send = {},
 /** invalidCallState 是「宿主在错误状态下调方法」的统一落点：本地拒绝，不发上去。 */
 CallOutput invalidCallState(const CallContext& ctx);
 
-/** reduceCall 是通话状态机的唯一入口。 */
-CallOutput reduceCall(const CallContext& ctx, const MachineInput& input);
+/**
+ * reduceCall 是通话状态机的唯一入口。
+ *
+ * `nowMs` 只有一个用处：本地合成 `onCallEnd` 时算时长（不变量 I8 的例外）。
+ * **状态机不自己读时钟**（I4），否则一致性向量没法复现。
+ */
+CallOutput reduceCall(const CallContext& ctx, const MachineInput& input,
+                      std::int64_t nowMs = 0);
 
 /** reduceCallRecv 处理一条下行帧（转移表的右半边），在 CallRecv.cpp 里。 */
 CallOutput reduceCallRecv(const CallContext& ctx, const std::string& type, const Json& data);

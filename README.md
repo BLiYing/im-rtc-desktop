@@ -84,10 +84,18 @@ engine 与 31 个用例照样能编能跑（少掉的 5 个是 IxTransport 的�
 - **信令连接**：握手、心跳、按 `req_id` 配对、超时、退避重连、关闭码处置。
   **不持有定时器**（时间由 `tick(nowMs)` 喂），socket 藏在 `Transport` 接口后
 - **真实 WS Transport**：IXWebSocket v12.0.1，回调跨线程投递到宿主线程
+- **门面 `CallEngine`**：§7.5 的回调总表，宿主实现 `CallEngineObserver` 就能自画 UI
 
-约 6800 行 C++17。`./scripts/test.sh` **36 个用例全绿**（macOS），
+约 7600 行 C++17。`./scripts/test.sh` **45 个用例全绿**（macOS），
 ASan / UBSan / TSan 都干净。
 
-**还没有的**：门面（Connection ↔ 状态机的缝合）、媒体、设备、C ABI 层、Qt Demo。
-**Windows 一次都没编译过**，也**还没连过真服务端**。
+**已经对着真服务端跑通一整轮**：握手 → 拨号 → `onCallEnd(offline)`。
+
+```bash
+cd ../im-rtc-server && ./scripts/dev.sh     # 起本地服务端
+cd -                && ./scripts/smoke.sh   # 跑一轮
+```
+
+**还没有的**：媒体（没有 SDP、没有 ICE、没有声音画面）、设备、C ABI 层、Qt Demo。
+**Windows 一次都没编译过。**
 逐层状态见 `im-rtc-server/docs/CLIENT_PARITY.md` §1.1，本文不重复。

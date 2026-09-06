@@ -40,6 +40,7 @@ add_subdirectory(engine)
 
 if(IMRTC_WITH_IX_TRANSPORT)
   add_subdirectory(transport)
+  add_subdirectory(tools)
 endif()
 
 if(IMRTC_BUILD_TESTS)

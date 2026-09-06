@@ -105,7 +105,17 @@ EngineOutput handleHelloOk(const EngineContext& ctx, const Json& data, std::int6
   return EngineOutput{std::move(next), std::move(send), std::move(emit)};
 }
 
-EngineOutput handleInternal(const EngineContext& ctx, const std::string& name) {
+EngineOutput handleInternal(const EngineContext& ctx, const std::string& name,
+                            std::int64_t nowMs) {
+  if (name == "reset") {
+    // 宿主主动 logout：房间直接清空，通话本地合成一条 onCallEnd（见 CallMachine 的注释）。
+    CallOutput call = reduceCall(ctx.call, MachineInput::internal(name), nowMs);
+    EngineContext next;
+    next.room = clearedRoom(RoomState::Idle);
+    next.call = std::move(call.state);
+    return EngineOutput{std::move(next), {}, std::move(call.emit)};
+  }
+
   if (name == "ws_closed_4403") {
     // 被踢：什么都不留。重连没有意义——那等于跟另一台设备打架。
     EngineContext next;
@@ -126,13 +136,13 @@ EngineOutput handleInternal(const EngineContext& ctx, const std::string& name) {
   }
   if (name == "call_failed") {
     // 交给通话机回 idle；它抛的 onCallEnd 会顺带把房间也清掉（见 liftCall）。
-    return liftCall(ctx, reduceCall(ctx.call, MachineInput::internal(name)));
+    return liftCall(ctx, reduceCall(ctx.call, MachineInput::internal(name), nowMs));
   }
   if (name == "join_failed") {
     return liftRoom(ctx, reduceRoom(ctx.room, MachineInput::internal(name)));
   }
   // 其余内部事件（media_ready）交给通话机。
-  return liftCall(ctx, reduceCall(ctx.call, MachineInput::internal(name)));
+  return liftCall(ctx, reduceCall(ctx.call, MachineInput::internal(name), nowMs));
 }
 
 }  // namespace
@@ -142,15 +152,15 @@ EngineOutput reduceEngine(const EngineContext& ctx, const MachineInput& input,
   if (input.kind == MachineInput::Kind::Recv && input.name == frame::kHelloOk) {
     return handleHelloOk(ctx, input.payload, nowMs);
   }
-  if (input.kind == MachineInput::Kind::Internal) return handleInternal(ctx, input.name);
+  if (input.kind == MachineInput::Kind::Internal) return handleInternal(ctx, input.name, nowMs);
 
   if (input.kind == MachineInput::Kind::Recv) {
-    if (startsWith(input.name, "call.")) return liftCall(ctx, reduceCall(ctx.call, input));
+    if (startsWith(input.name, "call.")) return liftCall(ctx, reduceCall(ctx.call, input, nowMs));
     if (startsWith(input.name, "room.")) return liftRoom(ctx, reduceRoom(ctx.room, input));
     return EngineOutput{ctx, {}, {}};
   }
 
-  if (isCallAct(input.name)) return liftCall(ctx, reduceCall(ctx.call, input));
+  if (isCallAct(input.name)) return liftCall(ctx, reduceCall(ctx.call, input, nowMs));
   if (isRoomAct(input.name)) return liftRoom(ctx, reduceRoom(ctx.room, input));
   return EngineOutput{ctx, {}, {}};
 }

@@ -11,6 +11,7 @@ add_executable(im_rtc_engine_tests
   RoomFsmTest.cpp
   ConnectionTest.cpp
   ReconnectTest.cpp
+  CallEngineTest.cpp
 )
 
 target_include_directories(im_rtc_engine_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

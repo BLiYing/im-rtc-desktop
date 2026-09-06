@@ -95,7 +95,8 @@ CallOutput reduceAct(const CallContext& ctx, const std::string& op, const Json& 
   return invalidCallState(ctx);
 }
 
-CallOutput reduceInternal(const CallContext& ctx, const std::string& name) {
+CallOutput reduceInternal(const CallContext& ctx, const std::string& name,
+                          std::int64_t nowMs) {
   // 媒体就绪：room.join.ok 到手 + sub PC 的 ICE 连通（§5.1）。
   if (name == "media_ready" && ctx.state == CallState::Connecting) {
     CallContext next = ctx;
@@ -112,6 +113,20 @@ CallOutput reduceInternal(const CallContext& ctx, const std::string& name) {
     抛 onCallEnd 而不是只清状态：它是所有结束分支的唯一出口（设计 §7.5），
     界面只认这一个信号来收场子。reason 用 error——这通电话从未建立。
   */
+  /*
+    `reset` 是**本地拆除**：宿主主动 logout。服务端随后也会结束这通电话，
+    但那条 `call.ended` 到不了我们手里（连接已经关了）——与不变量 I8 里
+    「重连恢复失败」是同一种处境，所以用同一种处置：本地合成 onCallEnd，
+    时长用本地计时。
+
+    不合成不行：`onCallEnd` 是所有结束分支的唯一出口（不变量 I1），而宿主的
+    通话记录**只由它拼出来**。中途登出那通电话就会从记录里凭空消失。
+
+    **待与协议确认**：§5.1 的 I8 目前只写了「重连恢复失败」一个例外，
+    logout 是第二个。要么把它写进 I8，要么给 reason 加一个值。
+  */
+  if (name == "reset") return synthesizeNetworkEnd(ctx, nowMs);
+
   if (name == "call_failed" && ctx.state != CallState::Idle) {
     return callOut(CallContext{}, {},
                    {eventOf("onCallEnd", obj({{"call_id", Json::make(ctx.callId)},
@@ -160,11 +175,12 @@ CallOutput invalidCallState(const CallContext& ctx) {
                                           {"name", Json::make(errorName(code))}}))});
 }
 
-CallOutput reduceCall(const CallContext& ctx, const MachineInput& input) {
+CallOutput reduceCall(const CallContext& ctx, const MachineInput& input,
+                      std::int64_t nowMs) {
   switch (input.kind) {
     case MachineInput::Kind::Act: return reduceAct(ctx, input.name, input.payload);
     case MachineInput::Kind::Recv: return reduceCallRecv(ctx, input.name, input.payload);
-    case MachineInput::Kind::Internal: return reduceInternal(ctx, input.name);
+    case MachineInput::Kind::Internal: return reduceInternal(ctx, input.name, nowMs);
   }
   return callOut(ctx);
 }

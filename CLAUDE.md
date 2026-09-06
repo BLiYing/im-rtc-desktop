@@ -45,8 +45,9 @@ im-rtc-desktop/
 ├── engine/ *                          # 无 UI，**零 Qt 依赖**
 │   ├── include/imrtc/ *               # 引擎内部公开头（**不是对外交付面**，对外见 capi/）
 │   │   ├── Json.h Errors.h Enums.h Reasons.h *
-│   │   ├── Envelope.h FieldSpec.h Frames.h Registry.h *
-│   │   └── MachineTypes.h CallMachine.h RoomMachine.h EngineMachine.h *
+│   │   ├── Envelope.h FieldSpec.h Frames.h Registry.h Transport.h Connection.h *
+│   │   ├── MachineTypes.h CallMachine.h RoomMachine.h EngineMachine.h *
+│   │   └── CallEngine.h CallEngineObserver.h *   # **门面与 §7.5 回调总表**
 │   └── src/
 │       ├── json/ *                    # 手写 JSON：数字**按值**判定（1e3 是整数、15e-1 不是）
 │       ├── signaling/ *               # 信封 + 编码硬规则 + 声明式帧表 + 注册表
@@ -55,12 +56,16 @@ im-rtc-desktop/
 ├── transport/ *                       # **唯一需要第三方依赖的目标**（IXWebSocket）
 │   └── src/IxTransport.cpp *          # 回调跨线程投递：IX 在自己的线程收帧，poll() 里放出来
 │       ├── state/ *                   # 通话机 / 房间机 / 合成层，纯逻辑、跑一致性向量
+│       ├── CallEngine.cpp *           # 门面：宿主方法 ↔ 状态机 ↔ 连接。**时钟在这里收口**
+│       ├── CallEngineEvents.cpp *     # 回调名 → 观察者方法的纯映射表
 │       ├── media/                     # MediaAdapter 接口 + WebRTCAdapter（P5 第四刀）
 │       └── devices/                   # 麦克风/摄像头/扬声器枚举与切换（P5 第四刀）
 ├── capi/                              # **对外唯一边界**（P5 第五刀）
 │   ├── include/imrtc/imrtc_c.h        # 纯 C 头：不透明句柄 + POD + 函数指针回调
 │   ├── include/imrtc/CallEngine.hpp   # header-only C++ RAII 包装（自己也走 C ABI）
 │   └── src/                           # C++ → C 的转换层（异常在这里被吃掉转错误码）
+├── tools/ *                           # 联调工具（需要真服务端，不进 test.sh）
+│   └── Smoke.cpp *                    # 握手 → 拨号 → 终局，跑一轮给人看
 ├── demo/                              # Qt 6 Demo，**经 capi 调引擎**（P5 第六刀）
 ├── tests/ *                           # 自制 harness（120 行）+ 五份向量的 runner
 └── scripts/ *                         # 门禁与测试入口

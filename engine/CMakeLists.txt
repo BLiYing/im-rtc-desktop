@@ -26,6 +26,8 @@ add_library(im_rtc_engine STATIC
   src/state/RoomMachine.cpp
   src/state/RoomRecv.cpp
   src/state/EngineMachine.cpp
+  src/CallEngine.cpp
+  src/CallEngineEvents.cpp
 )
 
 target_include_directories(im_rtc_engine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
