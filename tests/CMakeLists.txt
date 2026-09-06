@@ -9,6 +9,8 @@ add_executable(im_rtc_engine_tests
   JsonTest.cpp
   CallFsmTest.cpp
   RoomFsmTest.cpp
+  ConnectionTest.cpp
+  ReconnectTest.cpp
 )
 
 target_link_libraries(im_rtc_engine_tests PRIVATE imrtc::engine)

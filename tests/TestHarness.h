@@ -4,6 +4,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include "imrtc/Json.h"
@@ -47,6 +48,12 @@ std::string describe(std::int64_t value);
 std::string describe(int value);
 std::string describe(std::size_t value);
 std::string describe(const imrtc::Json& value);
+
+/** 枚举按底层整数渲染——测试里比的是「状态对不对」，数值足够定位。 */
+template <typename T, typename = std::enable_if_t<std::is_enum<T>::value>>
+std::string describe(T value) {
+  return std::to_string(static_cast<long long>(value));
+}
 
 template <typename T>
 std::string describe(const std::vector<T>& values) {

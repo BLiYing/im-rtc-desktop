@@ -10,6 +10,10 @@ add_library(im_rtc_engine STATIC
   src/json/JsonValue.cpp
   src/json/JsonParser.cpp
   src/signaling/Envelope.cpp
+  src/signaling/Backoff.cpp
+  src/signaling/Heartbeat.cpp
+  src/signaling/PendingRequests.cpp
+  src/signaling/Connection.cpp
   src/signaling/Discipline.cpp
   src/signaling/FieldSpec.cpp
   src/signaling/FramesSys.cpp

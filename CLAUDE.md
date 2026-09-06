@@ -48,7 +48,8 @@ im-rtc-desktop/
 │   └── src/
 │       ├── json/ *                    # 手写 JSON：数字**按值**判定（1e3 是整数、15e-1 不是）
 │       ├── signaling/ *               # 信封 + 编码硬规则 + 声明式帧表 + 注册表
-│       │   └── （WS 客户端 + 重连退避 —— P5 第三刀）
+│       │   ├── Connection *           # 握手/心跳/应答配对/退避重连。**不持有定时器**
+│       │   └── （Transport 的真实 WS 实现 —— 待选型，见 current_task）
 │       ├── state/ *                   # 通话机 / 房间机 / 合成层，纯逻辑、跑一致性向量
 │       ├── media/                     # MediaAdapter 接口 + WebRTCAdapter（P5 第四刀）
 │       └── devices/                   # 麦克风/摄像头/扬声器枚举与切换（P5 第四刀）
