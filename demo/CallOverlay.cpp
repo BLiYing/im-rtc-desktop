@@ -125,27 +125,18 @@ CallOverlay::CallOverlay(QWidget* parent) : QWidget(parent) {
     connect(button, &ControlButton::blockedClicked, this, &CallOverlay::notice);
   }
 
+  danger_->setObjectName(QStringLiteral("dangerButton"));
+  answer_->setObjectName(QStringLiteral("answerButton"));
+
   connect(answer_, &ControlButton::clicked, this, &CallOverlay::acceptRequested);
   connect(danger_, &ControlButton::clicked, this, [this] {
-    switch (phase_) {
-      case Phase::Incoming:
-        emit rejectRequested();
-        break;
-      case Phase::Outgoing:
-        // 接通前是「取消」，不是「挂断」——协议上是两条不同的帧。
-        emit cancelRequested();
-        break;
-      case Phase::Connected:
-        // **只判会议房，不判人数。**群通话是有 call 的，必须走 hangup——
-        // 发 room.leave 的话离开者永远收不到 onCallEnd（见头注释第 2 条）。
-        if (isRoomMode()) {
-          emit leaveRoomRequested();
-        } else {
-          emit hangupRequested();
-        }
-        break;
-      case Phase::Ended:
-        break;
+    // 规则本身在 dangerAction() 里，这里只负责把它翻成信号。
+    switch (dangerAction()) {
+      case DangerAction::Reject:    emit rejectRequested(); break;
+      case DangerAction::Cancel:    emit cancelRequested(); break;
+      case DangerAction::Hangup:    emit hangupRequested(); break;
+      case DangerAction::LeaveRoom: emit leaveRoomRequested(); break;
+      case DangerAction::None:      break;
     }
   });
 
@@ -163,6 +154,33 @@ CallOverlay::CallOverlay(QWidget* parent) : QWidget(parent) {
 
   retranslateUi();
   applyPhase();
+}
+
+CallOverlay::DangerAction CallOverlay::dangerAction() const {
+  switch (phase_) {
+    case Phase::Incoming:
+      return DangerAction::Reject;
+    case Phase::Outgoing:
+      // 接通前是「取消」，不是「挂断」——协议上是两条不同的帧。
+      return DangerAction::Cancel;
+    case Phase::Connected:
+      // **只判会议房，不判人数。**群通话是有 call 的，必须走 hangup——
+      // 发 room.leave 的话离开者永远收不到 onCallEnd（见头注释第 2 条）。
+      return isRoomMode() ? DangerAction::LeaveRoom : DangerAction::Hangup;
+    case Phase::Ended:
+      break;
+  }
+  return DangerAction::None;
+}
+
+QString CallOverlay::dangerCaption() const {
+  switch (phase_) {
+    case Phase::Incoming: return tr("拒绝");
+    case Phase::Outgoing: return tr("取消");
+    default: break;
+  }
+  // 文案按人数分叉，与 dangerAction() 的依据不同——群通话写「离开」但调 hangup。
+  return (isGroup_ || isRoomMode()) ? tr("离开") : tr("挂断");
 }
 
 void CallOverlay::beginOutgoing(const QStringList& members, const QString& mediaType,
@@ -389,15 +407,8 @@ void CallOverlay::retranslateUi() {
   screen_->setCaptions(tr("共享屏幕"), tr("共享中"));
   answer_->setCaptions(tr("接听"), tr("接听"));
 
-  QString dangerCaption;
-  switch (phase_) {
-    case Phase::Incoming: dangerCaption = tr("拒绝"); break;
-    case Phase::Outgoing: dangerCaption = tr("取消"); break;
-    // **文案**按人数分叉：群通话与会议房都写「离开」，1v1 写「挂断」。
-    // 注意这与上面调哪个方法是两件事——群通话写着「离开」但调的是 hangup()。
-    default: dangerCaption = (isGroup_ || isRoomMode()) ? tr("离开") : tr("挂断"); break;
-  }
-  danger_->setCaptions(dangerCaption, dangerCaption);
+  const QString caption = dangerCaption();
+  danger_->setCaptions(caption, caption);
   danger_->setSymbols(phase_ == Phase::Incoming ? icons::Name::Xmark : icons::Name::PhoneDown,
                       phase_ == Phase::Incoming ? icons::Name::Xmark : icons::Name::PhoneDown);
 

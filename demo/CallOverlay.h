@@ -52,6 +52,25 @@ class CallOverlay : public QWidget {
 public:
   enum class Phase { Outgoing, Incoming, Connected, Ended };
 
+  /** 红按钮在当前状态下到底该调哪个方法。 */
+  enum class DangerAction { None, Cancel, Reject, Hangup, LeaveRoom };
+
+  /**
+   * **红按钮那条规则的唯一真相源**，公开是为了能直接测。
+   *
+   * 动作只看「有没有 call」，**不看人数**：
+   *   - 会议房（`join_room` 进来的，没有 call）→ `LeaveRoom`
+   *   - 1v1 与群通话（有 call）→ 接通前 `Cancel` / `Reject`，接通后 `Hangup`
+   */
+  DangerAction dangerAction() const;
+
+  /**
+   * 红按钮的文案。**依据与 `dangerAction()` 不同**：文案只看人数——
+   * 1v1 写「挂断」，群通话与会议房都写「离开」。
+   * 于是群通话上写着「离开」，调的却是 `Hangup`。这一格最容易写错。
+   */
+  QString dangerCaption() const;
+
   explicit CallOverlay(QWidget* parent = nullptr);
 
   /** 我拨出去的。`members` 是被叫列表（1v1 就一个）。 */

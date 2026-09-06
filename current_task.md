@@ -7,7 +7,8 @@
 ## 当前焦点
 
 **P5 进行中。第一~三刀 + 门面 + 媒体面接线 + 第五刀 capi + 第六刀 Qt Demo 已落地。**
-`./scripts/test.sh` **65 个用例全绿**（macOS），约 14100 行 C++17。
+`./scripts/test.sh` **七步全绿**（macOS）：65 个引擎用例 + 10 个 Demo 界面用例，
+约 14300 行 C++17。第七步只在 `IMRTC_BUILD_DEMO=ON` 时存在（需要 Qt）。
 落地明细见 [current_task.archive.md](current_task.archive.md)。
 
 **对外交付物已经成立**：`libim_rtc_engine_capi.dylib` + 一个 C 头，
@@ -119,7 +120,9 @@
   **我们写错过**：设计稿 §05 原话是「群/会议 → leaveRoom()」，照抄之后群通话的离开者
   **永远收不到 `onCallEnd`**（服务端对 `room.leave` 只广播 `participant_left`），
   记录落不下来且违反 I1。Web / iOS 的代码本来就只判 `isMeeting`，是对的。
-  设计稿已于 2026-09-06 更正，别再照旧版写。
+  设计稿已于 2026-09-06 更正，别再照旧版写。规则本身抽在
+  `CallOverlay::dangerAction()` 里（单一真相源），`demo/tests/` 有回归测试守着，
+  做过变异测试：改回旧规则，两个用例当场红。
 - **联调时每轮换一次用户名**。上一轮被 kill 的进程在服务端还挂着「通话中」
   （30s 恢复窗口），复用同一个 uid 会让下一轮直接回 `busy`——
   `scripts/smoke.sh` 早就是这么做的（`smoke-$$`），Demo 联调也照办。

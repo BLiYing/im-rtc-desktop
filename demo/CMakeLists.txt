@@ -103,10 +103,23 @@ qt_add_translations(
 # 但这**不降低我们自己的交付面**——engine 与 capi 那两个目标照旧 11.0，
 # 也就是说集成方的 App 仍可以支持 macOS 11，只是「用 Qt 6.8 的宿主」得 12+。
 # 这是 Qt 的约束，不是我们的。
-foreach(_t imrtc_demo_ui imrtc_demo imrtc_demo_shots)
+foreach(_t imrtc_demo_ui imrtc_demo imrtc_demo_shots ${_imrtc_demo_targets})
   target_compile_options(${_t} PRIVATE -mmacosx-version-min=12.0)
   target_link_options(${_t} PRIVATE -mmacosx-version-min=12.0)
 endforeach()
+
+# 界面测试：只在 IMRTC_BUILD_DEMO=ON 时存在，所以离线构建不受影响。
+# 覆盖的是「看代码看不出来、跑真服务端才暴露」的那类规则——
+# 目前就一条：红按钮到底调哪个方法（见 OverlayActionsTest.cpp 顶部注释）。
+find_package(Qt6 6.5 QUIET COMPONENTS Test)
+if(Qt6Test_FOUND)
+  qt_add_executable(imrtc_demo_tests tests/OverlayActionsTest.cpp)
+  target_link_libraries(imrtc_demo_tests PRIVATE imrtc_demo_ui Qt6::Test imrtc_warnings)
+  add_test(NAME imrtc_demo_tests COMMAND imrtc_demo_tests)
+  list(APPEND _imrtc_demo_targets imrtc_demo_tests)
+else()
+  message(STATUS "没有 Qt6::Test，跳过 Demo 界面测试")
+endif()
 
 set_target_properties(imrtc_demo PROPERTIES
   MACOSX_BUNDLE TRUE
