@@ -8,11 +8,13 @@
  * 联调参数（都可省）：
  *   --server http://127.0.0.1:8787   预填服务器
  *   --user   alice                   预填用户 ID，并**自动登录**
- *   --call   bob                     连上之后自动拨一次
+ *   --call   bob[,carol,…]            连上之后自动拨一次，多于一个即群通话
  *   --video                          --call 用视频（默认语音）
  *   --profile bob                    独立的设置与通话记录
  *   --auto-accept                    收到来电就接（联调用）
- *   --hangup-after 5                 接通 5 秒后自动挂断（联调用）
+ *   --hangup-after 5                 接通 / 进房 5 秒后自动退出（联调用）
+ *   --invite dave                    接通后立刻 invite_more 一个人（只有主叫能发）
+ *   --room   new | 8827-1190         走会议房那条路：new 表示先建一个
  *
  * `--profile` 是给「同一台机器上开两个实例互打」用的。macOS 的
  * QStandardPaths **不理会 $HOME**（它走的是密码库里的真实家目录），
@@ -47,8 +49,9 @@ int main(int argc, char** argv) {
       QCoreApplication::translate("main", "预填用户 ID，并自动登录。"),
       QStringLiteral("uid"));
   const QCommandLineOption callOption(
-      QStringLiteral("call"), QCoreApplication::translate("main", "连上之后自动拨这个人。"),
-      QStringLiteral("uid"));
+      QStringLiteral("call"),
+      QCoreApplication::translate("main", "连上之后自动拨这些人，逗号分隔；多于一个即群通话。"),
+      QStringLiteral("uid[,uid…]"));
   const QCommandLineOption videoOption(
       QStringLiteral("video"), QCoreApplication::translate("main", "--call 用视频，默认语音。"));
   const QCommandLineOption profileOption(
@@ -64,11 +67,21 @@ int main(int argc, char** argv) {
       QCoreApplication::translate("main", "收到来电就接，联调用。"));
   const QCommandLineOption hangupAfterOption(
       QStringLiteral("hangup-after"),
-      QCoreApplication::translate("main", "接通 N 秒后自动挂断，联调用。"),
+      QCoreApplication::translate("main", "接通 / 进房 N 秒后自动退出，联调用。"),
       QStringLiteral("sec"));
+  const QCommandLineOption inviteOption(
+      QStringLiteral("invite"),
+      QCoreApplication::translate("main", "接通后立刻加一个人进来，联调用。"),
+      QStringLiteral("uid"));
+  const QCommandLineOption roomOption(
+      QStringLiteral("room"),
+      QCoreApplication::translate("main", "进会议房；new 表示先建一个。"),
+      QStringLiteral("id|new"));
   parser.addOption(profileOption);
   parser.addOption(autoAcceptOption);
   parser.addOption(hangupAfterOption);
+  parser.addOption(inviteOption);
+  parser.addOption(roomOption);
   parser.process(app);
 
   // applicationName 决定 QSettings 与 AppDataLocation 的位置，所以要在
@@ -83,14 +96,16 @@ int main(int argc, char** argv) {
 
   MainWindow window;
   window.setAutomation(parser.isSet(autoAcceptOption),
-                       parser.value(hangupAfterOption).toInt());
+                       parser.value(hangupAfterOption).toInt(),
+                       parser.value(inviteOption));
   window.show();
 
   if (parser.isSet(userOption)) {
     window.autoLogin(parser.value(serverOption), parser.value(userOption),
-                     parser.value(callOption),
+                     parser.value(callOption).split(QLatin1Char(','), Qt::SkipEmptyParts),
                      parser.isSet(videoOption) ? QStringLiteral("video")
-                                               : QStringLiteral("audio"));
+                                               : QStringLiteral("audio"),
+                     parser.value(roomOption));
   }
   return app.exec();
 }

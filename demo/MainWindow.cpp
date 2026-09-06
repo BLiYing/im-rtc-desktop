@@ -35,16 +35,31 @@ MainWindow::MainWindow(QWidget* parent) : QWidget(parent) {
 }
 
 void MainWindow::autoLogin(const QString& httpBase, const QString& username,
-                           const QString& autoCallee, const QString& mediaType) {
-  autoCallee_ = autoCallee;
+                           const QStringList& autoCallees, const QString& mediaType,
+                           const QString& autoRoom) {
+  autoCallees_ = autoCallees;
   autoCallMediaType_ = mediaType;
+  autoRoom_ = autoRoom;
   login_->prefill(httpBase, username);
   login_->submit();
 }
 
-void MainWindow::setAutomation(bool autoAccept, int hangupAfterSec) {
+void MainWindow::setAutomation(bool autoAccept, int hangupAfterSec, const QString& autoInvite) {
   autoAccept_ = autoAccept;
   hangupAfterSec_ = hangupAfterSec;
+  autoInvite_ = autoInvite;
+}
+
+void MainWindow::armAutoLeave(bool useLeaveRoom) {
+  if (hangupAfterSec_ <= 0) return;
+  QTimer::singleShot(hangupAfterSec_ * 1000, this, [this, useLeaveRoom] {
+    // 与红按钮同一条分叉：**只有会议房**是 leaveRoom，1v1 与群通话都是 hangup。
+    if (useLeaveRoom) {
+      bridge_->leaveRoom();
+    } else {
+      bridge_->hangup();
+    }
+  });
 }
 
 void MainWindow::buildUi() {
@@ -150,14 +165,25 @@ void MainWindow::wireConnection() {
             overlay_->setSelfUid(uid_);
             overlay_->onReconnecting(false);
 
-            if (!autoCallee_.isEmpty()) {
-              // 只自动拨一次：重连也会走到这里，不清空的话会变成自动重拨。
-              const QString callee = autoCallee_;
-              autoCallee_.clear();
-              if (autoCallMediaType_ == QLatin1String("video")) {
-                emit dial_->videoCallRequested(callee);
+            // 只自动做一次：重连也会走到这里，不清空的话会变成自动重拨。
+            if (!autoCallees_.isEmpty()) {
+              const QStringList callees = autoCallees_;
+              autoCallees_.clear();
+              if (callees.size() > 1) {
+                emit dial_->groupCallRequested(callees, autoCallMediaType_);
+              } else if (autoCallMediaType_ == QLatin1String("video")) {
+                emit dial_->videoCallRequested(callees.first());
               } else {
-                emit dial_->audioCallRequested(callee);
+                emit dial_->audioCallRequested(callees.first());
+              }
+            } else if (!autoRoom_.isEmpty()) {
+              const QString room = autoRoom_;
+              autoRoom_.clear();
+              if (room == QLatin1String("new")) {
+                autoRoomJoinPending_ = true;
+                emit dial_->createRoomRequested();
+              } else {
+                emit dial_->joinRoomRequested(room);
               }
             }
           });
@@ -243,16 +269,19 @@ void MainWindow::wireCall() {
             pending_.callId = callId;
             pending_.connected = true;
             overlay_->markConnected(role);
-            if (hangupAfterSec_ > 0) {
-              QTimer::singleShot(hangupAfterSec_ * 1000, this, [this] {
-                // 群 / 会议房是 leaveRoom，1v1 才是 hangup——与红按钮同一条分叉。
-                if (pending_.isGroup) {
-                  bridge_->leaveRoom();
-                } else {
-                  bridge_->hangup();
-                }
-              });
+            // 只有主叫能 invite_more（协议 1407），所以这里也照着分。
+            if (!autoInvite_.isEmpty() && role == QLatin1String("caller")) {
+              const QStringList more{autoInvite_};
+              autoInvite_.clear();
+              const qint32 code = bridge_->inviteMore(more);
+              if (code != IMRTC_V1_OK) {
+                toast(tr("加人失败：%1（%2）")
+                          .arg(code)
+                          .arg(QString::fromLatin1(imrtc_v1_error_name(code))));
+              }
             }
+            // 通话（含群通话）一律 hangup；会议房那条路在 roomJoined 里另行武装。
+            armAutoLeave(false);
           });
 
   connect(bridge_, &EngineBridge::callEnded, this,
@@ -323,6 +352,11 @@ void MainWindow::wireRoom() {
   connect(bridge_, &EngineBridge::meetingRoomCreated, this, [this](const QString& roomId) {
     dial_->setRoomId(roomId);
     toast(tr("会议房已创建：%1").arg(roomId));
+    // --room new：建完立刻进，否则还得手点一下「加入房间」。
+    if (autoRoomJoinPending_) {
+      autoRoomJoinPending_ = false;
+      emit dial_->joinRoomRequested(roomId);
+    }
   });
 
   connect(dial_, &DialPage::joinRoomRequested, this, [this](const QString& roomId) {
@@ -349,6 +383,7 @@ void MainWindow::wireRoom() {
     overlay_->beginRoom(roomId);
     showOverlay();
     dial_->setDialingEnabled(false);
+    armAutoLeave(true);  // 会议房永远是 leaveRoom
   });
   connect(bridge_, &EngineBridge::roomLeft, this, [this](const QString& roomId) {
     Q_UNUSED(roomId);

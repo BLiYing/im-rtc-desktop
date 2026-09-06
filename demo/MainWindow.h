@@ -34,8 +34,14 @@ public:
    * 联调用：预填服务器与用户名并自动登录，可选地在连上之后立刻拨一个人。
    * 每天要登几十次，手填三个字段是纯浪费。命令行见 main.cpp。
    */
-  void autoLogin(const QString& httpBase, const QString& username, const QString& autoCallee,
-                 const QString& mediaType);
+  /**
+   * 联调用：预填服务器与用户名并自动登录，可选地在连上之后立刻做一件事。
+   * `autoCallees` 多于一个就是群通话；`autoRoom` 非空则走会议房那条路
+   * （`"new"` 表示先建一个）。两者互斥，同时给时以通话优先。
+   */
+  void autoLogin(const QString& httpBase, const QString& username,
+                 const QStringList& autoCallees, const QString& mediaType,
+                 const QString& autoRoom);
 
   /**
    * 联调开关，**只由命令行打开**：
@@ -44,7 +50,7 @@ public:
    * 生产宿主当然不该这么干，这两个开关的存在是为了让「接通 → 计时 → 挂断 →
    * 落记录」这条完整回路能被一条命令跑完。
    */
-  void setAutomation(bool autoAccept, int hangupAfterSec);
+  void setAutomation(bool autoAccept, int hangupAfterSec, const QString& autoInvite);
 
 protected:
   void resizeEvent(QResizeEvent* event) override;
@@ -89,8 +95,12 @@ private:
   QString nickname_;
   QString sessionId_;
   /** --call 指定的对象：连上之后自动拨一次，只拨这一次。 */
-  QString autoCallee_;
+  QStringList autoCallees_;
   QString autoCallMediaType_;
+  /** --room：`new` 表示先建一个会议房再进。同样只做一次。 */
+  QString autoRoom_;
+  /** `--room new` 建完之后要不要立刻进房（手点「新建会议房」时不进）。 */
+  bool autoRoomJoinPending_ = false;
 
   /** 手上这通电话。onCallEnd 之后清空。 */
   CallRecord pending_;
@@ -98,4 +108,8 @@ private:
 
   bool autoAccept_ = false;
   int hangupAfterSec_ = 0;
+  QString autoInvite_;
+
+  /** 接通 / 进房之后 N 秒自动退出。1v1 是 hangup，群与会议房是 leaveRoom。 */
+  void armAutoLeave(bool useLeaveRoom);
 };

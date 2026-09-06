@@ -8,10 +8,20 @@
 #      只装了 CMake + 编译器的机器上就能跑——不能因为 Demo 就把 Qt 变成必需品。
 #   3. **Qt 只出现在这个目录里**。engine/ 里任何 Q 开头的类型都是直接打回。
 #
-# 装 Qt（macOS，最小集，约 1.8 GB）：
+# 装 Qt（macOS，最小集，实测 1.8 GB）：
 #   pip install aqtinstall
 #   aqt install-qt mac desktop 6.8.3 clang_64 \
 #       --archives qtbase qtsvg qttranslations qttools -O ~/Qt
+#
+# 四个 archive 各买什么：qtbase = Core/Gui/Widgets/Network（本 Demo 的全部界面）；
+# qtsvg = 图标渲染；qttranslations = **Qt 自己内置控件**的译文（右键菜单的
+# 剪切/复制/粘贴、QMessageBox 的按钮，tr() 覆盖不到这些）；qttools = lrelease。
+#
+# **刻意没装 qtdeclarative**（QML / Qt Quick，430 MB 下载 / 约 2.8 GB 磁盘）：
+# 本 Demo 是 Widgets 写的，一行 QML 都没有。副作用是 `lupdate` 起不来——
+# 它为了能解析 .qml 里的 qsTr() 而链了 QtQml。于是 i18n/*.ts 目前手工维护，
+# `update_translations` 这个 target 在装了 qtdeclarative 的机器上才能用。
+# `lrelease` 只要 QtCore，所以构建与运行不受影响。
 # 然后：
 #   cmake --preset macos-clang -DIMRTC_BUILD_DEMO=ON -DCMAKE_PREFIX_PATH=$HOME/Qt/6.8.3/macos
 

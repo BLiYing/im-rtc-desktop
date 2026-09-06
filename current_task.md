@@ -25,11 +25,19 @@
 官方包是 universal（`x86_64 arm64`），Intel Mac 上正常。
 
 **第六刀已落地**：`demo/` 四屏（登录 / 拨号 / 记录 / 设置）+ 通话浮窗四态 + 九宫格，
-**经 C ABI 调引擎**。已对着真服务端**两端互打验过四条终局分支**（2026-09-06）：
-`offline`（拨不在线的人）、`no_answer`（振铃 30s 超时，两侧各落一条记录）、
-`hangup`（真接通 → 计时 → 挂断，两侧 `connected=true` 且时长一致）、
-`busy`（第三方拨通话中的人 → 对方 `onCallBusy`，被拨方落一条 `on_call_missed` 的未接记录）。
-**时长是服务端给的**：设了 6 秒挂断，记录里是 5 秒——正是不变量 I8 要防的那个差。
+**经 C ABI 调引擎**。已对着真服务端多实例互打验过（2026-09-06）：
+
+| 场景 | 验到了什么 |
+|---|---|
+| 1v1 `offline` | 拨不在线的人 → 记录「呼出 · 对方不在线」 |
+| 1v1 `no_answer` | 振铃 30s 超时，两侧各落一条（被叫是「未接来电」） |
+| 1v1 `hangup` | 真接通 → 计时 → 挂断，两侧 `connected=true`、时长一致 |
+| 1v1 `busy` | 第三方拨通话中的人 → 他收 `onCallBusy`，被拨方落一条 `on_call_missed` |
+| **群通话 4 人** | `onUserAccept`/`onUserEnter` 逐个到；**`invite_more` 中途加人**，被加者收到 `group=1` 的来电并进同一个房 |
+| **群通话离场规则（协议 §4 规则 6）** | 主叫先走→只他自己 `ended{hangup}`，其余人继续；第二个人走；**最后一人也收 `ended`**。三人时长各 6 / 10 / 10，各算各的 |
+| **会议房** | `POST /v1/rooms` 建房 → `POST /v1/rooms/{id}/tokens` 换票（273 字符 JWT）→ `room.join` → 双方互见 → `onRoomLeft`。**没有 `onCallEnd`**，会议房不产生通话记录 |
+
+**时长是服务端给的**：1v1 那轮设了 6 秒挂断，记录里是 5 秒——正是不变量 I8 要防的那个差。
 《接入指南》在 [docs/INTEGRATION_GUIDE.md](docs/INTEGRATION_GUIDE.md)。
 `IMRTC_BUILD_DEMO` 默认 OFF——engine 与测试不依赖 Qt 这条不能破。
 
@@ -38,9 +46,10 @@
 
 ## 下一步
 
-1. **群通话与会议房走一遍真的**：1v1 的四条终局分支已验，但**群通话与
-   `join_room` 那两条路只在假数据下看过界面**——成员事件（`onUserEnter/Accept/Reject`）、
-   九宫格状态翻转、`invite_more`、会议房的 REST 换票，都还没对着真服务端跑过。
+1. **渲染路径 A/B 的口子**（`attachView` 收 `NSView*` / `HWND`；原始帧回调）——
+   接口已经在 C ABI 里留好了，但没有实现，要等 `WebRTCAdapter`。
+   在那之前可以先把**格子接受一个原生子窗口**这件事在 Qt 侧走通（贴一个纯色层验证），
+   免得媒体到位那天才发现窗口层级 / 缩放 / 多屏 DPI 有坑。
 2. ~~**P5 第四刀下半 · `WebRTCAdapter`**~~ —— **已推迟，不在当前排期内**（2026-09-06 定）。
    等 Apple Silicon 或 Windows 机器到手再做，做完与 Web/iOS 各互打一次。
 3. **按需**：C# / P&#8203;Invoke 绑定（C ABI 已经定型，这一层是薄的）。
@@ -86,11 +95,34 @@
   集成方只要是 Xcode 26 + Qt 6.8 就会撞同一个坑。
 - **Demo 必须经 capi 调引擎**。走内部 C++ 接口会掩盖全部 ABI 问题，那样「Demo 跑通」不等于「宿主接得通」。
   已经是这么接的（`demo/EngineBridge.cpp` 用 `imrtc::capi::Engine`，链的是动态库）。
-- **本机 `lupdate` 跑不起来**：Qt 6.8 的 lupdate 链了 QtQml，而我们没装 qtdeclarative
-  （省了 430 MB 下载 / 约 2.8 GB 磁盘）。所以 `demo/i18n/imrtc_demo_en.ts` 目前是
-  **手工维护**的，132 条；`lrelease` 只依赖 QtCore，构建正常。
-  装了 qtdeclarative 的机器上 `--target update_translations` 就能接管。
-  **加了新的 tr() 之后记得同步 .ts**，否则那条在英文下会退回中文（不会报错）。
+- **本机 `lupdate` 跑不起来 —— 这是个连带依赖，不是我们用了 QML**（2026-09-06 查证）。
+  `lupdate` 要能从 `.qml` 里抠 `qsTr()`，所以它链了 **QtQml**；而 QtQml 属于
+  `qtdeclarative`（QML / Qt Quick 那一整套：QtQml、QtQuick、QtQuickControls2…），
+  最小装法没装它。**Demo 一行 QML 都没有**（用的是 Widgets，在 `qtbase` 里）。
+
+  | 工具 | 依赖 | 状态 |
+  |---|---|---|
+  | `lrelease`（.ts → .qm） | 只要 QtCore | ✅ 正常，构建与运行都不受影响 |
+  | `lupdate`（源码 → .ts） | QtCore + QtNetwork + **QtQml** | ❌ 起不来 |
+
+  **决定：不装。** 装它只买到「一个构建期工具能启动」，代价 430 MB 下载 /
+  约 2.8 GB 磁盘，而那 2.8 GB 里 99% 的东西永远不会被加载；集成方装的是全量 Qt，
+  他们那边 `lupdate` 本来就能跑，所以这条限制**只影响本机，不影响交付物**。
+  真要装：`aqt install-qt mac desktop 6.8.3 clang_64 --archives qtdeclarative -O ~/Qt`
+  （只写 qtdeclarative，会并进已有的 `~/Qt/6.8.3/macos`，不重装 qtbase）。
+
+  代价是 `demo/i18n/imrtc_demo_en.ts`（132 条）**手工维护**：
+  **加了新的 `tr()` 之后记得同步 .ts**，否则那条在英文下会静默退回中文，不报错。
+- **红按钮：动作按「有没有 call」分叉，文案按人数分叉——依据不一样，别混。**
+  会议房 → `leaveRoom()`；**1v1 与群通话都是 `hangup()`**（接通前 cancel/reject）。
+  文案则是 1v1「挂断」、群通话与会议房「离开」。
+  **我们写错过**：设计稿 §05 原话是「群/会议 → leaveRoom()」，照抄之后群通话的离开者
+  **永远收不到 `onCallEnd`**（服务端对 `room.leave` 只广播 `participant_left`），
+  记录落不下来且违反 I1。Web / iOS 的代码本来就只判 `isMeeting`，是对的。
+  设计稿已于 2026-09-06 更正，别再照旧版写。
+- **联调时每轮换一次用户名**。上一轮被 kill 的进程在服务端还挂着「通话中」
+  （30s 恢复窗口），复用同一个 uid 会让下一轮直接回 `busy`——
+  `scripts/smoke.sh` 早就是这么做的（`smoke-$$`），Demo 联调也照办。
 - **提示不许用 `QMessageBox` 静态函数**。它开一个嵌套事件循环并**等人点确定**，
   在没人看着的场合会把后面的动作全挡住——实测中它挡掉过一次自动挂断，
   害我以为是引擎少发了 `onCallEnd`。`MainWindow::toast()` 现在是非模态自动消失的提示条。

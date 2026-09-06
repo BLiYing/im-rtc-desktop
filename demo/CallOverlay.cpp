@@ -136,8 +136,9 @@ CallOverlay::CallOverlay(QWidget* parent) : QWidget(parent) {
         emit cancelRequested();
         break;
       case Phase::Connected:
-        // 这里就是 Web 端炸过的那一处：群 / 会议房没有 call，hangup 会被拒成 2005。
-        if (isGroup_ || isRoomMode()) {
+        // **只判会议房，不判人数。**群通话是有 call 的，必须走 hangup——
+        // 发 room.leave 的话离开者永远收不到 onCallEnd（见头注释第 2 条）。
+        if (isRoomMode()) {
           emit leaveRoomRequested();
         } else {
           emit hangupRequested();
@@ -392,7 +393,8 @@ void CallOverlay::retranslateUi() {
   switch (phase_) {
     case Phase::Incoming: dangerCaption = tr("拒绝"); break;
     case Phase::Outgoing: dangerCaption = tr("取消"); break;
-    // 1v1 是「挂断」，群 / 会议房是「离开」——语义与调的方法都不同。
+    // **文案**按人数分叉：群通话与会议房都写「离开」，1v1 写「挂断」。
+    // 注意这与上面调哪个方法是两件事——群通话写着「离开」但调的是 hangup()。
     default: dangerCaption = (isGroup_ || isRoomMode()) ? tr("离开") : tr("挂断"); break;
   }
   danger_->setCaptions(dangerCaption, dangerCaption);

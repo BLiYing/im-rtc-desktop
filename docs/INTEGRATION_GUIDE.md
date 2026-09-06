@@ -206,18 +206,32 @@ create ──► set_observer ──► login ──► [tick tick tick …] ─
 
 ## 6. 五个一定会踩的坑
 
-### 6.1 群通话的红按钮**不是挂断**
+### 6.1 红按钮：**动作按「有没有 call」分叉，文案按人数分叉**
 
-这条在 Web 端炸过一次：会议房里点红按钮，三端都退不出去。原因是会议房里
-根本没有 call，`hangup()` 被本地拒成 `2005`。
+这两件事分叉的依据**不一样**，混在一起就必错一边。
 
 ```cpp
-if (isGroup || isMeetingRoom) engine.leaveRoom();   // 文案：离开
-else                          engine.hangup();     // 文案：挂断
+// 动作：只看是不是会议房
+if (isMeetingRoom)              engine.leaveRoom();  // join_room 进来的，没有 call
+else if (phase == Outgoing)     engine.cancel();     // 主叫，接通前
+else if (phase == Incoming)     engine.reject();     // 被叫，接通前
+else                            engine.hangup();     // 1v1 与**群通话**，接通后
+
+// 文案：只看人数
+const QString caption = (isGroup || isMeetingRoom) ? "离开" : "挂断";
 ```
 
-接通**之前**还要再分一次叉：主叫是 `cancel()`（取消），被叫是 `reject()`（拒绝），
-它们在协议上是两条不同的帧。
+于是**群通话上写着「离开」，调的却是 `hangup()`**——这一格最容易写错。
+
+两个方向的坑各踩过一次：
+
+- **会议房用了 `hangup()`** → 被本地拒成 `2005`，红按钮点了没反应（Web 端炸过）。
+- **群通话用了 `leaveRoom()`** → 更隐蔽：界面看起来正常退出了，但**离开者永远收不到
+  `on_call_end`**。服务端对 `room.leave` 只广播 `room.participant_left`，
+  而协议 §4 规则 6 规定「离开的人自己收 `ended{hangup, ended_by:<自己>}`」——
+  那是 `call.hangup` 才会产生的。后果是他那通电话的记录永远落不下来，
+  也违反不变量 I1（`on_call_begin` / `on_call_end` 各恰好一次）。
+  **本仓的 Demo 就是这么写错的**，在真服务端上跑群通话时才发现。
 
 ### 6.2 通话时长用 `on_call_end` 给的 `duration_sec`，**不要自己拿时间戳减**
 

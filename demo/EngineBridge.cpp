@@ -157,6 +157,7 @@ void EngineBridge::createMeetingRoom(const QString& httpBase) {
       emit restFailed(tr("建会议房失败：服务端没有返回 room_id"));
       return;
     }
+    qCInfo(lcBridge, "meetingRoomCreated %s", qUtf8Printable(roomId));
     emit meetingRoomCreated(roomId);
   });
 }
@@ -189,6 +190,9 @@ void EngineBridge::fetchRoomToken(const QString& httpBase, const QString& roomId
       emit restFailed(tr("换进房票失败：服务端没有返回 room_token"));
       return;
     }
+    // 票是凭据，只打前 6 位 + 长度（CONVENTIONS §8）。
+    qCInfo(lcBridge, "roomTokenReady room=%s token=%s… len=%d", qUtf8Printable(roomId),
+           qUtf8Printable(roomToken.left(6)), static_cast<int>(roomToken.size()));
     emit roomTokenReady(roomId, roomToken);
   });
 }
@@ -289,26 +293,31 @@ void EngineBridge::onHandledOnOtherDevice(const std::string& callId, const std::
 
 void EngineBridge::onUserEnter(const std::string& uid) {
   assertOnGuiThread("onUserEnter");
+  qCInfo(lcBridge, "onUserEnter %s", uid.c_str());
   emit userEntered(qs(uid));
 }
 
 void EngineBridge::onUserLeave(const std::string& uid) {
   assertOnGuiThread("onUserLeave");
+  qCInfo(lcBridge, "onUserLeave %s", uid.c_str());
   emit userLeft(qs(uid));
 }
 
 void EngineBridge::onUserAccept(const std::string& uid) {
   assertOnGuiThread("onUserAccept");
+  qCInfo(lcBridge, "onUserAccept %s", uid.c_str());
   emit userAccepted(qs(uid));
 }
 
 void EngineBridge::onUserReject(const std::string& uid) {
   assertOnGuiThread("onUserReject");
+  qCInfo(lcBridge, "onUserReject %s", uid.c_str());
   emit userRejected(qs(uid));
 }
 
 void EngineBridge::onUserNoResponse(const std::string& uid) {
   assertOnGuiThread("onUserNoResponse");
+  qCInfo(lcBridge, "onUserNoResponse %s", uid.c_str());
   emit userNoResponse(qs(uid));
 }
 
@@ -344,11 +353,13 @@ void EngineBridge::onNetworkQuality(const std::vector<imrtc::capi::Quality>& ent
 
 void EngineBridge::onRoomJoined(const std::string& roomId) {
   assertOnGuiThread("onRoomJoined");
+  qCInfo(lcBridge, "onRoomJoined %s", roomId.c_str());
   emit roomJoined(qs(roomId));
 }
 
 void EngineBridge::onRoomLeft(const std::string& roomId) {
   assertOnGuiThread("onRoomLeft");
+  qCInfo(lcBridge, "onRoomLeft %s", roomId.c_str());
   emit roomLeft(qs(roomId));
 }
 
