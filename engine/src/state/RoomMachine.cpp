@@ -1,0 +1,259 @@
+#include "imrtc/RoomMachine.h"
+
+#include <algorithm>
+#include <utility>
+
+#include "imrtc/Errors.h"
+#include "imrtc/Registry.h"
+
+namespace imrtc {
+namespace {
+
+/** localReject 是不变量 R1 的落点：错误状态下的调用**本地拒绝**，不发上去。 */
+RoomOutput localReject(const RoomContext& ctx) {
+  const std::int32_t code = codeValue(ErrorCode::InvalidState);
+  return roomOut(ctx, {},
+                 {eventOf("onError", obj({{"code", Json::make(static_cast<std::int64_t>(code))},
+                                          {"name", Json::make(errorName(code))}}))});
+}
+
+RoomOutput joinRoom(const RoomContext& ctx, const Json& args) {
+  if (ctx.state != RoomState::Idle) return localReject(ctx);
+  // auto_subscribe 默认 true——直接读 args 会把「没写」当成 false，
+  // 那正是协议 §2.4 点名的发送侧陷阱。
+  const Json* autoSubscribeArg = args.find("auto_subscribe");
+  const bool autoSubscribe =
+      autoSubscribeArg == nullptr ? true : boolean(args, "auto_subscribe");
+  const std::string roomId = str(args, "room_id");
+  const std::string roomToken = str(args, "room_token");
+
+  RoomContext next = ctx;
+  next.state = RoomState::Joining;
+  next.roomId = roomId;
+  next.roomToken = roomToken;
+  next.autoSubscribe = autoSubscribe;
+
+  return roomOut(next, {frameOf(frame::kRoomJoin,
+                                obj({{"room_id", Json::make(roomId)},
+                                     {"room_token", Json::make(roomToken)},
+                                     {"auto_subscribe", Json::make(autoSubscribe)}}))});
+}
+
+RoomOutput publishTrack(const RoomContext& ctx, const Json& args) {
+  const std::string cid = str(args, "cid");
+  RoomContext next = ctx;
+  next.publish[cid] = "publishing";
+  return roomOut(next, {frameOf(frame::kRoomPublish,
+                                obj({{"cid", Json::make(cid)},
+                                     {"kind", Json::make(str(args, "kind"))},
+                                     {"source", Json::make(str(args, "source"))},
+                                     {"simulcast", Json::make(boolean(args, "simulcast"))}}))});
+}
+
+/** cidOfTrack 反查某条 track_id 对应的本地 cid；没有则返回空串。 */
+std::string cidOfTrack(const RoomContext& ctx, const std::string& trackId) {
+  for (const auto& entry : ctx.publishTrackIds) {
+    if (entry.second == trackId) return entry.first;
+  }
+  return {};
+}
+
+RoomOutput unpublishTrack(const RoomContext& ctx, const Json& args) {
+  const std::string trackId = str(args, "track_id");
+  RoomContext next = ctx;
+  const std::string cid = cidOfTrack(ctx, trackId);
+  if (!cid.empty()) next.publish[cid] = "unpublishing";
+  return roomOut(next, {frameOf(frame::kRoomUnpublish,
+                                obj({{"track_id", Json::make(trackId)}}))});
+}
+
+/** layerOf 取 max_layer，缺席时用协议默认的 "m"。 */
+std::string layerOf(const Json& args) {
+  const std::string layer = str(args, "max_layer");
+  return layer.empty() ? "m" : layer;
+}
+
+/**
+ * subscribeTrack：**重复订阅等价于换层**（不变量 R3）。
+ *
+ * 客户端的订阅与服务端的 `track_unpublished` 天然会赛跑，所以这条路径必须幂等。
+ */
+RoomOutput subscribeTrack(const RoomContext& ctx, const Json& args) {
+  const std::string trackId = str(args, "track_id");
+  const std::string maxLayer = layerOf(args);
+
+  RoomContext next = ctx;
+  next.layers[trackId] = maxLayer;
+  if (ctx.subscribe.find(trackId) != ctx.subscribe.end()) {
+    return roomOut(next, {frameOf(frame::kRoomUpdateLayer,
+                                  obj({{"track_id", Json::make(trackId)},
+                                       {"max_layer", Json::make(maxLayer)}}))});
+  }
+  next.subscribe[trackId] = "subscribing";
+  return roomOut(next, {frameOf(frame::kRoomSubscribe,
+                                obj({{"track_id", Json::make(trackId)},
+                                     {"max_layer", Json::make(maxLayer)}}))});
+}
+
+RoomOutput unsubscribeTrack(const RoomContext& ctx, const Json& args) {
+  const std::string trackId = str(args, "track_id");
+  RoomContext next = ctx;
+  next.subscribe[trackId] = "unsubscribing";
+  return roomOut(next, {frameOf(frame::kRoomUnsubscribe,
+                                obj({{"track_id", Json::make(trackId)}}))});
+}
+
+RoomOutput updateLayer(const RoomContext& ctx, const Json& args) {
+  const std::string trackId = str(args, "track_id");
+  const std::string maxLayer = layerOf(args);
+  RoomContext next = ctx;
+  next.layers[trackId] = maxLayer;
+  return roomOut(next, {frameOf(frame::kRoomUpdateLayer,
+                                obj({{"track_id", Json::make(trackId)},
+                                     {"max_layer", Json::make(maxLayer)}}))});
+}
+
+/** bufferableOps 是值得攒下来重放的操作——正好是 R1 管的那一组。 */
+bool isBufferable(const std::string& op) {
+  static const std::vector<std::string> kOps = {"publish",     "unpublish",   "mute",
+                                                "subscribe",   "unsubscribe", "update_layer"};
+  return std::find(kOps.begin(), kOps.end(), op) != kOps.end();
+}
+
+/** bufferIntent 把中间态期间的用户意图缓存起来（不变量 R2）。 */
+RoomOutput bufferIntent(const RoomContext& ctx, const std::string& op, const Json& args) {
+  // 不认识的 op 照旧本地拒绝：缓存的是**合法但来早了**的调用，不是笔误。
+  if (!isBufferable(op)) return localReject(ctx);
+  RoomContext next = ctx;
+  next.buffered.push_back(BufferedIntent{op, args});
+  return roomOut(next);
+}
+
+RoomOutput reduceRoomInternal(const RoomContext& ctx, const std::string& name) {
+  if (name == "disconnected") {
+    // 断线**不等于**离房：协议给了 30 秒恢复窗口，房内其他人这时还看得见我们。
+    if (ctx.state == RoomState::Idle) return roomOut(ctx);
+    RoomContext next = ctx;
+    next.state = RoomState::Reconnecting;
+    return roomOut(next);
+  }
+  if (name == "ws_closed_4403" || name == "reset") {
+    return roomOut(clearedRoom(RoomState::Idle));
+  }
+  if (name == "join_failed") {
+    /*
+      进房被拒（房间没了、票过期、已在房里…）。**退回 idle**，否则状态机永远停在
+      joining，之后每次 publish 都被 R1 本地拒成 2005。
+
+      **还要抛 onRoomLeft**：只清状态的话宿主什么都不知道，会议界面会一直停在
+      「正在进入会议…」。房间的收场信号就是这一条。
+    */
+    if (ctx.state != RoomState::Joining) return roomOut(ctx);
+    return roomOut(clearedRoom(RoomState::Idle), {},
+                   {eventOf("onRoomLeft", obj({{"room_id", Json::make(ctx.roomId)}}))});
+  }
+  return roomOut(ctx);
+}
+
+}  // namespace
+
+const char* roomStateName(RoomState state) {
+  switch (state) {
+    case RoomState::Idle: return "idle";
+    case RoomState::Joining: return "joining";
+    case RoomState::Joined: return "joined";
+    case RoomState::Leaving: return "leaving";
+    case RoomState::Reconnecting: return "reconnecting";
+  }
+  return "idle";
+}
+
+bool parseRoomState(const std::string& text, RoomState& out) {
+  const RoomState kStates[] = {RoomState::Idle, RoomState::Joining, RoomState::Joined,
+                               RoomState::Leaving, RoomState::Reconnecting};
+  for (const RoomState state : kStates) {
+    if (text == roomStateName(state)) {
+      out = state;
+      return true;
+    }
+  }
+  return false;
+}
+
+RoomOutput roomOut(RoomContext state, std::vector<OutgoingFrame> send,
+                   std::vector<EmittedEvent> emit) {
+  return RoomOutput{std::move(state), std::move(send), std::move(emit)};
+}
+
+RoomContext clearedRoom(RoomState state) {
+  RoomContext ctx;
+  ctx.state = state;
+  return ctx;
+}
+
+RoomOutput reduceRoomAct(const RoomContext& ctx, const std::string& op, const Json& args) {
+  if (op == "join") return joinRoom(ctx, args);
+  if (op == "leave") {
+    if (ctx.state != RoomState::Joined) return localReject(ctx);
+    RoomContext next = ctx;
+    next.state = RoomState::Leaving;
+    return roomOut(next, {frameOf(frame::kRoomLeave,
+                                  obj({{"room_id", Json::make(ctx.roomId)}}))});
+  }
+
+  // R1：只有 joined 才允许发布/订阅类操作。
+  // R2：**joining 与 reconnecting** 期间把意图缓存下来，之后重放——不是丢掉，
+  //     也不是发上去。这两个状态宿主都观察不到，在它们上面报「状态非法」
+  //     等于让宿主为一个内部细节买单。
+  if (ctx.state == RoomState::Joining || ctx.state == RoomState::Reconnecting) {
+    return bufferIntent(ctx, op, args);
+  }
+  if (ctx.state != RoomState::Joined) return localReject(ctx);
+
+  if (op == "publish") return publishTrack(ctx, args);
+  if (op == "unpublish") return unpublishTrack(ctx, args);
+  if (op == "mute") {
+    return roomOut(ctx, {frameOf(frame::kRoomMute,
+                                 obj({{"track_id", Json::make(str(args, "track_id"))},
+                                      {"muted", Json::make(boolean(args, "muted"))}}))});
+  }
+  if (op == "subscribe") return subscribeTrack(ctx, args);
+  if (op == "unsubscribe") return unsubscribeTrack(ctx, args);
+  if (op == "update_layer") return updateLayer(ctx, args);
+  return localReject(ctx);
+}
+
+RoomOutput reduceRoom(const RoomContext& ctx, const MachineInput& input) {
+  switch (input.kind) {
+    case MachineInput::Kind::Act: return reduceRoomAct(ctx, input.name, input.payload);
+    case MachineInput::Kind::Recv: return reduceRoomRecv(ctx, input.name, input.payload);
+    case MachineInput::Kind::Internal: return reduceRoomInternal(ctx, input.name);
+  }
+  return roomOut(ctx);
+}
+
+RoomOutput replayBuffered(const RoomContext& ctx) {
+  if (ctx.buffered.empty()) return roomOut(ctx);
+
+  RoomContext state = ctx;
+  state.buffered.clear();
+  std::vector<OutgoingFrame> send;
+  std::vector<EmittedEvent> emit;
+  for (const BufferedIntent& intent : ctx.buffered) {
+    RoomOutput result = reduceRoomAct(state, intent.op, intent.args);
+    state = std::move(result.state);
+    send.insert(send.end(), result.send.begin(), result.send.end());
+    emit.insert(emit.end(), result.emit.begin(), result.emit.end());
+  }
+  return roomOut(std::move(state), std::move(send), std::move(emit));
+}
+
+RoomOutput resumeRoom(const RoomContext& ctx, bool resumed) {
+  if (!resumed) return roomOut(clearedRoom(RoomState::Idle));
+  if (ctx.state != RoomState::Reconnecting) return roomOut(ctx);
+  RoomContext next = ctx;
+  next.state = RoomState::Joined;
+  return replayBuffered(next);
+}
+
+}  // namespace imrtc

@@ -1,0 +1,51 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "macos-clang",
+      "displayName": "macOS / Apple clang",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/macos-clang",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_OSX_DEPLOYMENT_TARGET": "11.0"
+      }
+    },
+    {
+      "name": "macos-clang-release",
+      "inherits": "macos-clang",
+      "displayName": "macOS / Apple clang / Release（universal）",
+      "binaryDir": "${sourceDir}/build/macos-clang-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_OSX_ARCHITECTURES": "x86_64;arm64"
+      }
+    },
+    {
+      "name": "windows-msvc",
+      "displayName": "Windows / MSVC x64",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/windows-msvc",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" },
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" }
+    }
+  ],
+  "buildPresets": [
+    { "name": "macos-clang", "configurePreset": "macos-clang" },
+    { "name": "macos-clang-release", "configurePreset": "macos-clang-release" },
+    { "name": "windows-msvc", "configurePreset": "windows-msvc" }
+  ],
+  "testPresets": [
+    {
+      "name": "macos-clang",
+      "configurePreset": "macos-clang",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "windows-msvc",
+      "configurePreset": "windows-msvc",
+      "output": { "outputOnFailure": true }
+    }
+  ]
+}
