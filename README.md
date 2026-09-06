@@ -88,7 +88,7 @@ engine 与 31 个用例照样能编能跑（少掉的 5 个是 IxTransport 的�
 - **媒体面接线**：`MediaAdapter` 契约 + `MediaPlane`（进房推流、SDP 填充、候选双向、
   媒体就绪、终局归零）。**真适配器还没有**——见上面的 libwebrtc 平台问题
 - **C ABI 交付物**：`libim_rtc_engine_capi.dylib` + `imrtc_c.h` + header-only C++ 包装。
-  **导出面只有 25 个 `imrtc_v1_*` 符号**，`scripts/check-abi.sh` 守着（已进 test.sh）
+  **导出面只有 26 个 `imrtc_v1_*` 符号**，`scripts/check-abi.sh` 守着（已进 test.sh）
 - **Qt 6 Demo**：四屏（登录 / 拨号 / 记录 / 设置）+ 通话浮窗四态 + 九宫格，
   **经 C ABI 调引擎**，与集成方同一条路。默认不构建（`IMRTC_BUILD_DEMO=OFF`）——
   engine 与测试不该因为一个 Demo 就依赖 Qt

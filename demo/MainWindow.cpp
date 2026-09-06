@@ -347,6 +347,10 @@ void MainWindow::wireCall() {
           [this](const QString& uid, void* handle) { bridge_->attachView(uid, handle); });
   connect(overlay_, &CallOverlay::detachViewRequested, this,
           [this](const QString& uid) { bridge_->attachView(uid, nullptr); });
+  connect(overlay_, &CallOverlay::attachLocalViewRequested, this,
+          [this](void* handle) { bridge_->attachLocalView(handle); });
+  connect(overlay_, &CallOverlay::detachLocalViewRequested, this,
+          [this] { bridge_->attachLocalView(nullptr); });
   connect(bridge_, &EngineBridge::activeSpeakers, overlay_, &CallOverlay::onSpeakers);
   connect(bridge_, &EngineBridge::networkQuality, overlay_, &CallOverlay::onQuality);
 

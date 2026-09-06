@@ -239,6 +239,11 @@ void CallEngine::attachView(const std::string& uid, void* nativeHandle) {
   options_.mediaAdapter->attachView(trackId, nativeHandle);
 }
 
+void CallEngine::attachLocalView(void* nativeHandle) {
+  // 本端预览不依赖任何轨道：摄像头没开也能先把窗口挂上，开了就有画面。
+  if (options_.mediaAdapter) options_.mediaAdapter->attachLocalView(nativeHandle);
+}
+
 std::string CallEngine::videoTrackOf(const std::string& uid) const {
   for (const auto& entry : context_.room.remoteTracks) {
     if (entry.second.uid == uid && entry.second.kind == "video") return entry.first;

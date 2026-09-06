@@ -107,6 +107,12 @@ public:
    */
   qint32 attachView(const QString& uid, void* nativeHandle);
 
+  /**
+   * 本端摄像头预览（1v1 那一屏右下角的小窗）。**不是** `attachView(自己的 uid, …)`——
+   * 引擎不知道自己的 uid，本端画面也没有远端轨道 id。见 imrtc_c.h。
+   */
+  qint32 attachLocalView(void* nativeHandle);
+
   qint32 openMic();
   qint32 closeMic();
   qint32 openCamera();

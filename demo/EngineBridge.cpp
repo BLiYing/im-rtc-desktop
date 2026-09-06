@@ -404,6 +404,12 @@ qint32 EngineBridge::attachView(const QString& uid, void* nativeHandle) {
   return engine_->attachView(uid.toStdString(), nativeHandle).code();
 }
 
+qint32 EngineBridge::attachLocalView(void* nativeHandle) {
+  if (!engine_) return IMRTC_V1_ERR_INVALID_STATE;
+  qCInfo(lcBridge, "attachLocalView handle=%p", nativeHandle);
+  return engine_->attachLocalView(nativeHandle).code();
+}
+
 qint32 EngineBridge::openMic() {
   return engine_ ? engine_->openMic().code() : IMRTC_V1_ERR_INVALID_STATE;
 }

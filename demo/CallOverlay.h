@@ -44,6 +44,7 @@ class QGridLayout;
 class QHBoxLayout;
 class QLabel;
 class QTimer;
+class SoloVideo;
 class VideoTile;
 
 class CallOverlay : public QWidget {
@@ -117,6 +118,9 @@ signals:
   /** 渲染路径 A：句柄只在下一次 `detachViewRequested` 之前有效。 */
   void attachViewRequested(const QString& uid, void* nativeHandle);
   void detachViewRequested(const QString& uid);
+  /** 本端预览走的是另一条口子（`attachLocalView`），见 SoloVideo.h。 */
+  void attachLocalViewRequested(void* nativeHandle);
+  void detachLocalViewRequested();
   void closed();
 
 protected:
@@ -127,6 +131,8 @@ private:
   void retranslateUi();
   void applyPhase();
   void rebuildTiles();
+  /** 按当前状态决定 1v1 那一屏要不要画面层，并负责 attach / detach 的顺序。 */
+  void syncSoloVideo();
   VideoTile* tileFor(const QString& uid);
   void updateTitle();
   bool isRoomMode() const { return !roomId_.isEmpty(); }
@@ -152,6 +158,8 @@ private:
   QLabel* modeNotice_ = nullptr;
   AvatarWidget* avatar_ = nullptr;
   QWidget* soloPane_ = nullptr;
+  /** 1v1 视频接通后才有：远端铺满 + 本端小窗。语音通话不建。 */
+  SoloVideo* soloVideo_ = nullptr;
   QWidget* gridPane_ = nullptr;
   QGridLayout* grid_ = nullptr;
   QWidget* endPane_ = nullptr;

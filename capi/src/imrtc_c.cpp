@@ -369,6 +369,10 @@ std::int32_t imrtc_v1_attach_view(imrtc_v1_engine* engine, const char* uid, void
   return guard(engine, [=](CallEngine& target) { target.attachView(cstr(uid), native_handle); });
 }
 
+std::int32_t imrtc_v1_attach_local_view(imrtc_v1_engine* engine, void* native_handle) {
+  return guard(engine, [=](CallEngine& target) { target.attachLocalView(native_handle); });
+}
+
 std::int32_t imrtc_v1_get_call_state(imrtc_v1_engine* engine, std::int32_t* out_state) {
   if (out_state == nullptr) return IMRTC_V1_ERR_BAD_PARAMS;
   return guard(engine, [out_state](CallEngine& target) {

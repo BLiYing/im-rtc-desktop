@@ -144,6 +144,19 @@ public:
   virtual void attachView(const std::string& trackId, void* nativeHandle) = 0;
 
   /**
+   * attachLocalView 把**本端摄像头的预览**挂到宿主的原生窗口上。
+   *
+   * 单独一个方法，不是 `attachView(自己的 uid, ...)`：
+   * 引擎**不知道自己的 uid**（token 里有，但那是宿主与服务端之间的事），
+   * 而且本端画面根本不是一条「远端轨道」——它来自采集侧，没有 trackId。
+   * 硬要复用 attachView 就得约定一个魔法 uid，那是给将来埋雷。
+   *
+   * `nativeHandle` 与 attachView 同义；传 nullptr 卸载。
+   * 摄像头还没打开时可以先挂上，开了自然就有画面。
+   */
+  virtual void attachLocalView(void* nativeHandle) = 0;
+
+  /**
    * reset 把这一轮的媒体归零并**重建 PeerConnection**。
    *
    * PC 是**跟着房间走**的：服务端每次进房都新建一对。不重建的话上一轮的

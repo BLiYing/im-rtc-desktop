@@ -144,6 +144,12 @@ public:
   void attachView(const std::string& uid, void* nativeHandle);
 
   /**
+   * attachLocalView 把本端摄像头预览挂到宿主的原生窗口上（1v1 那一屏的小窗）。
+   * 传 nullptr 卸载。没有媒体适配器时是空操作。
+   */
+  void attachLocalView(void* nativeHandle);
+
+  /**
    * notifyMediaReady 由媒体层在「`room.join.ok` 到手 + sub PC 的 ICE 连通」时调用，
    * 通话状态机据此从 connecting 走到 connected（§5.1）。
    *

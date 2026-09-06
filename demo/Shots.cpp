@@ -213,6 +213,26 @@ int main(int argc, char** argv) {
     surfaces.hide();
   }
 
+  // ---- 渲染路径 A：1v1 视频（远端铺满 + 本端小窗）----
+  {
+    CallOverlay solo1v1;
+    solo1v1.setSelfUid(QStringLiteral("alice"));
+    solo1v1.setFakeVideo(true);
+    solo1v1.beginOutgoing({QStringLiteral("bob")}, QStringLiteral("video"), false);
+    solo1v1.markConnected(QStringLiteral("caller"));
+    solo1v1.show();
+    for (int i = 0; i < 20; ++i) {
+      QApplication::processEvents();
+      QThread::msleep(10);
+    }
+    QPixmap shot;
+    if (QScreen* screen = solo1v1.screen()) shot = screen->grabWindow(solo1v1.winId());
+    if (shot.isNull()) shot = solo1v1.grab();
+    shot.save(QStringLiteral("%1/12-call-1v1-video%2.png").arg(dir, suffix));
+    QTextStream(stdout) << "  12-call-1v1-video" << suffix << ".png\n";
+    solo1v1.hide();
+  }
+
   // ---- 群通话九宫格：把格子的各种状态都摆出来 ----
   CallOverlay group;
   group.setSelfUid(QStringLiteral("alice"));

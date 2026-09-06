@@ -259,6 +259,26 @@ IMRTC_TEST(mediaMuteGoesBothWays, "MediaPlane —— 开关麦克风：本端停
   CHECK_EQ(harness.media->muted.back(), std::string("local-mic-1:live"), "恢复发包");
 }
 
+IMRTC_TEST(mediaAttachLocalViewIsSeparate,
+           "MediaPlane —— 本端预览是独立的一条口子，不走远端轨道那条") {
+  Harness harness;
+  harness.enterRoom("video");
+
+  int local = 0;
+  harness.engine->attachLocalView(&local);
+  CHECK_EQ(harness.media->attachedViews, std::vector<std::string>{"local:attach"},
+           "本端预览直接落到适配器上，不需要任何 trackId");
+
+  // 远端那条要有真轨道才挂得上；挂一个不存在的 uid 是空操作，不是错误
+  // （宿主在 onUserEnter 就建好格子，那时对方的视频轨可能还没发布）。
+  int remote = 0;
+  harness.engine->attachView("nobody", &remote);
+  CHECK_EQ(harness.media->attachedViews.size(), std::size_t{1}, "陌生 uid 不产生 attach");
+
+  harness.engine->attachLocalView(nullptr);
+  CHECK_EQ(harness.media->attachedViews.back(), std::string("local:detach"), "传空即卸载");
+}
+
 IMRTC_TEST(mediaDeferredCompletions, "MediaPlane —— 异步完成：poll() 之前一帧都不该发（真适配器就是异步的）") {
   Harness harness;
   harness.media->deferCompletions = true;
@@ -301,5 +321,6 @@ IMRTC_TEST(mediaNoAdapterIsPureSignaling, "CallEngine —— 不给适配器就�
   engine.openMic();
   engine.closeCamera();
   engine.attachView("bob", nullptr);
+  engine.attachLocalView(nullptr);
   CHECK_EQ(engine.callState(), CallState::Inviting, "状态机照常");
 }

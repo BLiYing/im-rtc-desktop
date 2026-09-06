@@ -268,6 +268,17 @@ IMRTC_API int32_t imrtc_v1_close_camera(imrtc_v1_engine* engine);
 IMRTC_API int32_t imrtc_v1_attach_view(imrtc_v1_engine* engine, const char* uid,
                                        void* native_handle);
 
+/**
+ * 把**本端摄像头预览**挂到宿主的原生窗口上（1v1 那一屏右下角的小窗）。
+ *
+ * 单独一个函数，**不是** `attach_view(自己的 uid, ...)`：引擎不知道你的 uid
+ * （那是你与服务端之间的事），而且本端画面来自采集侧，根本没有远端轨道 id。
+ * 硬要复用会逼出一个魔法 uid 约定，那是给将来埋雷。
+ *
+ * 传 NULL 卸载。摄像头还没开时可以先挂，开了自然有画面。
+ */
+IMRTC_API int32_t imrtc_v1_attach_local_view(imrtc_v1_engine* engine, void* native_handle);
+
 /* ---- 查询（都不分配内存） ---- */
 
 IMRTC_API int32_t imrtc_v1_get_call_state(imrtc_v1_engine* engine, int32_t* out_state);

@@ -7,12 +7,12 @@
 ## 当前焦点
 
 **P5 进行中。第一~三刀 + 门面 + 媒体面接线 + 第五刀 capi + 第六刀 Qt Demo 已落地。**
-`./scripts/test.sh` **七步全绿**（macOS）：65 个引擎用例 + 19 个 Demo 界面用例，
-约 14900 行 C++17。第七步只在 `IMRTC_BUILD_DEMO=ON` 时存在（需要 Qt）。
+`./scripts/test.sh` **七步全绿**（macOS）：66 个引擎用例 + 21 个 Demo 界面用例，
+约 15300 行 C++17。第七步只在 `IMRTC_BUILD_DEMO=ON` 时存在（需要 Qt）。
 落地明细见 [current_task.archive.md](current_task.archive.md)。
 
 **对外交付物已经成立**：`libim_rtc_engine_capi.dylib` + 一个 C 头，
-**导出面只有 25 个 `imrtc_v1_*` 符号**（`scripts/check-abi.sh` 守着，已进 test.sh）。
+**导出面只有 26 个 `imrtc_v1_*` 符号**（`scripts/check-abi.sh` 守着，已进 test.sh）。
 联调工具 `scripts/smoke.sh` **改成经 C ABI 走**——与 Qt / C# 宿主同一条路，
 对着真服务端跑通：握手 → 拨号 → `onCallEnd(offline)`。
 
@@ -42,20 +42,27 @@
 《接入指南》在 [docs/INTEGRATION_GUIDE.md](docs/INTEGRATION_GUIDE.md)。
 `IMRTC_BUILD_DEMO` 默认 OFF——engine 与测试不依赖 Qt 这条不能破。
 
-**渲染路径 A 的宿主侧已经走通**（2026-09-06）：格子里真的塞了原生子窗口
-（macOS `NSView*`），句柄经 `attachView` 递给引擎，几何 / DPI / 生命周期都有回归测试。
-**但引擎侧没通电**——没有媒体适配器时 `attachView` 直接返回。等 `WebRTCAdapter`
-落地就自动生效，Demo 这边不用改。用 `--fake-video` 可以看到它。
+**渲染路径 A 的宿主侧已经走通**（九宫格 2026-09-06，1v1 2026-09-07）：
+格子与 1v1 那一屏里都塞了真的原生子窗口（macOS `NSView*`），句柄递给引擎，
+几何 / DPI / 层级 / 生命周期都有回归测试。1v1 是**两层**：远端铺满 + 本端小窗
+160×90 压在右下角。**但引擎侧没通电**——没有媒体适配器时那两个方法直接返回。
+等 `WebRTCAdapter` 落地就自动生效，Demo 这边不用改。`--fake-video` 能看到它。
+
+**C ABI 加了一个符号**（2026-09-07，追加式，没动任何已有的）：
+`imrtc_v1_attach_local_view(engine, handle)` —— **本端预览**。
+做 1v1 那一屏时才发现缺：`attachView` 是按 uid 找**远端**轨道的，而引擎
+不知道自己的 uid，本端画面也来自采集侧、根本没有 trackId。导出面 25 → 26。
 
 **还没有的**：真实媒体（没有 SDP、没有 ICE、没有声音画面）、设备枚举、
 渲染路径 B（原始帧回调）、共享屏幕、C# 绑定。**Windows 一次都没编译过。**
 
 ## 下一步
 
-1. **1v1 那一屏也接上渲染路径 A**：现在只有九宫格的格子有原生子窗口，
-   1v1 的大画面（远端铺满 + 本端 160×90 小窗，草图 §06-R）还是头像。
-   坑应该与格子那批同类，但**本端小窗压在远端画面之上**是新的一层，值得单独验。
-2. **渲染路径 B（原始帧回调）**：C ABI 里还没有这个口子，等媒体落地一起开。
+1. **渲染路径 B（原始帧回调）**：C ABI 里还没有这个口子。它要定的是帧格式
+   （I420/NV12）、生命周期（那块内存谁free）、以及**回调频率**（30fps 跨 ABI
+   是个真问题）。等媒体落地一起开，但**形状可以先定**。
+2. **`WebRTCAdapter`**：等 Apple Silicon 或 Windows 机器。宿主侧的坑已经清完了，
+   到时候只剩一个文件。
 2. ~~**P5 第四刀下半 · `WebRTCAdapter`**~~ —— **已推迟，不在当前排期内**（2026-09-06 定）。
    等 Apple Silicon 或 Windows 机器到手再做，做完与 Web/iOS 各互打一次。
    - **做的时候别漏 ICE 重启**（协议 §3.3，2026-09-06 夜四端已落地，桌面端是唯一还没有的）：
@@ -128,6 +135,11 @@
 
   代价是 `demo/i18n/imrtc_demo_en.ts`（132 条）**手工维护**：
   **加了新的 `tr()` 之后记得同步 .ts**，否则那条在英文下会静默退回中文，不报错。
+- **本端预览必须走 `attachLocalView`，不是 `attachView(自己的 uid, …)`**。
+  引擎不知道自己的 uid，本端画面也没有远端 trackId。别为此约定魔法 uid。
+- **隐藏控件不腾地方**：想让画面铺满时把头像 `hide()` 掉是不够的，
+  同一个布局里的 `addStretch()` 会把空间全吃掉——实测画面只分到 520×**16**。
+  用 `QStackedWidget` 分页。
 - **原生子窗口会盖住同一个窗口里所有 Qt 绘制**，与 Qt 的 z 序无关（`raise()` 没用）。
   所以格子的名字标签 / 静音角标 / 发言描边不能由格子自己 `paintEvent` 画——
   必须放进**画面之后创建的另一个原生子窗口**（`demo/VideoTile.cpp` 的 `TileChrome`）。

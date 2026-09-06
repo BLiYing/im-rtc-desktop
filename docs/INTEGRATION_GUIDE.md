@@ -21,7 +21,7 @@ MSVC 与 MinGW 不通、`/MD` 与 `/MT` 不通、Debug 与 Release 的 CRT 不�
 libstdc++ 与 libc++ 不通。导出 C++ 类等于「只服务与我们同工具链的宿主」；
 导出 C 等于 Qt / MFC / WPF+C# / Delphi / Java / Python / Flutter / Swift 都能接。
 
-动态库的导出面只有 **25 个 `imrtc_v1_*` 符号**，有脚本守着（`scripts/check-abi.sh`）。
+动态库的导出面只有 **26 个 `imrtc_v1_*` 符号**，有脚本守着（`scripts/check-abi.sh`）。
 你可以自己核一遍：macOS 用 `dyld_info -exports`，Windows 用 `dumpbin /exports`。
 
 ---
@@ -351,7 +351,38 @@ delete surface;                    // 再拆
 `QScreen::grabWindow`**（它在某些环境需要「屏幕录制」授权，拿不到就要说清楚，
 别拿一张滞后的图当证据）。
 
-### 7.6 当前状态
+### 7.6 **本端预览走另一条口子**
+
+```c
+imrtc_v1_attach_view(engine, "bob", handle);   // 远端：按 uid
+imrtc_v1_attach_local_view(engine, handle);    // 本端：没有 uid 这一说
+```
+
+不是同一个函数，也**不要**期待 `attach_view(你自己的 uid, …)` 能用：
+
+- 引擎**不知道你的 uid**。那是你与服务端之间的事，token 里有，引擎不解析。
+- 本端画面来自**采集侧**，根本不是一条「远端轨道」，没有 trackId 可查。
+
+硬要复用就得约定一个魔法 uid（空串？`"self"`？），那是给将来埋雷。
+
+1v1 那一屏正好两条都要：远端铺满 → `attach_view(对方uid, …)`，
+右下角 160×90 的小窗 → `attach_local_view(…)`。摄像头还没开时可以先挂上，
+开了自然就有画面；关摄像头**不需要**摘，画面自己没了。
+
+> 这条口子是做 1v1 那一屏时才发现缺的，2026-09-07 加进 C ABI。
+> **追加式变更**：新增一个符号，已有的一个都没动，老宿主不受影响。
+
+### 7.7 布局：**隐藏控件不腾地方**
+
+一个 Qt 的坑，不是原生窗口特有的，但在这里最容易撞：想让画面铺满时，
+把原本占位的头像 / 名字 `hide()` 掉是**不够的**——如果那个布局里有
+`addStretch()`，弹簧会把空间全吃掉，画面只分到十几个像素高。
+实测：画面拿到 520×**16**。
+
+用 `QStackedWidget` 分成两页（头像页 / 画面页）就没这个问题。
+参考 `demo/CallOverlay.cpp` 里 `soloPane_` 的构造。
+
+### 7.8 当前状态
 
 上面这些**宿主侧**的坑已经在 `demo/` 里走通并有回归测试
 （`demo/tests/NativeSurfaceTest.cpp`）。但**引擎侧还没有画面**：

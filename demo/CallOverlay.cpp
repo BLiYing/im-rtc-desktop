@@ -5,6 +5,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLinearGradient>
+#include <QStackedWidget>
 #include <QPainter>
 #include <QTimer>
 #include <QVBoxLayout>
@@ -12,6 +13,7 @@
 #include "Avatar.h"
 #include "CallStrings.h"
 #include "ControlButton.h"
+#include "SoloVideo.h"
 #include "Theme.h"
 #include "VideoTile.h"
 
@@ -48,14 +50,27 @@ CallOverlay::CallOverlay(QWidget* parent) : QWidget(parent) {
   status_->setFont(theme::type::b2());
   status_->setAlignment(Qt::AlignCenter);
 
-  soloPane_ = new QWidget(this);
-  auto* solo = new QVBoxLayout(soloPane_);
+  /*
+    1v1 主体是**两页**，不是一页里藏几个控件：
+
+      第 0 页 —— 头像 + 名字 + 状态（语音通话页、接通前、结束前都用它）
+      第 1 页 —— 画面（远端铺满 + 本端小窗）
+
+    一开始是一页里 `hide()` 掉头像那几个再塞画面，结果画面只分到 520×16——
+    两个 `addStretch()` 把空间吃光了，**隐藏控件并不腾地方**。堆叠页没这个问题。
+  */
+  auto* avatarPage = new QWidget(this);
+  auto* solo = new QVBoxLayout(avatarPage);
+  solo->setContentsMargins(0, 0, 0, 0);
   solo->addStretch();
   solo->addWidget(avatar_, 0, Qt::AlignHCenter);
   solo->addSpacing(12);
   solo->addWidget(peerName_);
   solo->addWidget(status_);
   solo->addStretch();
+
+  soloPane_ = new QStackedWidget(this);
+  static_cast<QStackedWidget*>(soloPane_)->addWidget(avatarPage);
 
   // ---- 九宫格主体 ----
   gridPane_ = new QWidget(this);
@@ -232,120 +247,18 @@ void CallOverlay::markConnected(const QString& role) {
   elapsedSec_ = 0;
   clock_->start();
   applyPhase();
+  syncSoloVideo();
 }
 
 void CallOverlay::markEnded(const QString& reason, qint64 durationSec) {
+  // 画面层要在切到结束态**之前**拆掉：那时 peer_ 还在，detach 才发得对人。
   phase_ = Phase::Ended;
+  syncSoloVideo();
   endReason_ = reason;
   endDuration_ = durationSec;
   clock_->stop();
   applyPhase();
   autoClose_->start();
-}
-
-/* ---- 成员事件 ---- */
-
-VideoTile* CallOverlay::tileFor(const QString& uid) {
-  auto it = tiles_.find(uid);
-  return it == tiles_.end() ? nullptr : it.value();
-}
-
-void CallOverlay::onMemberEntered(const QString& uid) {
-  if (!members_.contains(uid)) {
-    members_ << uid;
-    rebuildTiles();
-  }
-  if (VideoTile* tile = tileFor(uid)) tile->setState(VideoTile::State::Present);
-}
-
-void CallOverlay::onMemberLeft(const QString& uid) {
-  if (VideoTile* tile = tileFor(uid)) tile->setState(VideoTile::State::Left);
-}
-
-void CallOverlay::onMemberAccepted(const QString& uid) {
-  if (VideoTile* tile = tileFor(uid)) tile->setState(VideoTile::State::Present);
-}
-
-void CallOverlay::onMemberRejected(const QString& uid) {
-  if (VideoTile* tile = tileFor(uid)) tile->setState(VideoTile::State::Left);
-}
-
-void CallOverlay::onMemberNoResponse(const QString& uid) {
-  if (VideoTile* tile = tileFor(uid)) tile->setState(VideoTile::State::Left);
-}
-
-void CallOverlay::onMemberAudio(const QString& uid, bool available) {
-  if (VideoTile* tile = tileFor(uid)) tile->setMuted(!available);
-}
-
-void CallOverlay::onMemberVideo(const QString& uid, bool available) {
-  // 这一条就是渲染路径 A 的触发点：对端一发布视频轨，格子就建原生子窗口
-  // 并把句柄递给引擎。对端关摄像头就摘掉。
-  if (VideoTile* tile = tileFor(uid)) tile->setVideoAvailable(available);
-}
-
-void CallOverlay::setFakeVideo(bool on) {
-  fakeVideo_ = on;
-  for (auto it = tiles_.begin(); it != tiles_.end(); ++it) {
-    it.value()->setTestPatternEnabled(on);
-    it.value()->setVideoAvailable(on);
-  }
-}
-
-void CallOverlay::onSpeakers(const QList<SpeakerInfo>& speakers) {
-  QStringList talking;
-  for (const SpeakerInfo& speaker : speakers) talking << speaker.uid;
-  for (auto it = tiles_.begin(); it != tiles_.end(); ++it) {
-    it.value()->setSpeaking(talking.contains(it.key()));
-  }
-}
-
-void CallOverlay::onQuality(const QList<QualityInfo>& entries) {
-  for (const QualityInfo& entry : entries) {
-    if (VideoTile* tile = tileFor(entry.uid)) tile->setQualityLevel(entry.level);
-  }
-}
-
-void CallOverlay::onReconnecting(bool reconnecting) {
-  if (phase_ != Phase::Connected) return;
-  status_->setVisible(reconnecting);
-  status_->setText(reconnecting ? tr("正在重连…") : QString());
-}
-
-/* ---- 布局与外观 ---- */
-
-void CallOverlay::rebuildTiles() {
-  qDeleteAll(tiles_);
-  tiles_.clear();
-  while (QLayoutItem* item = grid_->takeAt(0)) delete item;
-
-  if (!isGroup_ && !isRoomMode()) return;
-
-  QStringList everyone = members_;
-  if (!selfUid_.isEmpty() && !everyone.contains(selfUid_)) everyone.prepend(selfUid_);
-
-  int index = 0;
-  for (const QString& uid : everyone) {
-    auto* tile = new VideoTile(gridPane_);
-    // **先接线再设状态。**顺序反了的话 setVideoAvailable(true) 发出的
-    // attachRequested 落在没人监听的地方，引擎永远拿不到句柄——
-    // 而界面看起来一切正常，这类 bug 只能靠日志里"少了一行"发现。
-    connect(tile, &VideoTile::attachRequested, this, &CallOverlay::attachViewRequested);
-    connect(tile, &VideoTile::detachRequested, this, &CallOverlay::detachViewRequested);
-
-    tile->setIdentity(uid, uid);
-    tile->setSelf(uid == selfUid_);
-    // 拨出中时除自己外都还在振铃——这一格的「呼叫中…」是真的，由回调翻转。
-    tile->setState(uid == selfUid_ || phase_ == Phase::Connected ? VideoTile::State::Present
-                                                                 : VideoTile::State::Ringing);
-    if (fakeVideo_) {
-      tile->setTestPatternEnabled(true);
-      tile->setVideoAvailable(true);
-    }
-    grid_->addWidget(tile, index / kGridColumns, index % kGridColumns);
-    tiles_.insert(uid, tile);
-    ++index;
-  }
 }
 
 void CallOverlay::updateTitle() {

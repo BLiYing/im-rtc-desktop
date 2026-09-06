@@ -105,6 +105,13 @@ public:
     attachedViews.push_back(trackId + (nativeHandle == nullptr ? ":detach" : ":attach"));
   }
 
+  void attachLocalView(void* nativeHandle) override {
+    // 记成 "local:attach" / "local:detach"，与远端那条用同一个列表，
+    // 顺序也就一并测到了。
+    attachedViews.push_back(std::string("local") +
+                            (nativeHandle == nullptr ? ":detach" : ":attach"));
+  }
+
   void reset() override {
     ++resetCount;
     calls.push_back("reset");

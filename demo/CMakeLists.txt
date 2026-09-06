@@ -51,6 +51,14 @@ find_package(Qt6 6.5 REQUIRED COMPONENTS Widgets Network Svg LinguistTools)
 
 qt_standard_project_setup(I18N_TRANSLATED_LANGUAGES en)
 
+# 部署目标统一在这里设。**必须在每个目标建出来之后立刻调用**——
+# 原先写成一个 foreach 放在末尾，而测试目标是在它之后才建的，
+# 于是测试那两个漏掉了，链接时一路 "built for newer macOS version" 警告。
+function(imrtc_demo_deployment_target target)
+  target_compile_options(${target} PRIVATE -mmacosx-version-min=12.0)
+  target_link_options(${target} PRIVATE -mmacosx-version-min=12.0)
+endfunction()
+
 # 界面代码做成一个静态库，给两个可执行文件共用：
 #   imrtc_demo        真 Demo（要服务端）
 #   imrtc_demo_shots  离线截图工具（不要服务端，见 Shots.cpp）
@@ -61,7 +69,9 @@ qt_add_library(imrtc_demo_ui STATIC
   ControlButton.cpp
   VideoTile.cpp
   NativeSurface.cpp
+  SoloVideo.cpp
   CallOverlay.cpp
+  CallOverlayMembers.cpp
   Language.cpp
   EngineBridge.cpp
   CallHistory.cpp
@@ -112,22 +122,29 @@ qt_add_translations(
 # 但这**不降低我们自己的交付面**——engine 与 capi 那两个目标照旧 11.0，
 # 也就是说集成方的 App 仍可以支持 macOS 11，只是「用 Qt 6.8 的宿主」得 12+。
 # 这是 Qt 的约束，不是我们的。
-foreach(_t imrtc_demo_ui imrtc_demo imrtc_demo_shots ${_imrtc_demo_targets})
-  target_compile_options(${_t} PRIVATE -mmacosx-version-min=12.0)
-  target_link_options(${_t} PRIVATE -mmacosx-version-min=12.0)
+foreach(_t imrtc_demo_ui imrtc_demo imrtc_demo_shots)
+  imrtc_demo_deployment_target(${_t})
 endforeach()
 
 # 界面测试：只在 IMRTC_BUILD_DEMO=ON 时存在，所以离线构建不受影响。
 # 覆盖的是「看代码看不出来、跑真服务端才暴露」的那类规则——
 # 目前就一条：红按钮到底调哪个方法（见 OverlayActionsTest.cpp 顶部注释）。
+# QtTest 的 QSKIP / QVERIFY2 是变参宏，不给变参时 -Wpedantic 会抱怨「C++20 扩展」。
+# 那是 Qt 自己的宏、不是我们的代码，单独关掉这一条；**别为此放宽 imrtc_warnings**。
+add_library(imrtc_qtest_warnings INTERFACE)
+target_compile_options(imrtc_qtest_warnings INTERFACE -Wno-variadic-macro-arguments-omitted)
+
 find_package(Qt6 6.5 QUIET COMPONENTS Test)
 if(Qt6Test_FOUND)
   # 每个测试一个可执行文件（QTEST_MAIN 自带 main）。
   foreach(_case OverlayActions NativeSurface)
     qt_add_executable(imrtc_demo_${_case}_test tests/${_case}Test.cpp)
-    target_link_libraries(imrtc_demo_${_case}_test PRIVATE imrtc_demo_ui Qt6::Test imrtc_warnings)
+    # imrtc_qtest_warnings 要排在 imrtc_warnings **之后**：INTERFACE 选项按链接
+    # 顺序拼在命令行上，排前面的 -Wno- 会被后面的 -Wpedantic 重新打开。
+    target_link_libraries(imrtc_demo_${_case}_test
+                          PRIVATE imrtc_demo_ui Qt6::Test imrtc_warnings imrtc_qtest_warnings)
     add_test(NAME imrtc_demo_${_case} COMMAND imrtc_demo_${_case}_test)
-    list(APPEND _imrtc_demo_targets imrtc_demo_${_case}_test)
+    imrtc_demo_deployment_target(imrtc_demo_${_case}_test)
   endforeach()
 else()
   message(STATUS "没有 Qt6::Test，跳过 Demo 界面测试")

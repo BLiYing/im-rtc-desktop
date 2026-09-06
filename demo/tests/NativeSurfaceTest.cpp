@@ -20,7 +20,10 @@
 #include <QVBoxLayout>
 #include <QtTest>
 
+#include "CallOverlay.h"
 #include "NativeSurface.h"
+#include "SoloVideo.h"
+#include "Theme.h"
 #include "VideoTile.h"
 
 class NativeSurfaceTest : public QObject {
@@ -35,6 +38,8 @@ private slots:
   void tileTogglesCleanly();
   void layerFollowsTileLayout();
   void chromeSitsAboveSurface();
+  void soloVideoPutsSelfAboveRemote();
+  void soloVideoAttachesBothPipes();
 
 private:
   bool headless_ = false;
@@ -213,6 +218,63 @@ void NativeSurfaceTest::chromeSitsAboveSurface() {
   // 关掉画面时两层都要收走，不能剩一个空外壳挡着头像。
   tile->setVideoAvailable(false);
   QCOMPARE(tile->findChildren<QWidget*>(Qt::FindDirectChildrenOnly).size(), 0);
+}
+
+/**
+ * 1v1 那一屏：远端铺满、本端小窗 160×90 压在右下角。
+ * **顺序即 z 序**——先建远端后建本端，反过来小窗会被大画面整块盖掉。
+ */
+void NativeSurfaceTest::soloVideoPutsSelfAboveRemote() {
+  QWidget host;
+  host.resize(520, 300);
+  auto* video = new SoloVideo(&host);
+  video->setGeometry(0, 0, 520, 300);
+  host.show();
+  QVERIFY(QTest::qWaitForWindowExposed(&host));
+  QApplication::processEvents();
+
+  const QList<QWidget*> layers = video->findChildren<QWidget*>(Qt::FindDirectChildrenOnly);
+  QCOMPARE(layers.size(), 2);
+  QVERIFY(reinterpret_cast<void*>(layers.at(0)->winId()) == video->remoteHandle());
+  QVERIFY(reinterpret_cast<void*>(layers.at(1)->winId()) == video->selfHandle());
+
+  // 远端铺满
+  QCOMPARE(layers.at(0)->size(), video->size());
+  // 本端 160×90，离右下角各 12（UI_SPEC §04）
+  const QRect pip = layers.at(1)->geometry();
+  QCOMPARE(pip.size(), QSize(theme::metric::kSelfPipWidth, theme::metric::kSelfPipHeight));
+  QCOMPARE(video->width() - pip.right() - 1, theme::metric::kPipMargin);
+  QCOMPARE(video->height() - pip.bottom() - 1, theme::metric::kPipMargin);
+}
+
+/**
+ * 1v1 视频接通时要挂**两条**口子：远端走 attachView(uid)，本端走 attachLocalView()。
+ * 结束时两条都要摘，而且要在 peer_ 还在的时候摘——否则 detach 发不对人。
+ */
+void NativeSurfaceTest::soloVideoAttachesBothPipes() {
+  CallOverlay overlay;
+  overlay.setSelfUid(QStringLiteral("alice"));
+  overlay.setFakeVideo(true);
+
+  QSignalSpy attach(&overlay, &CallOverlay::attachViewRequested);
+  QSignalSpy attachLocal(&overlay, &CallOverlay::attachLocalViewRequested);
+  QSignalSpy detach(&overlay, &CallOverlay::detachViewRequested);
+  QSignalSpy detachLocal(&overlay, &CallOverlay::detachLocalViewRequested);
+
+  overlay.beginOutgoing({QStringLiteral("bob")}, QStringLiteral("video"), false);
+  QCOMPARE(attach.count(), 0);          // 接通前不该有画面
+  overlay.markConnected(QStringLiteral("caller"));
+
+  QCOMPARE(attach.count(), 1);
+  QCOMPARE(attach.at(0).at(0).toString(), QStringLiteral("bob"));
+  QVERIFY(attach.at(0).at(1).value<void*>() != nullptr);
+  QCOMPARE(attachLocal.count(), 1);
+  QVERIFY(attachLocal.at(0).at(0).value<void*>() != nullptr);
+
+  overlay.markEnded(QStringLiteral("hangup"), 5);
+  QCOMPARE(detach.count(), 1);
+  QCOMPARE(detach.at(0).at(0).toString(), QStringLiteral("bob"));
+  QCOMPARE(detachLocal.count(), 1);
 }
 
 QTEST_MAIN(NativeSurfaceTest)

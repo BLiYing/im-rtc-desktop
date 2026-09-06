@@ -221,6 +221,11 @@ public:
     return call(imrtc_v1_attach_view(handle_, uid.c_str(), nativeHandle));
   }
 
+  /** 本端摄像头预览。见 imrtc_c.h 里为什么它不是 attachView(自己的 uid, …)。 */
+  Error attachLocalView(void* nativeHandle) {
+    return call(imrtc_v1_attach_local_view(handle_, nativeHandle));
+  }
+
   /** tick 推进时间。在你的定时器里按 ~200ms~1s 调。 */
   Error tick() { return call(imrtc_v1_engine_tick(handle_)); }
 

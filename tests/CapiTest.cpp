@@ -76,6 +76,10 @@ IMRTC_TEST(capiNullHandleIsSafe, "C ABI —— 对空句柄调任何方法都返
   CHECK_EQ(imrtc_v1_login(nullptr, "tk"), std::int32_t{IMRTC_V1_ERR_BAD_PARAMS}, "login");
   CHECK_EQ(imrtc_v1_hangup(nullptr), std::int32_t{IMRTC_V1_ERR_BAD_PARAMS}, "hangup");
   CHECK_EQ(imrtc_v1_engine_tick(nullptr), std::int32_t{IMRTC_V1_ERR_BAD_PARAMS}, "tick");
+  CHECK_EQ(imrtc_v1_attach_view(nullptr, "bob", nullptr), std::int32_t{IMRTC_V1_ERR_BAD_PARAMS},
+           "attach_view");
+  CHECK_EQ(imrtc_v1_attach_local_view(nullptr, nullptr), std::int32_t{IMRTC_V1_ERR_BAD_PARAMS},
+           "attach_local_view");
   std::int32_t state = -1;
   CHECK_EQ(imrtc_v1_get_call_state(nullptr, &state), std::int32_t{IMRTC_V1_ERR_BAD_PARAMS},
            "get_call_state");
