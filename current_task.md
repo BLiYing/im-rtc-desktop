@@ -15,9 +15,14 @@
 联调工具 `scripts/smoke.sh` **改成经 C ABI 走**——与 Qt / C# 宿主同一条路，
 对着真服务端跑通：握手 → 拨号 → `onCallEnd(offline)`。
 
-**现在卡在一个平台问题上**：libwebrtc 桌面预编译包**没有 macOS x86_64**，而本机是 Intel Mac。
-所以第四刀只做了上半——`MediaAdapter` 接口 + `MediaPlane` 接线，用假适配器测全；
-真正的 `WebRTCAdapter` 要换机器。出路见「已知坑」第一条。
+**媒体已决定推迟（2026-09-06 定，见「已知坑」第一条）**：libwebrtc 桌面预编译包**没有 macOS x86_64**，
+本机是 Intel Mac，所以第四刀只做了上半——`MediaAdapter` 接口 + `MediaPlane` 接线，用假适配器测全。
+真正的 `WebRTCAdapter` **等 Apple Silicon 或 Windows 机器**再做。在那之前
+**桌面端按纯信令模式交付**：能拨号、能进房、能收到全部状态回调，就是没有声音和画面。
+
+**Qt 6.8.3 已装好并验证过**（2026-09-06，`~/Qt/6.8.3/macos`，占 1.8 GB）：
+用 `aqt install-qt mac desktop 6.8.3 clang_64 --archives qtbase qtsvg qttranslations qttools`，
+官方包是 universal（`x86_64 arm64`），本机 Intel 真出窗口，`qtbase_zh_CN` 生效。
 
 **还没有的**：真实媒体（没有 SDP、没有 ICE、没有声音画面）、设备枚举、Qt Demo。
 **Windows 一次都没编译过。**
@@ -26,13 +31,17 @@
 
 1. **P5 第六刀 · Qt Demo + 《接入指南》**：四屏，**经 capi 调引擎**。这一刀要装 Qt 6，
    但不需要 libwebrtc——纯信令模式下四屏的状态流转都能演。
-2. **P5 第四刀下半 · `WebRTCAdapter`**：libwebrtc C++ API 的真实实现。
-   **换机器才能做**（见已知坑第一条）。做完与 Web/iOS 各互打一次。
+2. ~~**P5 第四刀下半 · `WebRTCAdapter`**~~ —— **已推迟，不在当前排期内**（2026-09-06 定）。
+   等 Apple Silicon 或 Windows 机器到手再做，做完与 Web/iOS 各互打一次。
 3. **按需**：C# / P&#8203;Invoke 绑定（C ABI 已经定型，这一层是薄的）。
 
 ## 已知坑 / 限制
 
-- **⚠️ 本机（Intel Mac）做不了媒体那一刀**。libwebrtc 桌面预编译包的平台矩阵：
+- **✅ 已决定（2026-09-06）：媒体推迟，Intel Mac 上先不支持声音与视频。**
+  这是一个**决定**，不是一条待办——不要再拿它当「卡住了」重新讨论。
+  桌面端在此期间按**纯信令模式**交付；影响面被 `MediaAdapter` 关死在
+  **一个还没写的文件 `WebRTCAdapter.cpp`** 里，其余全部代码与测试不受影响。
+  起因是 libwebrtc 桌面预编译包的平台矩阵：
 
   | 平台 | shiguredo 预编译包 | 备注 |
   |---|---|---|
@@ -41,17 +50,30 @@
   | Windows x86_64 | ✅ `webrtc.windows_x86_64.zip` | 集成方那边有 |
   | Ubuntu x86_64 | ✅ | 与本产品无关 |
 
-  三条出路，**建议 ② 或 ①**：
-  ① 换一台 Apple Silicon Mac —— 最省事；
-  ② 直接在 Windows 上做 `WebRTCAdapter` —— 反正 Windows 侧终究要验，顺序换一下而已；
-  ③ 自己从源码编 macOS x86_64 的 libwebrtc —— depot_tools + 数十 GB + 数小时，还要长期维护。
-  **不要走「换成 stasel/WebRTC 的 XCFramework」**：那是 ObjC API，Windows 上用不了，
-  会变成两套媒体适配器，正好违背「一套代码两平台」。
+  **决定：等机器**——Apple Silicon Mac 或 Windows，哪台先到手就在哪台做。
+  已经排除掉的三条路，别再回头试：
+  - ❌ **`bengreenier/webrtc` 的 `darwin-x64` 包**（273 MB）—— 它**确实存在**，能在 Intel Mac 上用，
+    但冻在 2023 年的 branch 5735（约 **M115**），与我们要对齐的 **M150** 差 35 个里程碑。
+    为一台过渡机器去适配一套三年前的 API，代价高于收益。
+  - ❌ **自己从源码编 macOS x86_64 的 libwebrtc** —— depot_tools + 数十 GB + 数小时，还要长期维护。
+    本机数据卷已 97% 满，连磁盘都不够。
+  - ❌ **换成 stasel/WebRTC 的 XCFramework** —— 那是 ObjC API，Windows 上用不了，
+    会变成两套媒体适配器，正好违背「一套代码两平台」。
+
+  生态背景（说明这不是我们选型失误）：Homebrew 已于 2026-09 停发 Intel macOS bottle，
+  macOS 27 起 Apple 不再支持 Intel，GitHub Actions 2027 下线 Intel runner——
+  **x86_64 macOS 正在被整个生态放弃**，不只是 libwebrtc 一家。
 
   版本打算锁 **m150.7871.3.2**（与 Android 那条线的 M150 对齐，见 CLIENT_PARITY §3），
   落地时再确认。
 - **本机只有 macOS**：Windows 侧编译与验证需要集成方配合，时间未定。
   **不许把「macOS 过了」写成「桌面端完成」**——每次交付分平台说清楚。
+- **Qt 6.8 + Xcode 26 会撞 `ld: framework 'AGL' not found`**。macOS 26 SDK 删掉了 `AGL.framework`，
+  而 Qt 6.8 的 `FindWrapOpenGL.cmake` 在找不到时会**无条件回退到硬编码的 `-framework AGL`**。
+  **注意别用 `find_library` 探测**：AGL 还留在**运行系统**的 `/System/Library/Frameworks/` 下，
+  只是从 **SDK** 里删了，而 `ld` 只看 SDK——`find_library` 会误报「存在」。
+  必须直接查 SDK 目录。修法已进 Demo 的 `CMakeLists.txt`，也要写进《接入指南》——
+  集成方只要是 Xcode 26 + Qt 6.8 就会撞同一个坑。
 - **Demo 必须经 capi 调引擎**。走内部 C++ 接口会掩盖全部 ABI 问题，那样「Demo 跑通」不等于「宿主接得通」。
 - **`engine/` 里出现任何 `Q` 开头的类型 = 直接打回**（CONVENTIONS §1）。WS 换独立库，
   TLS 复用 libwebrtc 自带的 BoringSSL，不再引第二份 OpenSSL。
