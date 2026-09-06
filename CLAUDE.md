@@ -72,7 +72,12 @@ im-rtc-desktop/
 │   └── src/ *                         # C++ → C 的转换层（异常在这里被吃掉转错误码）
 ├── tools/ *                           # 联调工具（需要真服务端，不进 test.sh）
 │   └── Smoke.cpp *                    # 握手 → 拨号 → 终局，跑一轮给人看
-├── demo/                              # Qt 6 Demo，**经 capi 调引擎**（P5 第六刀）
+├── demo/ *                            # Qt 6 Demo，**经 capi 调引擎**（默认不构建）
+│   ├── Theme/Icons/Avatar/ControlButton/VideoTile *   # 设计令牌与组件，图标是稿子里那份 SVG
+│   ├── EngineBridge *                 # C ABI 回调 → Qt 信号；QTimer 驱动 tick
+│   ├── LoginPage/DialPage/HistoryPage/SettingsPage/CallOverlay/MainWindow *
+│   └── Shots.cpp *                    # 离线把各界面态渲染成 PNG，不连服务端
+├── docs/INTEGRATION_GUIDE.md *        # **《接入指南》**，给宿主看
 ├── tests/ *                           # 自制 harness（120 行）+ 五份向量的 runner
 └── scripts/ *                         # 门禁与测试入口
 ```

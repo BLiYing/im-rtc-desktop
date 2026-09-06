@@ -6,8 +6,8 @@
 
 ## 当前焦点
 
-**P5 进行中。第一~三刀 + 门面 + 媒体面接线 + 第五刀 capi 已落地。**
-`./scripts/test.sh` **65 个用例全绿**（macOS），约 10100 行 C++17。
+**P5 进行中。第一~三刀 + 门面 + 媒体面接线 + 第五刀 capi + 第六刀 Qt Demo 已落地。**
+`./scripts/test.sh` **65 个用例全绿**（macOS），约 14100 行 C++17。
 落地明细见 [current_task.archive.md](current_task.archive.md)。
 
 **对外交付物已经成立**：`libim_rtc_engine_capi.dylib` + 一个 C 头，
@@ -20,17 +20,24 @@
 真正的 `WebRTCAdapter` **等 Apple Silicon 或 Windows 机器**再做。在那之前
 **桌面端按纯信令模式交付**：能拨号、能进房、能收到全部状态回调，就是没有声音和画面。
 
-**Qt 6.8.3 已装好并验证过**（2026-09-06，`~/Qt/6.8.3/macos`，占 1.8 GB）：
-用 `aqt install-qt mac desktop 6.8.3 clang_64 --archives qtbase qtsvg qttranslations qttools`，
-官方包是 universal（`x86_64 arm64`），本机 Intel 真出窗口，`qtbase_zh_CN` 生效。
+**Qt 6.8.3 已装好**（2026-09-06，`~/Qt/6.8.3/macos`，占 1.8 GB）：
+`aqt install-qt mac desktop 6.8.3 clang_64 --archives qtbase qtsvg qttranslations qttools`，
+官方包是 universal（`x86_64 arm64`），Intel Mac 上正常。
 
-**还没有的**：真实媒体（没有 SDP、没有 ICE、没有声音画面）、设备枚举、Qt Demo。
-**Windows 一次都没编译过。**
+**第六刀已落地**：`demo/` 四屏（登录 / 拨号 / 记录 / 设置）+ 通话浮窗四态 + 九宫格，
+**经 C ABI 调引擎**；已对着真服务端跑通一轮（自动登录 → 拨不在线的人 →
+`call.ended{offline}` → 落一条带真 `call_id` 的记录）。
+《接入指南》在 [docs/INTEGRATION_GUIDE.md](docs/INTEGRATION_GUIDE.md)。
+`IMRTC_BUILD_DEMO` 默认 OFF——engine 与测试不依赖 Qt 这条不能破。
+
+**还没有的**：真实媒体（没有 SDP、没有 ICE、没有声音画面）、设备枚举、
+渲染 A/B、共享屏幕、C# 绑定。**Windows 一次都没编译过。**
 
 ## 下一步
 
-1. **P5 第六刀 · Qt Demo + 《接入指南》**：四屏，**经 capi 调引擎**。这一刀要装 Qt 6，
-   但不需要 libwebrtc——纯信令模式下四屏的状态流转都能演。
+1. **两端互打一轮**：起两个 Demo（`./scripts/demo.sh alice` / `./scripts/demo.sh bob`），
+   真的拨通一次 1v1 与一次群通话，把成员事件、九宫格状态、通话记录都过一遍。
+   现在只验过「拨不在线的人」这一条终局分支。
 2. ~~**P5 第四刀下半 · `WebRTCAdapter`**~~ —— **已推迟，不在当前排期内**（2026-09-06 定）。
    等 Apple Silicon 或 Windows 机器到手再做，做完与 Web/iOS 各互打一次。
 3. **按需**：C# / P&#8203;Invoke 绑定（C ABI 已经定型，这一层是薄的）。
@@ -75,6 +82,15 @@
   必须直接查 SDK 目录。修法已进 Demo 的 `CMakeLists.txt`，也要写进《接入指南》——
   集成方只要是 Xcode 26 + Qt 6.8 就会撞同一个坑。
 - **Demo 必须经 capi 调引擎**。走内部 C++ 接口会掩盖全部 ABI 问题，那样「Demo 跑通」不等于「宿主接得通」。
+  已经是这么接的（`demo/EngineBridge.cpp` 用 `imrtc::capi::Engine`，链的是动态库）。
+- **本机 `lupdate` 跑不起来**：Qt 6.8 的 lupdate 链了 QtQml，而我们没装 qtdeclarative
+  （省了 430 MB 下载 / 约 2.8 GB 磁盘）。所以 `demo/i18n/imrtc_demo_en.ts` 目前是
+  **手工维护**的，132 条；`lrelease` 只依赖 QtCore，构建正常。
+  装了 qtdeclarative 的机器上 `--target update_translations` 就能接管。
+  **加了新的 tr() 之后记得同步 .ts**，否则那条在英文下会退回中文（不会报错）。
+- **静音 / 摄像头按钮在 Demo 里是禁用态**：没接媒体适配器时引擎的 `openMic()`
+  是**静默空操作**，留个假开关比画成禁用更糟。`WebRTCAdapter` 落地后
+  把 `CallOverlay` 里的 `setBlocked({})` 打开即可。
 - **`engine/` 里出现任何 `Q` 开头的类型 = 直接打回**（CONVENTIONS §1）。WS 换独立库，
   TLS 复用 libwebrtc 自带的 BoringSSL，不再引第二份 OpenSSL。
 - **C ABI 的头号崩因是生命周期**：`destroy` 必须阻塞到所有回调线程静默；宿主是 C#/Java 这类

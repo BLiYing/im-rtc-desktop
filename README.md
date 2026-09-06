@@ -89,6 +89,11 @@ engine 与 31 个用例照样能编能跑（少掉的 5 个是 IxTransport 的�
   媒体就绪、终局归零）。**真适配器还没有**——见上面的 libwebrtc 平台问题
 - **C ABI 交付物**：`libim_rtc_engine_capi.dylib` + `imrtc_c.h` + header-only C++ 包装。
   **导出面只有 25 个 `imrtc_v1_*` 符号**，`scripts/check-abi.sh` 守着（已进 test.sh）
+- **Qt 6 Demo**：四屏（登录 / 拨号 / 记录 / 设置）+ 通话浮窗四态 + 九宫格，
+  **经 C ABI 调引擎**，与集成方同一条路。默认不构建（`IMRTC_BUILD_DEMO=OFF`）——
+  engine 与测试不该因为一个 Demo 就依赖 Qt
+- **《接入指南》**：[docs/INTEGRATION_GUIDE.md](docs/INTEGRATION_GUIDE.md)，
+  给「要把它装进自己 Windows / macOS 应用」的人看，不必读引擎源码
 
 约 10100 行 C++17。`./scripts/test.sh` **65 个用例全绿**（macOS），
 ASan / UBSan / TSan 都干净。
@@ -98,9 +103,17 @@ ASan / UBSan / TSan 都干净。
 
 ```bash
 cd ../im-rtc-server && ./scripts/dev.sh     # 起本地服务端
-cd -                && ./scripts/smoke.sh   # 跑一轮
+cd -                && ./scripts/smoke.sh   # 跑一轮（命令行）
+./scripts/demo.sh alice bob                 # 跑一轮（Qt Demo，要装 Qt 6）
+./scripts/demo-shots.sh                     # 不要服务端，把各界面态渲染成 PNG
 ```
 
-**还没有的**：真实媒体实现（`WebRTCAdapter`）、设备枚举、Qt Demo。
+装 Qt 6（macOS，最小集，实测 1.8 GB）：
+
+```bash
+pip install aqtinstall && aqt install-qt mac desktop 6.8.3 clang_64 --archives qtbase qtsvg qttranslations qttools -O ~/Qt
+```
+
+**还没有的**：真实媒体实现（`WebRTCAdapter`，已决定推迟等机器）、设备枚举、共享屏幕。
 **Windows 一次都没编译过。**
 逐层状态见 `im-rtc-server/docs/CLIENT_PARITY.md` §1.1，本文不重复。
