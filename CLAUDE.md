@@ -65,10 +65,11 @@ im-rtc-desktop/
 │       ├── media/ *                   # MediaPlane：信令 ↔ 媒体的接线（**不做决策**）
 │       │   └── （WebRTCAdapter —— 要 libwebrtc，见技术栈里的平台问题）
 │       └── devices/                   # 麦克风/摄像头/扬声器枚举与切换（待做）
-├── capi/                              # **对外唯一边界**（P5 第五刀）
-│   ├── include/imrtc/imrtc_c.h        # 纯 C 头：不透明句柄 + POD + 函数指针回调
-│   ├── include/imrtc/CallEngine.hpp   # header-only C++ RAII 包装（自己也走 C ABI）
-│   └── src/                           # C++ → C 的转换层（异常在这里被吃掉转错误码）
+├── capi/ *                            # **对外唯一边界**
+│   ├── include/imrtc/imrtc_c.h *      # 纯 C 头：不透明句柄 + POD + 函数指针回调
+│   ├── include/imrtc/CallEngine.hpp * # header-only C++ RAII 包装（**自己也走 C ABI**）
+│   ├── exported_symbols.txt *         # 导出白名单——-fvisibility 挡不住 libc++ 的 RTTI
+│   └── src/ *                         # C++ → C 的转换层（异常在这里被吃掉转错误码）
 ├── tools/ *                           # 联调工具（需要真服务端，不进 test.sh）
 │   └── Smoke.cpp *                    # 握手 → 拨号 → 终局，跑一轮给人看
 ├── demo/                              # Qt 6 Demo，**经 capi 调引擎**（P5 第六刀）
@@ -99,7 +100,9 @@ im-rtc-desktop/
 3. 更新 `current_task.md`；里程碑完成同步更新 server 仓设计文档 §10 的状态与日期（YYYY-MM-DD）。
 4. 明确说清楚「没做什么 / 已知限制 / TODO」，不假装完成。
 5. **C ABI 冒烟测试要过**（create → 注册回调 → 调用 → destroy，ASan 干净），
+   **导出面体检要过**（`scripts/check-abi.sh`，只许 `imrtc_v1_*`），
    且 Qt Demo **确实是经 capi 调的引擎**——走内部 C++ 接口会掩盖全部 ABI 问题。
+   联调工具 `tools/Smoke.cpp` 已经是这么走的，照着它写。
 6. **两个平台都要说清楚状态**：只在 macOS 编译过就明说 Windows 未验证。
    本机是 macOS，**Windows 侧验证需要集成方配合**——不许把「macOS 过了」写成「桌面端完成」。
 
@@ -111,7 +114,7 @@ im-rtc-desktop/
 ```bash
 ./scripts/install-hooks.sh                     # 新 clone 跑一次
 cmake --preset macos-clang && cmake --build --preset macos-clang
-./scripts/test.sh                              # 唯一测试入口：体量 + 配置 + 编译 + 单测
+./scripts/test.sh                              # 唯一入口：体量 + 配置 + 编译 + 单测 + ABI 导出面
 ```
 > 脚本与 CMake 工程随 P5 落地补齐；当前仓库只有文档与体量门禁。
 
