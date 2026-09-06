@@ -46,6 +46,20 @@ private:
   std::int32_t code_ = IMRTC_V1_OK;
 };
 
+/** 一个正在说话的人，对应 `imrtc_v1_speaker`。volume 0~100。 */
+struct Speaker {
+  std::string uid;
+  std::string participantId;
+  std::int64_t volume = 0;
+};
+
+/** 一个人的网络质量，对应 `imrtc_v1_quality`。level 0~6（0 = unknown）。 */
+struct Quality {
+  std::string uid;
+  std::string participantId;
+  std::int64_t level = 0;
+};
+
 /**
  * Observer 是回调基类。方法都有空实现，只覆盖关心的那几个。
  *
@@ -75,13 +89,37 @@ public:
                          std::int64_t durationSec, const std::string& endedBy) {
     (void)callId; (void)reason; (void)durationSec; (void)endedBy;
   }
+  /** 通话中被第三个人呼叫、服务端已替你回了忙线。**不是**一次需要你处理的来电。 */
+  virtual void onCallMissed(const std::string& callId, const std::string& caller,
+                            const std::string& reason) {
+    (void)callId; (void)caller; (void)reason;
+  }
+  virtual void onCallCancelled(const std::string& by) { (void)by; }
+  virtual void onCallRejected(const std::string& uid) { (void)uid; }
+  virtual void onCallBusy(const std::string& uid) { (void)uid; }
+  virtual void onCallNoAnswer(const std::string& uid) { (void)uid; }
+  /** 同一账号的另一台设备接了或拒了。action 是 "accepted" / "rejected"。 */
+  virtual void onHandledOnOtherDevice(const std::string& callId, const std::string& action) {
+    (void)callId; (void)action;
+  }
+
   virtual void onUserEnter(const std::string& uid) { (void)uid; }
   virtual void onUserLeave(const std::string& uid) { (void)uid; }
   virtual void onUserAccept(const std::string& uid) { (void)uid; }
+  virtual void onUserReject(const std::string& uid) { (void)uid; }
+  virtual void onUserNoResponse(const std::string& uid) { (void)uid; }
   virtual void onUserAudioAvailable(const std::string& uid, bool available) { (void)uid; (void)available; }
   virtual void onUserVideoAvailable(const std::string& uid, bool available) { (void)uid; (void)available; }
+
+  /** 数组已经拷成 vector，随便往后传。 */
+  virtual void onActiveSpeakers(const std::vector<Speaker>& speakers) { (void)speakers; }
+  virtual void onNetworkQuality(const std::vector<Quality>& entries) { (void)entries; }
+
   virtual void onRoomJoined(const std::string& roomId) { (void)roomId; }
   virtual void onRoomLeft(const std::string& roomId) { (void)roomId; }
+  virtual void onRoomClosed(const std::string& roomId, const std::string& reason) {
+    (void)roomId; (void)reason;
+  }
 };
 
 /** Engine 是句柄的 RAII 包装：构造即创建，析构即销毁（并等回调静默）。 */
@@ -125,13 +163,24 @@ public:
     table.on_call_received = &Engine::cbCallReceived;
     table.on_call_begin = &Engine::cbCallBegin;
     table.on_call_end = &Engine::cbCallEnd;
+    table.on_call_missed = &Engine::cbCallMissed;
+    table.on_call_cancelled = &Engine::cbCallCancelled;
+    table.on_call_rejected = &Engine::cbCallRejected;
+    table.on_call_busy = &Engine::cbCallBusy;
+    table.on_call_no_answer = &Engine::cbCallNoAnswer;
+    table.on_handled_on_other_device = &Engine::cbHandledOnOtherDevice;
     table.on_user_enter = &Engine::cbUserEnter;
     table.on_user_leave = &Engine::cbUserLeave;
     table.on_user_accept = &Engine::cbUserAccept;
+    table.on_user_reject = &Engine::cbUserReject;
+    table.on_user_no_response = &Engine::cbUserNoResponse;
     table.on_user_audio_available = &Engine::cbAudioAvailable;
     table.on_user_video_available = &Engine::cbVideoAvailable;
+    table.on_active_speakers = &Engine::cbActiveSpeakers;
+    table.on_network_quality = &Engine::cbNetworkQuality;
     table.on_room_joined = &Engine::cbRoomJoined;
     table.on_room_left = &Engine::cbRoomLeft;
+    table.on_room_closed = &Engine::cbRoomClosed;
     return call(imrtc_v1_engine_set_observer(handle_, &table));
   }
 
@@ -239,6 +288,26 @@ private:
     if (o == nullptr || end == nullptr) return;
     o->onCallEnd(text(end->call_id), text(end->reason), end->duration_sec, text(end->ended_by));
   }
+  static void cbCallMissed(void* u, const imrtc_v1_call_missed* missed) {
+    Observer* o = self(u);
+    if (o == nullptr || missed == nullptr) return;
+    o->onCallMissed(text(missed->call_id), text(missed->caller), text(missed->reason));
+  }
+  static void cbCallCancelled(void* u, const char* by) {
+    if (Observer* o = self(u)) o->onCallCancelled(text(by));
+  }
+  static void cbCallRejected(void* u, const char* uid) {
+    if (Observer* o = self(u)) o->onCallRejected(text(uid));
+  }
+  static void cbCallBusy(void* u, const char* uid) {
+    if (Observer* o = self(u)) o->onCallBusy(text(uid));
+  }
+  static void cbCallNoAnswer(void* u, const char* uid) {
+    if (Observer* o = self(u)) o->onCallNoAnswer(text(uid));
+  }
+  static void cbHandledOnOtherDevice(void* u, const char* callId, const char* action) {
+    if (Observer* o = self(u)) o->onHandledOnOtherDevice(text(callId), text(action));
+  }
   static void cbUserEnter(void* u, const char* uid) {
     if (Observer* o = self(u)) o->onUserEnter(text(uid));
   }
@@ -248,17 +317,46 @@ private:
   static void cbUserAccept(void* u, const char* uid) {
     if (Observer* o = self(u)) o->onUserAccept(text(uid));
   }
+  static void cbUserReject(void* u, const char* uid) {
+    if (Observer* o = self(u)) o->onUserReject(text(uid));
+  }
+  static void cbUserNoResponse(void* u, const char* uid) {
+    if (Observer* o = self(u)) o->onUserNoResponse(text(uid));
+  }
   static void cbAudioAvailable(void* u, const char* uid, imrtc_v1_bool available) {
     if (Observer* o = self(u)) o->onUserAudioAvailable(text(uid), available != 0);
   }
   static void cbVideoAvailable(void* u, const char* uid, imrtc_v1_bool available) {
     if (Observer* o = self(u)) o->onUserVideoAvailable(text(uid), available != 0);
   }
+  static void cbActiveSpeakers(void* u, const imrtc_v1_speaker* items, std::uint32_t count) {
+    Observer* o = self(u);
+    if (o == nullptr) return;
+    std::vector<Speaker> out;
+    out.reserve(count);
+    for (std::uint32_t i = 0; i < count; ++i) {
+      out.push_back(Speaker{text(items[i].uid), text(items[i].participant_id), items[i].volume});
+    }
+    o->onActiveSpeakers(out);
+  }
+  static void cbNetworkQuality(void* u, const imrtc_v1_quality* items, std::uint32_t count) {
+    Observer* o = self(u);
+    if (o == nullptr) return;
+    std::vector<Quality> out;
+    out.reserve(count);
+    for (std::uint32_t i = 0; i < count; ++i) {
+      out.push_back(Quality{text(items[i].uid), text(items[i].participant_id), items[i].level});
+    }
+    o->onNetworkQuality(out);
+  }
   static void cbRoomJoined(void* u, const char* roomId) {
     if (Observer* o = self(u)) o->onRoomJoined(text(roomId));
   }
   static void cbRoomLeft(void* u, const char* roomId) {
     if (Observer* o = self(u)) o->onRoomLeft(text(roomId));
+  }
+  static void cbRoomClosed(void* u, const char* roomId, const char* reason) {
+    if (Observer* o = self(u)) o->onRoomClosed(text(roomId), text(reason));
   }
 
   imrtc_v1_engine* handle_ = nullptr;
