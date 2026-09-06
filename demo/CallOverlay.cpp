@@ -278,6 +278,20 @@ void CallOverlay::onMemberAudio(const QString& uid, bool available) {
   if (VideoTile* tile = tileFor(uid)) tile->setMuted(!available);
 }
 
+void CallOverlay::onMemberVideo(const QString& uid, bool available) {
+  // 这一条就是渲染路径 A 的触发点：对端一发布视频轨，格子就建原生子窗口
+  // 并把句柄递给引擎。对端关摄像头就摘掉。
+  if (VideoTile* tile = tileFor(uid)) tile->setVideoAvailable(available);
+}
+
+void CallOverlay::setFakeVideo(bool on) {
+  fakeVideo_ = on;
+  for (auto it = tiles_.begin(); it != tiles_.end(); ++it) {
+    it.value()->setTestPatternEnabled(on);
+    it.value()->setVideoAvailable(on);
+  }
+}
+
 void CallOverlay::onSpeakers(const QList<SpeakerInfo>& speakers) {
   QStringList talking;
   for (const SpeakerInfo& speaker : speakers) talking << speaker.uid;
@@ -313,11 +327,21 @@ void CallOverlay::rebuildTiles() {
   int index = 0;
   for (const QString& uid : everyone) {
     auto* tile = new VideoTile(gridPane_);
+    // **先接线再设状态。**顺序反了的话 setVideoAvailable(true) 发出的
+    // attachRequested 落在没人监听的地方，引擎永远拿不到句柄——
+    // 而界面看起来一切正常，这类 bug 只能靠日志里"少了一行"发现。
+    connect(tile, &VideoTile::attachRequested, this, &CallOverlay::attachViewRequested);
+    connect(tile, &VideoTile::detachRequested, this, &CallOverlay::detachViewRequested);
+
     tile->setIdentity(uid, uid);
     tile->setSelf(uid == selfUid_);
     // 拨出中时除自己外都还在振铃——这一格的「呼叫中…」是真的，由回调翻转。
     tile->setState(uid == selfUid_ || phase_ == Phase::Connected ? VideoTile::State::Present
                                                                  : VideoTile::State::Ringing);
+    if (fakeVideo_) {
+      tile->setTestPatternEnabled(true);
+      tile->setVideoAvailable(true);
+    }
     grid_->addWidget(tile, index / kGridColumns, index % kGridColumns);
     tiles_.insert(uid, tile);
     ++index;

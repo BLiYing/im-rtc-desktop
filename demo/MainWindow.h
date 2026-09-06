@@ -52,6 +52,12 @@ public:
    */
   void setAutomation(bool autoAccept, int hangupAfterSec, const QString& autoInvite);
 
+  /**
+   * 联调用：把每个格子都当成"有画面"。用来在**没有媒体**的情况下验
+   * 渲染路径 A 的宿主侧——原生子窗口的层级 / 缩放 / DPI / 生命周期。
+   */
+  void setFakeVideo(bool on);
+
 protected:
   void resizeEvent(QResizeEvent* event) override;
   void changeEvent(QEvent* event) override;
@@ -106,6 +112,7 @@ private:
   CallRecord pending_;
   bool hasPending_ = false;
 
+  bool fakeVideo_ = false;
   bool autoAccept_ = false;
   int hangupAfterSec_ = 0;
   QString autoInvite_;

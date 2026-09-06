@@ -87,6 +87,12 @@ public:
 
   void setSelfUid(const QString& uid) { selfUid_ = uid; }
 
+  /**
+   * 联调用：把每个格子都当成"有画面"，并在原生层上贴测试图案。
+   * 用来在**没有媒体**的情况下验渲染路径 A 的宿主侧（层级 / 缩放 / DPI / 生命周期）。
+   */
+  void setFakeVideo(bool on);
+
   /* ---- 成员事件：全部由回调驱动 ---- */
   void onMemberEntered(const QString& uid);
   void onMemberLeft(const QString& uid);
@@ -94,6 +100,7 @@ public:
   void onMemberRejected(const QString& uid);
   void onMemberNoResponse(const QString& uid);
   void onMemberAudio(const QString& uid, bool available);
+  void onMemberVideo(const QString& uid, bool available);
   void onSpeakers(const QList<SpeakerInfo>& speakers);
   void onQuality(const QList<QualityInfo>& entries);
   void onReconnecting(bool reconnecting);
@@ -107,6 +114,9 @@ signals:
   void inviteMoreRequested();
   /** 点了禁用按钮：上层弹提示，不能静默。 */
   void notice(const QString& message);
+  /** 渲染路径 A：句柄只在下一次 `detachViewRequested` 之前有效。 */
+  void attachViewRequested(const QString& uid, void* nativeHandle);
+  void detachViewRequested(const QString& uid);
   void closed();
 
 protected:
@@ -154,6 +164,7 @@ private:
   ControlButton* answer_ = nullptr;
 
   QHash<QString, VideoTile*> tiles_;
+  bool fakeVideo_ = false;
   QTimer* clock_ = nullptr;
   QTimer* autoClose_ = nullptr;
 };

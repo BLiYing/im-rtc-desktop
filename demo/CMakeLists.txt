@@ -60,6 +60,7 @@ qt_add_library(imrtc_demo_ui STATIC
   Avatar.cpp
   ControlButton.cpp
   VideoTile.cpp
+  NativeSurface.cpp
   CallOverlay.cpp
   Language.cpp
   EngineBridge.cpp
@@ -72,6 +73,14 @@ qt_add_library(imrtc_demo_ui STATIC
   MainWindow.cpp
 )
 target_include_directories(imrtc_demo_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+
+# 渲染路径 A 的假渲染器是平台代码：macOS 走 CALayer（ObjC++），别的平台先占位。
+if(APPLE)
+  target_sources(imrtc_demo_ui PRIVATE NativeSurfacePattern_mac.mm)
+  target_link_libraries(imrtc_demo_ui PRIVATE "-framework AppKit" "-framework QuartzCore")
+else()
+  target_sources(imrtc_demo_ui PRIVATE NativeSurfacePattern_stub.cpp)
+endif()
 
 qt_add_executable(imrtc_demo main.cpp)
 qt_add_executable(imrtc_demo_shots Shots.cpp)
@@ -113,10 +122,13 @@ endforeach()
 # 目前就一条：红按钮到底调哪个方法（见 OverlayActionsTest.cpp 顶部注释）。
 find_package(Qt6 6.5 QUIET COMPONENTS Test)
 if(Qt6Test_FOUND)
-  qt_add_executable(imrtc_demo_tests tests/OverlayActionsTest.cpp)
-  target_link_libraries(imrtc_demo_tests PRIVATE imrtc_demo_ui Qt6::Test imrtc_warnings)
-  add_test(NAME imrtc_demo_tests COMMAND imrtc_demo_tests)
-  list(APPEND _imrtc_demo_targets imrtc_demo_tests)
+  # 每个测试一个可执行文件（QTEST_MAIN 自带 main）。
+  foreach(_case OverlayActions NativeSurface)
+    qt_add_executable(imrtc_demo_${_case}_test tests/${_case}Test.cpp)
+    target_link_libraries(imrtc_demo_${_case}_test PRIVATE imrtc_demo_ui Qt6::Test imrtc_warnings)
+    add_test(NAME imrtc_demo_${_case} COMMAND imrtc_demo_${_case}_test)
+    list(APPEND _imrtc_demo_targets imrtc_demo_${_case}_test)
+  endforeach()
 else()
   message(STATUS "没有 Qt6::Test，跳过 Demo 界面测试")
 endif()

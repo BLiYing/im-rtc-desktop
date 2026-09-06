@@ -265,7 +265,101 @@ const QString caption = (isGroup || isMeetingRoom) ? "离开" : "挂断";
 
 ---
 
-## 7. 各宿主怎么接
+## 7. 渲染路径 A：把画面交给引擎
+
+`imrtc_v1_attach_view(engine, uid, nativeHandle)`：你给一个原生窗口句柄
+（macOS `NSView*`、Windows `HWND`），引擎把那个人的画面画进去。零拷贝，性能最好，
+**默认推荐**。传 `nullptr` 卸载。
+
+自绘宿主走路径 B（原始帧回调），那条口子等媒体落地后开。
+
+### 7.1 Qt 里怎么拿到句柄
+
+```cpp
+class VideoSurface : public QWidget {
+public:
+  explicit VideoSurface(QWidget* parent) : QWidget(parent) {
+    setAttribute(Qt::WA_NativeWindow, true);            // 真的有一个 NSView / HWND
+    setAttribute(Qt::WA_DontCreateNativeAncestors, true);  // 别把祖先一路提升
+    setAttribute(Qt::WA_OpaquePaintEvent, true);
+    setAttribute(Qt::WA_NoSystemBackground, true);
+  }
+  void* handle() { return reinterpret_cast<void*>(winId()); }
+};
+```
+
+`WA_DontCreateNativeAncestors` 不是可选项：不加的话 Qt 会把整条父链都变成原生窗口，
+连累其他控件的绘制与 z 序。
+
+### 7.2 **原生子窗口会盖住同一个窗口里所有 Qt 绘制**
+
+这是最容易吃亏的一条，而且**与 Qt 的 z 序无关**——`raise()` / `stackUnder()` 都没用。
+macOS 上原生子窗口按 NSView 的兄弟顺序合成，Qt 自己画的内容一律在它们之下。
+
+后果很具体：格子上的名字标签、静音角标、"正在说话"的绿色描边，只要是
+`paintEvent` 画的，画面一来就**整块消失**。
+
+解法是把这些东西放进**画面之后创建的另一个原生子窗口**：
+
+```cpp
+surface = new VideoSurface(tile);      // 先建画面
+surface->show();
+chrome  = new TileChrome(tile);        // 再建外壳，于是它在上面
+chrome->setAttribute(Qt::WA_TranslucentBackground, true);
+chrome->setAttribute(Qt::WA_TransparentForMouseEvents, true);  // 别挡住点击
+chrome->show();
+```
+
+参考实现见 `demo/VideoTile.cpp` 的 `TileChrome`。
+
+### 7.3 **原生视图的尺寸滞后于 Qt 的 `resizeEvent`**
+
+`QWidget::resizeEvent` 触发时，Qt 还没把新几何推给底层的 `NSView`。
+这时去读 `view.layer.bounds` 拿到的是**上一次**的尺寸，而且**不会再有第二次
+resizeEvent 来纠正**——画面就永远卡在初始大小，格子边上露出一条底色。
+
+实测数据：格子 157×92、Qt 控件 153×88，而 layer 停在 116×86（那是格子的最小尺寸）。
+
+所以同步几何要**以 Qt 控件的尺寸为准**，或者在原生那一侧用 AppKit 自己的机制
+（`NSViewFrameDidChangeNotification` / `autoresizingMask`）。
+
+**两种伸缩机制不能同时开**：试过 `autoresizingMask` 叠加显式 `frame`，
+结果两者相乘——控件 153×88，层变成 190×90。
+
+### 7.4 生命周期：**先 detach，再销毁窗口**
+
+```cpp
+engine.attachView(uid, nullptr);   // 先摘
+delete surface;                    // 再拆
+```
+
+反过来的话引擎手里剩的是一个已销毁的 `NSView` / `HWND`，下一帧画上去就崩，
+而且崩在引擎的线程上，栈里看不到你的界面代码。
+
+### 7.5 截图：`QWidget::grab()` 会抓到**上一帧**
+
+做 UI 回归时会踩：`grab()` **能**看到原生子窗口，但内容可能滞后一帧。
+实测（Qt 6.8.3 / macOS，逐像素平均每通道差值）：
+
+| 抓法 | 与系统合成的差 |
+|---|---|
+| `QWidget::grab()` 单独跑 | **5.11 / 255**（原生层只画了一半） |
+| 先跑一次 `QScreen::grabWindow` 再 `grab()` | 0.54 / 255 |
+| `QScreen::grabWindow(winId)` | 基准 |
+
+试过 `[CATransaction flush]`，没用。**带画面的界面要截图，用
+`QScreen::grabWindow`**（它在某些环境需要「屏幕录制」授权，拿不到就要说清楚，
+别拿一张滞后的图当证据）。
+
+### 7.6 当前状态
+
+上面这些**宿主侧**的坑已经在 `demo/` 里走通并有回归测试
+（`demo/tests/NativeSurfaceTest.cpp`）。但**引擎侧还没有画面**：
+没有媒体适配器时 `imrtc_v1_attach_view` 直接返回，连轨道都不去解析。
+也就是说这条线现在是**接好了但没通电**——等 `WebRTCAdapter` 落地就自动生效，
+你这边不用改。
+
+## 8. 各宿主怎么接
 
 ### Qt
 
@@ -293,7 +387,7 @@ const QString caption = (isGroup || isMeetingRoom) ? "离开" : "挂断";
 
 ---
 
-## 8. 构建与平台
+## 9. 构建与平台
 
 ### 结构体的兼容规矩
 
@@ -343,7 +437,7 @@ const QString caption = (isGroup || isMeetingRoom) ? "离开" : "挂断";
 
 ---
 
-## 9. 当前构建**没有**什么
+## 10. 当前构建**没有**什么
 
 不写清楚这一段的话，你会按 Demo 的外观推断出错误的结论。
 

@@ -15,6 +15,8 @@
  *   --hangup-after 5                 接通 / 进房 5 秒后自动退出（联调用）
  *   --invite dave                    接通后立刻 invite_more 一个人（只有主叫能发）
  *   --room   new | 8827-1190         走会议房那条路：new 表示先建一个
+ *   --fake-video                     每个格子都当成有画面并贴测试图案。
+ *                                    用来在没有媒体的情况下验渲染路径 A 的宿主侧。
  *
  * `--profile` 是给「同一台机器上开两个实例互打」用的。macOS 的
  * QStandardPaths **不理会 $HOME**（它走的是密码库里的真实家目录），
@@ -81,7 +83,12 @@ int main(int argc, char** argv) {
   parser.addOption(autoAcceptOption);
   parser.addOption(hangupAfterOption);
   parser.addOption(inviteOption);
+  const QCommandLineOption fakeVideoOption(
+      QStringLiteral("fake-video"),
+      QCoreApplication::translate(
+          "main", "每个格子都当成有画面并贴测试图案，验渲染路径 A 的宿主侧。"));
   parser.addOption(roomOption);
+  parser.addOption(fakeVideoOption);
   parser.process(app);
 
   // applicationName 决定 QSettings 与 AppDataLocation 的位置，所以要在
@@ -98,6 +105,7 @@ int main(int argc, char** argv) {
   window.setAutomation(parser.isSet(autoAcceptOption),
                        parser.value(hangupAfterOption).toInt(),
                        parser.value(inviteOption));
+  window.setFakeVideo(parser.isSet(fakeVideoOption));
   window.show();
 
   if (parser.isSet(userOption)) {

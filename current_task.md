@@ -7,8 +7,8 @@
 ## 当前焦点
 
 **P5 进行中。第一~三刀 + 门面 + 媒体面接线 + 第五刀 capi + 第六刀 Qt Demo 已落地。**
-`./scripts/test.sh` **七步全绿**（macOS）：65 个引擎用例 + 10 个 Demo 界面用例，
-约 14300 行 C++17。第七步只在 `IMRTC_BUILD_DEMO=ON` 时存在（需要 Qt）。
+`./scripts/test.sh` **七步全绿**（macOS）：65 个引擎用例 + 19 个 Demo 界面用例，
+约 14900 行 C++17。第七步只在 `IMRTC_BUILD_DEMO=ON` 时存在（需要 Qt）。
 落地明细见 [current_task.archive.md](current_task.archive.md)。
 
 **对外交付物已经成立**：`libim_rtc_engine_capi.dylib` + 一个 C 头，
@@ -42,15 +42,20 @@
 《接入指南》在 [docs/INTEGRATION_GUIDE.md](docs/INTEGRATION_GUIDE.md)。
 `IMRTC_BUILD_DEMO` 默认 OFF——engine 与测试不依赖 Qt 这条不能破。
 
+**渲染路径 A 的宿主侧已经走通**（2026-09-06）：格子里真的塞了原生子窗口
+（macOS `NSView*`），句柄经 `attachView` 递给引擎，几何 / DPI / 生命周期都有回归测试。
+**但引擎侧没通电**——没有媒体适配器时 `attachView` 直接返回。等 `WebRTCAdapter`
+落地就自动生效，Demo 这边不用改。用 `--fake-video` 可以看到它。
+
 **还没有的**：真实媒体（没有 SDP、没有 ICE、没有声音画面）、设备枚举、
-渲染 A/B、共享屏幕、C# 绑定。**Windows 一次都没编译过。**
+渲染路径 B（原始帧回调）、共享屏幕、C# 绑定。**Windows 一次都没编译过。**
 
 ## 下一步
 
-1. **渲染路径 A/B 的口子**（`attachView` 收 `NSView*` / `HWND`；原始帧回调）——
-   接口已经在 C ABI 里留好了，但没有实现，要等 `WebRTCAdapter`。
-   在那之前可以先把**格子接受一个原生子窗口**这件事在 Qt 侧走通（贴一个纯色层验证），
-   免得媒体到位那天才发现窗口层级 / 缩放 / 多屏 DPI 有坑。
+1. **1v1 那一屏也接上渲染路径 A**：现在只有九宫格的格子有原生子窗口，
+   1v1 的大画面（远端铺满 + 本端 160×90 小窗，草图 §06-R）还是头像。
+   坑应该与格子那批同类，但**本端小窗压在远端画面之上**是新的一层，值得单独验。
+2. **渲染路径 B（原始帧回调）**：C ABI 里还没有这个口子，等媒体落地一起开。
 2. ~~**P5 第四刀下半 · `WebRTCAdapter`**~~ —— **已推迟，不在当前排期内**（2026-09-06 定）。
    等 Apple Silicon 或 Windows 机器到手再做，做完与 Web/iOS 各互打一次。
    - **做的时候别漏 ICE 重启**（协议 §3.3，2026-09-06 夜四端已落地，桌面端是唯一还没有的）：
@@ -123,6 +128,18 @@
 
   代价是 `demo/i18n/imrtc_demo_en.ts`（132 条）**手工维护**：
   **加了新的 `tr()` 之后记得同步 .ts**，否则那条在英文下会静默退回中文，不报错。
+- **原生子窗口会盖住同一个窗口里所有 Qt 绘制**，与 Qt 的 z 序无关（`raise()` 没用）。
+  所以格子的名字标签 / 静音角标 / 发言描边不能由格子自己 `paintEvent` 画——
+  必须放进**画面之后创建的另一个原生子窗口**（`demo/VideoTile.cpp` 的 `TileChrome`）。
+- **原生视图的尺寸滞后于 Qt 的 `resizeEvent`**：那一刻读 `view.layer.bounds`
+  拿到的是上一次的值，而且**不会再有第二次 resizeEvent 来纠正**。
+  实测格子 157×92 / 控件 153×88 / layer 停在 116×86。几何一律**以 Qt 控件尺寸为准**。
+  另：`autoresizingMask` 与显式 `frame` **不能同时开**，会相乘（153×88 → 190×90）。
+- **带原生子窗口的界面截图要用 `QScreen::grabWindow`**。`QWidget::grab()` 能看到
+  原生层但**内容滞后一帧**（实测与系统合成差 5.11/255，先跑一次系统合成后只差 0.54）。
+  `[CATransaction flush]` 不管用。`screencapture` 那条路要「屏幕录制」授权。
+- **test.sh 里不许写死测试可执行文件名**：按用例分文件之后，写死会在改名后
+  **静默跑一个过时的二进制**。已经踩过一次，现在是遍历 `imrtc_demo_*_test`。
 - **红按钮：动作按「有没有 call」分叉，文案按人数分叉——依据不一样，别混。**
   会议房 → `leaveRoom()`；**1v1 与群通话都是 `hangup()`**（接通前 cancel/reject）。
   文案则是 1v1「挂断」、群通话与会议房「离开」。

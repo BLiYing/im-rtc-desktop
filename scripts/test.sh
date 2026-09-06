@@ -57,10 +57,19 @@ echo ""
 echo "== 7/7 Demo 界面测试 =="
 # Demo 默认不构建，所以这一步通常是跳过的。有它的时候必须跑：
 # 它守的是「看代码看不出来、跑真服务端才暴露」的那类规则。
-if [ -x "build/${PRESET}/demo/imrtc_demo_tests" ]; then
-  QT_QPA_PLATFORM=offscreen "./build/${PRESET}/demo/imrtc_demo_tests"
-else
+# **不要写死某一个文件名**：测试目标是按用例分文件的，写死会在改名后
+# 静默跑一个过时的二进制（踩过一次）。这里遍历，一个都不许漏。
+found=0
+for t in "build/${PRESET}/demo/"imrtc_demo_*_test; do
+  [ -x "$t" ] || continue
+  found=$((found + 1))
+  # **不能 offscreen**：原生子窗口那组要真窗口才有 backing scale。
+  "$t"
+done
+if [ "$found" -eq 0 ]; then
   echo "  （没构建 Demo，跳过——打开 -DIMRTC_BUILD_DEMO=ON 才有）"
+else
+  echo "  跑了 ${found} 组。"
 fi
 
 echo ""

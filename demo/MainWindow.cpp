@@ -50,6 +50,11 @@ void MainWindow::setAutomation(bool autoAccept, int hangupAfterSec, const QStrin
   autoInvite_ = autoInvite;
 }
 
+void MainWindow::setFakeVideo(bool on) {
+  fakeVideo_ = on;
+  overlay_->setFakeVideo(on);
+}
+
 void MainWindow::armAutoLeave(bool useLeaveRoom) {
   if (hangupAfterSec_ <= 0) return;
   QTimer::singleShot(hangupAfterSec_ * 1000, this, [this, useLeaveRoom] {
@@ -334,6 +339,14 @@ void MainWindow::wireCall() {
   connect(bridge_, &EngineBridge::userRejected, overlay_, &CallOverlay::onMemberRejected);
   connect(bridge_, &EngineBridge::userNoResponse, overlay_, &CallOverlay::onMemberNoResponse);
   connect(bridge_, &EngineBridge::userAudioAvailable, overlay_, &CallOverlay::onMemberAudio);
+  connect(bridge_, &EngineBridge::userVideoAvailable, overlay_, &CallOverlay::onMemberVideo);
+
+  // 渲染路径 A：格子把原生句柄递上来，这里原样转给引擎。
+  // **detach 必须先于窗口销毁**——VideoTile 已经保证了这个顺序。
+  connect(overlay_, &CallOverlay::attachViewRequested, this,
+          [this](const QString& uid, void* handle) { bridge_->attachView(uid, handle); });
+  connect(overlay_, &CallOverlay::detachViewRequested, this,
+          [this](const QString& uid) { bridge_->attachView(uid, nullptr); });
   connect(bridge_, &EngineBridge::activeSpeakers, overlay_, &CallOverlay::onSpeakers);
   connect(bridge_, &EngineBridge::networkQuality, overlay_, &CallOverlay::onQuality);
 

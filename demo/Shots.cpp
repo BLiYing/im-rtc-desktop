@@ -16,8 +16,10 @@
 
 #include <QApplication>
 #include <QDir>
+#include <QScreen>
 #include <QSplitter>
 #include <QStandardPaths>
+#include <QThread>
 #include <QPixmap>
 #include <QTextStream>
 
@@ -160,6 +162,56 @@ int main(int argc, char** argv) {
   ended.beginOutgoing({QStringLiteral("bob")}, QStringLiteral("audio"), false);
   ended.markEnded(QStringLiteral("busy"), 0);
   shoot(&ended, dir, QStringLiteral("08-call-ended%1").arg(suffix));
+
+  // ---- 渲染路径 A：格子里真的塞一个原生子窗口（设计 §8.3）----
+  //
+  // 实测过：Qt 6.8 / macOS 上 `QWidget::grab()` **能**抓到原生子窗口，
+  // 与系统合成（QScreen::grabWindow）逐像素比过，平均每通道只差 0.54/255。
+  // 所以这一张和别的图走同一条截图路径，不需要特殊处理。
+  {
+    CallOverlay surfaces;
+    surfaces.setSelfUid(QStringLiteral("alice"));
+    surfaces.setFakeVideo(true);
+    surfaces.beginOutgoing({QStringLiteral("bob"), QStringLiteral("carol"),
+                            QStringLiteral("dave"), QStringLiteral("erin")},
+                           QStringLiteral("video"), true);
+    surfaces.markConnected(QStringLiteral("caller"));
+    for (const QString& who : {QStringLiteral("bob"), QStringLiteral("carol"),
+                               QStringLiteral("dave"), QStringLiteral("erin")}) {
+      surfaces.onMemberAccepted(who);
+    }
+    // 外壳的几种状态：它们由压在画面之上的那层画，被盖住的话会一起消失。
+    surfaces.onMemberAudio(QStringLiteral("carol"), false);
+    surfaces.onSpeakers({SpeakerInfo{QStringLiteral("bob"), 80}});
+    surfaces.onQuality({QualityInfo{QStringLiteral("dave"), 2}});
+    surfaces.show();
+    // 原生层的几何在 show 之后才落定，多转几圈事件循环再抓。
+    for (int i = 0; i < 20; ++i) {
+      QApplication::processEvents();
+      QThread::msleep(10);
+    }
+    /*
+      **这一张必须走 QScreen::grabWindow，不能用 QWidget::grab()。**
+
+      实测（Qt 6.8.3 / macOS，逐像素比平均每通道差值）：
+        grab() 单独跑          vs 系统合成 → 差 5.11/255（原生层只画了一半）
+        先跑一次系统合成再 grab() vs 系统合成 → 差 0.54/255
+      也就是说 grab() **能**看到原生子窗口，但拿到的可能是上一帧；
+      要等窗口服务器真的合成过一次才对得上。试过 `[CATransaction flush]`，没用。
+
+      别的场景没有原生子窗口，照旧用 grab()。
+    */
+    QPixmap shot;
+    if (QScreen* screen = surfaces.screen()) shot = screen->grabWindow(surfaces.winId());
+    if (shot.isNull()) {
+      // grabWindow 在某些环境要「屏幕录制」授权。退回 grab()，但要说清楚。
+      QTextStream(stderr) << "  系统合成不可用，退回 QWidget::grab()（原生层可能滞后一帧）\n";
+      shot = surfaces.grab();
+    }
+    shot.save(QStringLiteral("%1/11-call-group-video%2.png").arg(dir, suffix));
+    QTextStream(stdout) << "  11-call-group-video" << suffix << ".png\n";
+    surfaces.hide();
+  }
 
   // ---- 群通话九宫格：把格子的各种状态都摆出来 ----
   CallOverlay group;

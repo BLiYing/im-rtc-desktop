@@ -97,6 +97,16 @@ public:
   qint32 inviteMore(const QStringList& calleeIds);
   qint32 joinRoom(const QString& roomId, const QString& roomToken);
   qint32 leaveRoom();
+  /**
+   * 渲染路径 A（设计 §8.3）：把某个 uid 的远端画面挂到宿主的原生窗口上。
+   * macOS 传 `NSView*`、Windows 传 `HWND`；**传 nullptr 卸载**。
+   *
+   * **当前构建里它到不了任何地方**：引擎在没有媒体适配器时直接返回，
+   * 连轨道都不去解析。留着这条线是为了把宿主侧的顺序（建窗口 → attach →
+   * detach → 销毁窗口）先跑正，等 WebRTCAdapter 接上就自动生效。
+   */
+  qint32 attachView(const QString& uid, void* nativeHandle);
+
   qint32 openMic();
   qint32 closeMic();
   qint32 openCamera();

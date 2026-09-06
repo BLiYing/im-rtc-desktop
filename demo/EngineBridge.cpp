@@ -398,6 +398,12 @@ qint32 EngineBridge::joinRoom(const QString& roomId, const QString& roomToken) {
 qint32 EngineBridge::leaveRoom() {
   return engine_ ? engine_->leaveRoom().code() : IMRTC_V1_ERR_INVALID_STATE;
 }
+qint32 EngineBridge::attachView(const QString& uid, void* nativeHandle) {
+  if (!engine_) return IMRTC_V1_ERR_INVALID_STATE;
+  qCInfo(lcBridge, "attachView uid=%s handle=%p", qUtf8Printable(uid), nativeHandle);
+  return engine_->attachView(uid.toStdString(), nativeHandle).code();
+}
+
 qint32 EngineBridge::openMic() {
   return engine_ ? engine_->openMic().code() : IMRTC_V1_ERR_INVALID_STATE;
 }
