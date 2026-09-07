@@ -175,3 +175,96 @@ ASan、UBSan、**TSan** 都干净。变异测试十一次，十次当场被抓�
 
 变异测试十一次，十次当场被抓。没抓住的那次是「不关 IXWebSocket 自带的自动重连」——
 它只写在注释里没有测试守着，已补一条从行为上验的用例（连必然被拒的端口，1.5 秒里只该报一次 closed）。
+
+
+---
+
+# 2026-09-08 搬入：P5 各刀的落地明细（均已完成，test.sh 七步全绿）
+
+**刚跑完一轮 `/code-review max` 并把结论落地了**（15 条，13 修 / 1 记为待办 / 1 判为文档错）。
+其中五条是**测试当时全绿也照样存在**的：
+
+- `room.mute` 发的是本端 cid 而不是服务端 track_id —— 本端停发了，房里其他人的
+  麦克风图标永不变化，两端都不报错。（旧用例把错的值当成期望钉住了。）
+- `logout()` 的 `tearingDown_` 只在**假**传输上成立：真 Transport 异步投递关闭事件，
+  标记早清了，那条「已断开」照样弹给宿主。假件当时是同步回调的，所以测试看不见。
+- 心跳判死晚一个周期（60s vs 协议 §1.3 的 45s）。
+- join 还在飞时掉线，恢复后被直接宣布 `joined` —— 那个房间**再也出不去**。
+- 应答只按 `req_id` 认、不校验类型；超时后才回来的 `.ok` 会被当成服务端主动事件，
+  把状态机推回去。
+
+另外三条是**闸门本身**的问题：600 行体量门禁**从来没扫过 `capi/`**（只扫 engine 与 demo），
+`imrtc_v1_speaker` / `imrtc_v1_quality` 缺 `struct_size`（而它们恰恰是按**数组**交出去的），
+IxTransport 的投递队列无上限、且在锁内做 socket IO。都已修。
+
+**对外交付物已经成立**：`libim_rtc_engine_capi.dylib` + 一个 C 头，
+**导出面只有 27 个 `imrtc_v1_*` 符号**（`scripts/check-abi.sh` 守着，已进 test.sh）。
+联调工具 `scripts/smoke.sh` **改成经 C ABI 走**——与 Qt / C# 宿主同一条路，
+对着真服务端跑通：握手 → 拨号 → `onCallEnd(offline)`。
+
+**媒体已决定推迟（2026-09-06 定，见「已知坑」第一条）**：libwebrtc 桌面预编译包**没有 macOS x86_64**，
+本机是 Intel Mac，所以第四刀只做了上半——`MediaAdapter` 接口 + `MediaPlane` 接线，用假适配器测全。
+真正的 `WebRTCAdapter` **等 Apple Silicon 或 Windows 机器**再做。在那之前
+**桌面端按纯信令模式交付**：能拨号、能进房、能收到全部状态回调，就是没有声音和画面。
+
+**Qt 6.8.3 已装好**（2026-09-06，`~/Qt/6.8.3/macos`，占 1.8 GB）：
+`aqt install-qt mac desktop 6.8.3 clang_64 --archives qtbase qtsvg qttranslations qttools`，
+官方包是 universal（`x86_64 arm64`），Intel Mac 上正常。
+
+**第六刀已落地**：`demo/` 四屏（登录 / 拨号 / 记录 / 设置）+ 通话浮窗四态 + 九宫格，
+**经 C ABI 调引擎**。已对着真服务端多实例互打验过（2026-09-06）：
+
+| 场景 | 验到了什么 |
+|---|---|
+| 1v1 `offline` | 拨不在线的人 → 记录「呼出 · 对方不在线」 |
+| 1v1 `no_answer` | 振铃 30s 超时，两侧各落一条（被叫是「未接来电」） |
+| 1v1 `hangup` | 真接通 → 计时 → 挂断，两侧 `connected=true`、时长一致 |
+| 1v1 `busy` | 第三方拨通话中的人 → 他收 `onCallBusy`，被拨方落一条 `on_call_missed` |
+| **群通话 4 人** | `onUserAccept`/`onUserEnter` 逐个到；**`invite_more` 中途加人**，被加者收到 `group=1` 的来电并进同一个房 |
+| **群通话离场规则（协议 §4 规则 6）** | 主叫先走→只他自己 `ended{hangup}`，其余人继续；第二个人走；**最后一人也收 `ended`**。三人时长各 6 / 10 / 10，各算各的 |
+| **会议房** | `POST /v1/rooms` 建房 → `POST /v1/rooms/{id}/tokens` 换票（273 字符 JWT）→ `room.join` → 双方互见 → `onRoomLeft`。**没有 `onCallEnd`**，会议房不产生通话记录 |
+
+**时长是服务端给的**：1v1 那轮设了 6 秒挂断，记录里是 5 秒——正是不变量 I8 要防的那个差。
+《接入指南》在 [docs/INTEGRATION_GUIDE.md](docs/INTEGRATION_GUIDE.md)。
+`IMRTC_BUILD_DEMO` 默认 OFF——engine 与测试不依赖 Qt 这条不能破。
+
+**渲染路径 A 的宿主侧已经走通**（九宫格 2026-09-06，1v1 2026-09-07）：
+格子与 1v1 那一屏里都塞了真的原生子窗口（macOS `NSView*`），句柄递给引擎，
+几何 / DPI / 层级 / 生命周期都有回归测试。1v1 是**两层**：远端铺满 + 本端小窗
+160×90 压在右下角。**但引擎侧没通电**——没有媒体适配器时那两个方法直接返回。
+等 `WebRTCAdapter` 落地就自动生效，Demo 这边不用改。`--fake-video` 能看到它。
+
+**C ABI 加了两个符号**（2026-09-07，都是追加式，已有的一个没动，25 → 27）：
+
+1. `imrtc_v1_attach_local_view(engine, handle)` —— **本端预览**。做 1v1 那一屏时
+   才发现缺：`attachView` 是按 uid 找**远端**轨道的，而引擎不知道自己的 uid，
+   本端画面也来自采集侧、根本没有 trackId。
+2. `imrtc_v1_set_remote_layer(engine, uid, layer)` —— **层上界**（协议 §3.5）。
+   底下全是现成的（`RoomMachine::updateLayer` + `remoteTracks` 记账早就有了），
+   缺的只是门面与 C ABI 这两层。Web 端一直有，桌面端漏了。
+
+**层上界这一条是唯一一个不用等媒体的**：`room.update_layer` 是纯信令帧。
+已对真服务端验过（2026-09-07）——用 `rtc-cli` 的 `publishStub` 那条路造一个
+只登记 Track、不做媒体协商的发布者占住会议房，桌面端进同一个房、收到
+`onUserVideoAvailable`、报 `l`，服务端回 `.ok`（持房 18 秒 > 10 秒请求超时，
+没有 2004，所以应答确实回来了）。Demo 里九宫格报 `l`、1v1 报 `h`。
+
+**顺带在服务端查出一件事（已在 server 仓修完）**：非法 `max_layer` 服务端
+**按设计不报错**——协议 §2.4 规则 6 规定枚举越界必须兜底（`max_layer` 兜到 `l`），
+而这条兜底正是 §10「新增枚举值不算破坏兼容」的前提。所以那里**不能加校验**，
+加了反而毁掉前向兼容。真正的问题只是兜底不留痕，server 仓已补一条 Warn 日志
+（`fix/max-layer-validation` 分支），并把 1306 `layer_unavailable` 标成
+**保留码、服务端不发**（它的原描述与规则 6 自相矛盾且零调用点）。
+
+结论不变：桌面端仍要在 **C ABI 边界上自己挡**（`isValidLayer`，名单从
+`imrtc::layers()` 读，不另抄一份）——但理由是「服务端按设计不会拒绝你，
+所以这个同步返回值是宿主唯一的反馈」，**不是**「服务端漏了」。
+
+**边界上还有一个洞（已知，未修）**：`probeMicrophone` / `startLocalPreview`
+在 `CallEngine.h` 的公开面上，**但不在 27 个导出符号里**——走纯 C ABI 的宿主
+（Qt / C#）根本调不到。原因是它们带 completion 回调，跨 C ABI 要另定形状，
+**与渲染路径 B 是同一类问题**，该一起定。现在没人踩到是因为没有媒体适配器时
+它们本来就是空操作。
+
+**还没有的**：真实媒体（没有 SDP、没有 ICE、没有声音画面）、设备枚举、
+渲染路径 B（原始帧回调）、共享屏幕、C# 绑定。**Windows 一次都没编译过。**
