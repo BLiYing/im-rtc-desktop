@@ -38,6 +38,9 @@ const std::vector<ErrorDefinition>& errorDefinitions() {
       {1103, "not_authenticated", "not authenticated", false, false},
       {1104, "kicked_out", "kicked out", false, false},
       {1105, "session_not_resumable", "session not resumable", false, false},
+      // 票据合法但该 app_id 已被停用（宿主在控制台停用了整个应用）。
+      // 与 1101/1102 不同：那两个是「换张票再来」，这个是「这个应用被停了」。
+      {1106, "app_disabled", "application disabled", false, false},
       {1201, "room_not_found", "room not found", false, false},
       {1202, "room_full", "room is full", false, false},
       {1203, "not_in_room", "not in room", false, false},
