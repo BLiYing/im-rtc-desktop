@@ -24,13 +24,19 @@ Json stringArray(const std::vector<std::string>& values) {
 
 }  // namespace
 
+std::int64_t steadyClock() {
+  const auto now = std::chrono::steady_clock::now().time_since_epoch();
+  return std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
+}
+
 std::int64_t systemClock() {
   const auto now = std::chrono::system_clock::now().time_since_epoch();
   return std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
 }
 
 CallEngine::CallEngine(CallEngineOptions options) : options_(std::move(options)) {
-  if (!options_.clock) options_.clock = &systemClock;
+  if (!options_.clock) options_.clock = &steadyClock;
+  if (!options_.wallClock) options_.wallClock = &systemClock;
   if (!options_.mediaAdapter) return;
 
   MediaPlane::Deps deps;
@@ -68,6 +74,10 @@ CallEngine::CallEngine(CallEngineOptions options) : options_(std::move(options))
     const auto it = context_.room.remoteTracks.find(trackId);
     return it == context_.room.remoteTracks.end() ? std::string() : it->second.uid;
   };
+  deps.trackIdOfCid = [this](const std::string& cid) {
+    const auto it = context_.room.publishTrackIds.find(cid);
+    return it == context_.room.publishTrackIds.end() ? std::string() : it->second;
+  };
   deps.onFirstVideoFrame = [](const std::string&, const std::string&) {
     // onFirstVideoFrame 还没进 CallEngineObserver（§7.5 里有，但要等渲染路径定下来
     // 一起加，否则宿主拿到一个自己没法用的事件）。留着接口，第五刀补。
@@ -91,6 +101,7 @@ void CallEngine::login(const std::string& token) {
   connectionOptions.requestTimeoutMs = options_.requestTimeoutMs;
   connectionOptions.transportFactory = options_.transportFactory;
   connectionOptions.random = options_.random;
+  connectionOptions.wallClock = options_.wallClock;
 
   ConnectionEvents events;
   events.onConnected = [this](const HelloOk& hello) {
@@ -144,7 +155,24 @@ void CallEngine::logout() {
     三条，而宿主只想要一条通话终局。
   */
   tearingDown_ = true;
-  if (connection_) connection_->close();
+  if (connection_) {
+    connection_->close();
+    /*
+      **光靠 tearingDown_ 这个瞬时标记挡不住它**，必须把连接一起放掉。
+
+      真实的 Transport 是**异步**投递关闭事件的：IxTransport::close() 里 ws_->stop()
+      只是让 IX 的后台线程把一条 Closed 排进队列，要到下一次 tick() 的 poll() 才放出来。
+      那时候本函数早已返回、标记也早已清零，于是上面那条 onDisconnected 照样传给宿主——
+      恰恰是这段注释说要挡掉的东西。
+
+      测试里看不出来：FakeTransport::close() 是**同步**回调 listener 的，标记还是 true。
+      换句话说这道闸只在假的传输上成立。
+
+      ~Connection 会先摘监听再析构 Transport，ws_->stop() 阻塞到后台线程 join——
+      队列里攒着的事件随之一起丢掉，返回之后不会再有任何回调。下一次 login() 会重建。
+    */
+    connection_.reset();
+  }
   /*
     用 `reset` 而不是 `ws_closed_4403`：**主动登出不是被踢**。走后者会抛一条
     onKickedOut，宿主据此弹「您的账号在别处登录」——用户自己点的退出，

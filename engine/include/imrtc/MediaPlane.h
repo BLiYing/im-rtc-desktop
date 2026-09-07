@@ -39,11 +39,33 @@ public:
     std::function<void(std::int32_t code, const std::string& forType)> reportError;
     /** 某条远端轨道属于谁；不知道时返回空串。 */
     std::function<std::string(const std::string& trackId)> uidOf;
+    /**
+     * 本端某条 cid 对应的服务端 track_id；`room.publish.ok` 还没回来时返回空串。
+     *
+     * 媒体面手里只有自己生成的 cid，而线路上的 `room.mute` 要的是 track_id
+     * （§3.2，room_fsm.json 第 10 步）。映射记在房间机的 publishTrackIds 里，
+     * 所以这里跟 uidOf 一样，往门面借一次查表。
+     */
+    std::function<std::string(const std::string& cid)> trackIdOfCid;
     /** 首帧到达（本地事件，没有对应的信令帧）。 */
     std::function<void(const std::string& uid, const std::string& trackId)> onFirstVideoFrame;
   };
 
   MediaPlane(std::shared_ptr<MediaAdapter> adapter, Deps deps);
+
+  /**
+   * 析构里**兜底关掉**适配器（CONVENTIONS §5：「资源必须有明确的关闭路径，
+   * 且析构里也要兜底关闭」）。
+   *
+   * attach() 交给适配器的那几个回调捕获的是裸 `this`，而适配器是 `shared_ptr`——
+   * 宿主自己也可能攥着一份，完全能比引擎活得久。此前唯一的解绑路径是 close()，
+   * 而它只有 logout() 会走；宿主不 logout 直接销毁引擎（GC 语言宿主的常态，
+   * C ABI 也允许），适配器就攥着一把野指针，下一个 ICE 候选或 PC 状态变化即崩。
+   */
+  ~MediaPlane();
+
+  MediaPlane(const MediaPlane&) = delete;
+  MediaPlane& operator=(const MediaPlane&) = delete;
 
   /** attach 建立两条 PC 并把回调接上。login 之后调一次即可。 */
   void attach();

@@ -16,8 +16,14 @@ namespace imrtc {
  *
  * 1. **没有 `ended` 状态**——`ended` 是事件不是状态。草图 §09 里那个「停 1.5s」的
  *    方框是 UI 层的展示状态，由 UI 自己持有（不变量 I5）。
- * 2. **便利事件只在 1v1 抛**（`onCallCancelled/Rejected/Busy/NoAnswer`）。群通话里
- *    某人拒接只抛 `onUserReject`——否则会违反「便利事件后必定跟 onCallEnd」（I7）。
+ * 2. **按成员裁决的便利事件只在 1v1 抛**（`onCallRejected` / `onCallBusy` /
+ *    `onCallNoAnswer`）。群通话里某人拒接，通话还在继续，后面并不会紧跟一条
+ *    `onCallEnd`，抛便利事件就违反了「便利事件后必定跟 onCallEnd」（I7）。
+ *
+ *    `onCallCancelled` **不在这一组里**，它群里也照抛：`call.cancelled` 说的是
+ *    主叫把整通电话取消了，服务端随后给每个人都发 `call.ended`——I7 成立。
+ *    （早先这行把它一起列进了「只在 1v1」，与 CallRecv.cpp 的实现对不上；
+ *    对不上的是这行字，不是代码。）
  * 3. **状态只由信令帧与宿主调用驱动，禁止由定时器改状态**（I4）。
  *    本地振铃倒计时只改 UI，超时由服务端裁决。
  */

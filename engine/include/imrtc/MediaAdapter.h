@@ -165,7 +165,14 @@ public:
    */
   virtual void reset() = 0;
 
-  /** close 彻底关掉两条 PC 并停掉所有本端轨道。 */
+  /**
+   * close 彻底关掉两条 PC 并停掉所有本端轨道。
+   *
+   * **返回之后必须一条回调都不再抛**（`open()` 收下的那份 events 就此作废）。
+   * MediaPlane 的析构会兜底调它——适配器是 `shared_ptr`，宿主完全可能比引擎活得久，
+   * 那些回调里捕获的 `this` 一旦成了野指针，下一个 ICE 候选就是一次崩溃
+   * （CONVENTIONS §5「对象先死、回调后到」，§2 红线 6「destroy 必须阻塞到回调静默」）。
+   */
   virtual void close() = 0;
 
   /** poll 把攒下的媒体事件投递给 engine，由 `CallEngine::tick()` 调用。 */

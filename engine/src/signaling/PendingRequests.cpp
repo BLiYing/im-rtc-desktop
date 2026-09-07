@@ -54,6 +54,18 @@ bool PendingRequests::settle(const Envelope& envelope, const DecodeFn& decode) {
     return true;
   }
 
+  /*
+    **应答的类型必须对得上**，不能只认 req_id。
+
+    只认 req_id 的话，一条串了号的帧会把别人的请求结算成「成功」，而 `data` 是按
+    **那条帧**的字段表解出来的——调用方读到的字段全是默认值。`call.invite` 这么被
+    结算掉的后果尤其难查：next.callId 是空串，之后每一次挂断都发向一个空 call_id，
+    服务端换回 1401，那通电话再也退不出去。
+
+    对不上就返回 false，交给调用方按事件处理（服务端主动发起的 sub offer 也带 req_id）。
+  */
+  if (envelope.type != replyTypeOf(type)) return false;
+
   RequestResult result;
   result.ok = true;
   result.forType = type;

@@ -120,14 +120,74 @@ IMRTC_TEST(connHeartbeat, "Connection —— 每个周期发 ping，收到任何
   // **判活条件是「收到对端任何一帧」**，不是 pong 回来了（§1.3）。
   harness.net.deliver(imtest::replyFrame("room.closed", "",
                                          imrtc::Json::parse("{\"room_id\":\"r-1\"}")));
+  // 最后一帧落在 15000 附近，于是「连续 3 个周期 = 45 秒」的死线正是 60000（§1.3）。
   harness.connection->tick(kT0 + 30000);
   harness.connection->tick(kT0 + 45000);
-  harness.connection->tick(kT0 + 60000);
-  CHECK_TRUE(!harness.net.current().closed, "还没到连续 3 个周期，不该判死");
+  CHECK_TRUE(!harness.net.current().closed, "才静默两个周期，不该判死");
 
-  harness.connection->tick(kT0 + 75000);
-  CHECK_TRUE(harness.net.current().closed, "连续 3 个周期静默之后判死");
+  harness.connection->tick(kT0 + 60000);
+  CHECK_TRUE(harness.net.current().closed, "连续 3 个周期（45s）静默之后判死");
   CHECK_EQ(harness.net.current().closeCode, imrtc::closecode::kGoingAway, "判死用的关闭码");
+
+  // 回归：早先这里写的是 `missed_ > kMissLimit`，要攒到第 4 个周期（60s 静默、
+  // 也就是 tick(75000)）才判死，比服务端那边晚整整一个周期。
+}
+
+IMRTC_TEST(connLateOkIsNotAnEvent,
+           "Connection —— 超时之后才回来的 .ok 是迟到的应答，不许当成服务端主动事件") {
+  Harness harness;
+  harness.handshake();
+
+  std::vector<std::string> outcomes;
+  harness.connection->request(imrtc::frame::kRoomJoin, Json::makeObject(), kT0,
+                              [&outcomes](const RequestResult& result) {
+                                outcomes.push_back(result.ok ? "ok" : "fail");
+                              });
+  const std::string reqId = imtest::field(imtest::lastSent(harness.net.current()), "req_id");
+
+  // 十秒无应答：expire 报 2004，在途表里已经没有这条了。
+  harness.connection->tick(kT0 + 10000);
+  CHECK_EQ(outcomes, std::vector<std::string>{"fail"}, "先超时");
+
+  // 服务端慢半拍才把 .ok 送回来。
+  harness.net.deliver(imtest::replyFrame(imrtc::okType(imrtc::frame::kRoomJoin), reqId,
+                                         Json::parse("{\"room_id\":\"r-1\"}")));
+  /*
+    **回归**：早先没人在等的帧一律往 dispatchEvent 掉，于是这条 room.join.ok 会被
+    当成服务端主动推送交给上层——房间机据此从 idle 跳回 joined，而宿主刚刚才收到
+    进房失败。事件的 req_id 恒为 ""（§2.2），带 req_id 的 .ok 只能是应答。
+  */
+  CHECK_EQ(harness.events, std::vector<std::string>{}, "迟到的 .ok 不许当事件抛上去");
+  CHECK_EQ(outcomes, std::vector<std::string>{"fail"}, "也不许把回调再调一次");
+}
+
+IMRTC_TEST(connReplyTypeMustMatch,
+           "Connection —— 对不上号的应答类型不算这条请求的应答（只认 req_id 会串号）") {
+  Harness harness;
+  harness.handshake();
+
+  std::vector<std::string> outcomes;
+  harness.connection->request(imrtc::frame::kCallInvite, Json::makeObject(), kT0,
+                              [&outcomes](const RequestResult& result) {
+                                outcomes.push_back(result.ok ? "ok" : "fail");
+                              });
+  const std::string reqId = imtest::field(imtest::lastSent(harness.net.current()), "req_id");
+
+  /*
+    服务端把一条房间事件挂在了这个 req_id 上（串号、或重连后 req_id 撞车）。
+    **回归**：早先 settle 只按 req_id 认，于是这条帧把 call.invite 结算成「成功」，
+    而 data 是按 participant_joined 的字段表解的——call_id 是空串，
+    之后每一次挂断都发向一个空 call_id，服务端换回 1401，那通电话再也退不出去。
+  */
+  harness.net.deliver(imtest::replyFrame(
+      imrtc::frame::kRoomParticipantJoined, reqId,
+      Json::parse("{\"room_id\":\"r-1\",\"uid\":\"bob\"}")));
+  CHECK_EQ(outcomes, std::vector<std::string>{}, "类型对不上，不许结算成成功");
+
+  // 真正的应答回来了才算数。
+  harness.net.deliver(imtest::replyFrame(imrtc::okType(imrtc::frame::kCallInvite), reqId,
+                                         Json::parse("{\"call_id\":\"call-1\"}")));
+  CHECK_EQ(outcomes, std::vector<std::string>{"ok"}, "对得上的 .ok 才结算");
 }
 
 IMRTC_TEST(connPongIsSwallowed, "Connection —— pong 不往上抛（它的全部信息是「还活着」）") {

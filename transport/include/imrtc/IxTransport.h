@@ -61,6 +61,16 @@ private:
     int code = 0;
   };
 
+  /**
+   * kMaxQueuedEvents 是投递队列的上限（CONVENTIONS §6：队列必须有界，
+   * 满了丢弃而不是阻塞）。
+   *
+   * 队列只由宿主线程的 poll() 排空。宿主一旦不 tick（界面线程卡住、弹了个模态框、
+   * 或者干脆停了 ticker），IX 的后台线程会一直往里堆——每条最大 64 KiB（kMaxFrameBytes），
+   * 没有上限就是一条没人看得见的内存泄漏。
+   */
+  static constexpr std::size_t kMaxQueuedEvents = 512;
+
   void enqueue(Event event);
 
   /** listener_ 只在宿主线程上读写（setListener / poll 都在那边）。 */
@@ -70,6 +80,13 @@ private:
   bool open_ = false;
   /** close() 已经发出过，别再重复 stop。 */
   bool closing_ = false;
+  /**
+   * 溢出过：有信令帧被丢掉了。
+   *
+   * 丢一帧信令 = 本地状态和服务端对不上，往下装作没事会越错越远。poll() 看到它就
+   * 按断线处置，让 Connection 那套重连 + `sys.hello` 把状态整个重来一遍。
+   */
+  bool overflowed_ = false;
 
   /**
    * ws_ **必须是最后一个成员**：成员按声明的逆序析构，于是它先走，

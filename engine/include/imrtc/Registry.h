@@ -88,6 +88,17 @@ bool isRequestType(const std::string& type);
 bool isReservedType(const std::string& type);
 
 /**
+ * replyTypeOf 给出某个上行请求帧的**应答类型**。
+ *
+ * 绝大多数是 `<type>.ok`，但 `room.offer` 不是——pub 侧的 offer 由 `room.answer`
+ * 直接作为应答回来（§3.3 固定 offerer），它没有 `.ok`。这条例外只写在这一处。
+ */
+std::string replyTypeOf(const std::string& requestType);
+
+/** isOkType 报告这个 type 是不是一条成功应答（`<请求>.ok`）。 */
+bool isOkType(const std::string& type);
+
+/**
  * lookupFrame 返回某帧类型的字段声明；未注册返回 nullptr。
  *
  * 请求帧的 .ok 如果没单独登记，一律给空对象——纯 ack 是常态，

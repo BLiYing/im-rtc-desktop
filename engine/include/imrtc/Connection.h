@@ -64,6 +64,14 @@ struct ConnectionOptions {
   TransportFactory transportFactory;
   /** 退避抖动用的随机源。留空则用默认实现。 */
   Random01 random;
+  /**
+   * 墙上时钟，**只**用来填信封的 `ts`。
+   *
+   * 与 `tick(nowMs)` 喂进来的那条时间线是两回事：那条必须单调（心跳、超时、退避
+   * 都靠它），而 `ts` 按协议是一个 Unix 毫秒时间戳，给对端记日志用。两者混用的话，
+   * 要么时序被 NTP 一校正就散架，要么线路上的 ts 是个没有意义的开机计数。
+   */
+  std::function<std::int64_t()> wallClock;
 };
 
 /**
@@ -147,6 +155,8 @@ private:
   void dispatchEvent(const Envelope& envelope);
   Json decodeData(const Envelope& envelope) const;
   std::string nextReqId();
+  /** wallNowMs 是信封 `ts` 用的墙上时间——与 tick 的单调时间线刻意分开。 */
+  std::int64_t wallNowMs() const;
   void scheduleReconnect(std::int64_t nowMs);
   void emitError(std::int32_t code, const std::string& forType);
 

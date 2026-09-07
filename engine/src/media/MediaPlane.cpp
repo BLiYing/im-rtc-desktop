@@ -40,6 +40,11 @@ Json sdpFrame(PcRole pc, const std::string& sdp) {
 MediaPlane::MediaPlane(std::shared_ptr<MediaAdapter> adapter, Deps deps)
     : adapter_(std::move(adapter)), deps_(std::move(deps)) {}
 
+MediaPlane::~MediaPlane() {
+  // 见头文件：attach() 埋下的回调捕获了裸 this，解绑只能靠 close()。
+  if (attached_) close();
+}
+
 void MediaPlane::attach() {
   if (!adapter_ || attached_) return;
   attached_ = true;
@@ -180,8 +185,26 @@ void MediaPlane::setMuted(MediaKind kind, bool muted) {
   if (cid.empty() || !adapter_) return;
   adapter_->setMuted(cid, muted);
 
+  /*
+    **线路上要的是 track_id，不是 cid**。
+
+    cid 是本端生成的，只活在 `room.publish` 请求与 pub offer 的 msid 里——服务端靠它
+    把 SDP 的 m-line 认回自己分配的 track_id（§3.2），两者是两套命名。把 cid 填进
+    `room.mute` 的 track_id 里，服务端找不到那条轨道，于是**不广播 `room.track_muted`**：
+    本端确实停发了，可房里其他人的麦克风图标永远不变。没有任何一端会报错。
+
+    映射记在房间机的 publishTrackIds 里，由门面借出来查（deps_.trackIdOfCid）。
+  */
+  const std::string trackId = deps_.trackIdOfCid ? deps_.trackIdOfCid(cid) : std::string();
+  if (trackId.empty()) {
+    // `room.publish.ok` 还在路上，线路上还没有任何东西能指代这条轨道。
+    // 本端已经停发了，但对端这次不会知道——**报出去**，别静悄悄发一帧废的上去。
+    deps_.reportError(codeValue(ErrorCode::InvalidState), frame::kRoomMute);
+    return;
+  }
+
   Json args = Json::makeObject();
-  args.set("track_id", Json::make(cid));
+  args.set("track_id", Json::make(trackId));
   args.set("muted", Json::make(muted));
   deps_.dispatchAct("mute", args);
 }

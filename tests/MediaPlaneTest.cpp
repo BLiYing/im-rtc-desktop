@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <vector>
@@ -5,6 +6,7 @@
 #include "FakeMediaAdapter.h"
 #include "FakeTransport.h"
 #include "TestHarness.h"
+
 #include "imrtc/CallEngine.h"
 #include "imrtc/Registry.h"
 
@@ -92,6 +94,12 @@ struct Harness {
       types.push_back(imtest::field(Json::parse(raw), "type"));
     }
     return types;
+  }
+
+  /** countSent 数线路上某类型的帧有几条（断言「一条都没有」时用）。 */
+  std::size_t countSent(const std::string& type) {
+    const std::vector<std::string> types = sentTypes();
+    return static_cast<std::size_t>(std::count(types.begin(), types.end(), type));
   }
 
   /** findSent 找最后一条某类型的帧。 */
@@ -247,16 +255,38 @@ IMRTC_TEST(mediaResetOnCallEnd, "MediaPlane —— 一轮结束要重建 PC（�
 IMRTC_TEST(mediaMuteGoesBothWays, "MediaPlane —— 开关麦克风：本端停发 + 发 room.mute 让对端知道") {
   Harness harness;
   harness.enterRoom("audio");
+  // 先把 track_id 拿到手：线路上的 room.mute 认的是它，不是本端的 cid。
+  harness.reply(imrtc::okType(imrtc::frame::kRoomPublish),
+                Json::parse("{\"track_id\":\"t-1\",\"cid\":\"local-mic-1\"}"));
 
   harness.engine->closeMic();
   CHECK_EQ(harness.media->muted, std::vector<std::string>{"local-mic-1:muted"}, "本端要停发");
   const Json mute = harness.findSent(imrtc::frame::kRoomMute);
-  CHECK_EQ(imtest::field(mute, "track_id"), std::string("local-mic-1"), "发的是那条轨道");
+  /*
+    **回归**：早先这里发的是 cid（"local-mic-1"）。服务端按 track_id 查，查不到那条轨道，
+    于是不广播 room.track_muted —— 本端停发了，房里其他人的麦克风图标却永远不变，
+    而且两端都不报错。发上去的必须是服务端分配的 t-1（§3.2、room_fsm.json 第 10 步）。
+  */
+  CHECK_EQ(imtest::field(mute, "track_id"), std::string("t-1"), "发的是服务端的 track_id");
   CHECK_TRUE(mute.find("data")->find("muted")->asBool(), "muted=true");
 
   harness.engine->openMic();
   CHECK_EQ(harness.media->muted.size(), std::size_t{2}, "再开一次");
   CHECK_EQ(harness.media->muted.back(), std::string("local-mic-1:live"), "恢复发包");
+}
+
+IMRTC_TEST(mediaMuteBeforePublishOkIsReported,
+           "MediaPlane —— publish.ok 还没回来就静音：本端照停，但不许发一帧废的上去") {
+  Harness harness;
+  harness.enterRoom("audio");
+  // 故意**不**回 publish.ok：此刻 cid 有了，track_id 还没有。
+
+  harness.engine->closeMic();
+  CHECK_EQ(harness.media->muted, std::vector<std::string>{"local-mic-1:muted"}, "本端仍要停发");
+  CHECK_EQ(harness.countSent(imrtc::frame::kRoomMute), std::size_t{0},
+           "线路上不该出现 room.mute —— 没有能指代这条轨道的 id");
+  CHECK_EQ(harness.recorder->log.back(), std::string("error:2005/invalid_state"),
+           "不能静悄悄吞掉：对端这次不会知道");
 }
 
 IMRTC_TEST(mediaAttachLocalViewIsSeparate,

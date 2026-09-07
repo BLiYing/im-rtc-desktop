@@ -165,6 +165,14 @@ bool isReservedType(const std::string& type) {
   return std::find(types.begin(), types.end(), type) != types.end();
 }
 
+std::string replyTypeOf(const std::string& requestType) {
+  // room.offer 的应答是 room.answer，不是 room.offer.ok（§3.3）。
+  if (requestType == frame::kRoomOffer) return frame::kRoomAnswer;
+  return okType(requestType);
+}
+
+bool isOkType(const std::string& type) { return endsWith(type, kOkSuffix); }
+
 const FrameFields* lookupFrame(const std::string& type) {
   const auto direct = registry().find(type);
   if (direct != registry().end()) return direct->second;

@@ -18,7 +18,22 @@ namespace imrtc {
 /** Clock 返回 Unix 毫秒。可注入以便测试。 */
 using Clock = std::function<std::int64_t()>;
 
-/** systemClock 是运行期的默认时钟。 */
+/**
+ * steadyClock 是**驱动时序的**默认时钟：心跳、请求超时、重连退避全用它。
+ *
+ * 必须单调：墙上时钟会被 NTP 校正、被用户改、被休眠唤醒挪动。往回跳一次，
+ * `nextPingAtMs_` / `reconnectAtMs_` 全都落在遥远的未来——心跳不再发、在途请求
+ * 不再超时、排好的重连永远等不到，引擎抱着一条死连接一声不吭。往前跳一次则相反：
+ * 所有在途请求同时超时，一通正在进行的电话被 failLocally 直接判死。
+ */
+std::int64_t steadyClock();
+
+/**
+ * systemClock 是**墙上时钟**，只用来填信封的 `ts`（发送方的 Unix 毫秒时间戳）。
+ *
+ * 协议规定接收方 `ts` **只用于日志、禁止参与逻辑判断**（§2.1）——本端的时序逻辑
+ * 同样不该用它，那正是 steadyClock 存在的理由。
+ */
 std::int64_t systemClock();
 
 /** CallEngineOptions 是构造参数。 */
@@ -35,8 +50,10 @@ struct CallEngineOptions {
   TransportFactory transportFactory;
   /** 退避抖动的随机源。留空用默认实现。 */
   Random01 random;
-  /** 时钟。留空用系统时钟；测试注入假的。 */
+  /** 单调时钟，驱动心跳/超时/退避。留空用 steadyClock；测试注入假的。 */
   Clock clock;
+  /** 墙上时钟，**只**用来填信封的 ts。留空用 systemClock；测试一般不必管。 */
+  Clock wallClock;
   /**
    * 媒体适配器。**留空 = 纯信令模式**：能登录、能拨号、能收发所有帧，
    * 就是没有声音画面。第四刀之前的全部测试都跑在这个模式下。

@@ -120,6 +120,39 @@ IMRTC_TEST(envelopeVector, "envelope.json —— 信封解析与默认值填充"
   for (const Json& testCase : defaults->items()) runDefaultCase(testCase);
 }
 
+IMRTC_TEST(envelopeExtremeIntegerIsRejected,
+           "envelope —— 最小的 int64 也要被 2^53 那道闸挡住（向量只覆盖了正的那头）") {
+  /*
+    **回归**：checkNumber 早先是 `number < 0 ? -number : number` 再跟上限比。
+    number == INT64_MIN 时 `-number` 是有符号溢出（UB），在常见的补码实现上折回
+    INT64_MIN——那是个负数，于是「> 上限」恒为假，这一帧反而**绕过**了整道闸，
+    一路走到状态机，宿主收到的 duration_sec 就是 -9223372036854775808。
+
+    envelope.json 只覆盖了 +2^53 那一头（max_safe_integer_is_accepted /
+    beyond_max_safe_integer_is_rejected），所以向量抓不到它。
+  */
+  const std::string frame =
+      "{\"type\":\"sys.ping\",\"req_id\":\"c-1\",\"ts\":1,"
+      "\"data\":{\"n\":-9223372036854775808}}";
+  try {
+    imrtc::decodeEnvelope(frame);
+    imtest::fail("envelope/int64_min", "本该按 bad_params 拒掉，却收下了");
+  } catch (const imrtc::RtcError& error) {
+    CHECK_EQ(error.name(), std::string("bad_params"), "INT64_MIN 超出 ±(2^53-1)");
+  }
+
+  // 负的那头的边界照常：刚好 -(2^53-1) 收下，再小一个拒掉。
+  imrtc::decodeEnvelope("{\"type\":\"sys.ping\",\"req_id\":\"c-1\",\"ts\":1,"
+                        "\"data\":{\"n\":-9007199254740991}}");
+  try {
+    imrtc::decodeEnvelope("{\"type\":\"sys.ping\",\"req_id\":\"c-1\",\"ts\":1,"
+                          "\"data\":{\"n\":-9007199254740992}}");
+    imtest::fail("envelope/below_min_safe", "本该拒掉");
+  } catch (const imrtc::RtcError& error) {
+    CHECK_EQ(error.name(), std::string("bad_params"), "低于 -(2^53-1) 要拒");
+  }
+}
+
 IMRTC_TEST(errorCodesVector, "error_codes.json —— 错误码全表逐条相等") {
   const Json vector = imtest::loadVector("error_codes.json");
 

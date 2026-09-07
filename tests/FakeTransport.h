@@ -27,6 +27,18 @@ struct FakeSocket {
   std::string closeReason;
   std::vector<std::string> sent;
   imrtc::TransportListener* listener = nullptr;
+
+  /**
+   * deferClose 让 close() 像**真实**的 Transport 那样把关闭事件排到 poll() 里去放。
+   *
+   * 默认是同步回调，因为绝大多数用例只想「断给我看」。但同步是**假的**：
+   * IxTransport 的 ws_->stop() 只是让 IX 的后台线程把一条 Closed 排进队列，
+   * 要到下一次 poll() 才出来。凡是依赖「close() 返回时回调已经抛完」的逻辑，
+   * 在同步的假件上全绿、到了真件上全错——CallEngine::logout() 的 tearingDown_
+   * 就这么漏过去过。要守那类规则的用例，把这个打开。
+   */
+  bool deferClose = false;
+  bool pendingClose = false;
 };
 
 class FakeTransport : public imrtc::Transport {
@@ -44,9 +56,21 @@ public:
     socket_->open = false;
     socket_->closeCode = code;
     socket_->closeReason = reason;
+    if (socket_->deferClose) {
+      socket_->pendingClose = true;
+      return;
+    }
     if (socket_->listener != nullptr) socket_->listener->onTransportClosed(code, reason);
   }
   bool isOpen() const override { return socket_->open; }
+
+  void poll() override {
+    if (!socket_->pendingClose) return;
+    socket_->pendingClose = false;
+    if (socket_->listener != nullptr) {
+      socket_->listener->onTransportClosed(socket_->closeCode, socket_->closeReason);
+    }
+  }
 
 private:
   std::shared_ptr<FakeSocket> socket_;
@@ -55,9 +79,13 @@ private:
 /** FakeNet 是测试这一侧的把手：造连接、放行握手、投帧、模拟断开。 */
 class FakeNet {
 public:
+  /** deferClose 打开后，**此后新建**的连接都按真实 Transport 那样异步放关闭事件。 */
+  bool deferClose = false;
+
   imrtc::TransportFactory factory() {
     return [this]() -> std::unique_ptr<imrtc::Transport> {
       auto socket = std::make_shared<FakeSocket>();
+      socket->deferClose = deferClose;
       sockets_.push_back(socket);
       return std::unique_ptr<imrtc::Transport>(new FakeTransport(socket));
     };

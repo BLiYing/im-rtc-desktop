@@ -162,8 +162,12 @@ public:
     std::vector<imrtc_v1_speaker> out;
     out.reserve(speakers.size());
     for (const imrtc::Speaker& speaker : speakers) {
-      out.push_back(imrtc_v1_speaker{speaker.uid.c_str(), speaker.participantId.c_str(),
-                                     speaker.volume});
+      imrtc_v1_speaker item{};
+      item.struct_size = sizeof(item);
+      item.uid = speaker.uid.c_str();
+      item.participant_id = speaker.participantId.c_str();
+      item.volume = speaker.volume;
+      out.push_back(item);
     }
     table_.on_active_speakers(table_.user_data, out.empty() ? nullptr : out.data(),
                               static_cast<std::uint32_t>(out.size()));
@@ -174,7 +178,12 @@ public:
     std::vector<imrtc_v1_quality> out;
     out.reserve(entries.size());
     for (const imrtc::QualityEntry& entry : entries) {
-      out.push_back(imrtc_v1_quality{entry.uid.c_str(), entry.participantId.c_str(), entry.level});
+      imrtc_v1_quality item{};
+      item.struct_size = sizeof(item);
+      item.uid = entry.uid.c_str();
+      item.participant_id = entry.participantId.c_str();
+      item.level = entry.level;
+      out.push_back(item);
     }
     table_.on_network_quality(table_.user_data, out.empty() ? nullptr : out.data(),
                               static_cast<std::uint32_t>(out.size()));

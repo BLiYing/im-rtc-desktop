@@ -6,6 +6,7 @@
 #include "TestHarness.h"
 #include "Vectors.h"
 #include "imrtc/EngineMachine.h"
+#include "imrtc/Registry.h"
 
 using imrtc::EngineContext;
 using imrtc::EngineOutput;
@@ -180,6 +181,68 @@ IMRTC_TEST(roomFsmVector, "room_fsm.json —— 房间与 Track 状态机（五�
   const Json* cases = vector.find("cases");
   CHECK_TRUE(cases != nullptr && !cases->items().empty(), "cases 不能为空");
   for (const Json& testCase : cases->items()) runCase(testCase);
+}
+
+IMRTC_TEST(roomResubscribeAfterUnsubscribe,
+           "房间机 —— 退订之后再订阅，发的必须是 room.subscribe 而不是换层") {
+  imrtc::RoomContext ctx;
+  ctx.state = imrtc::RoomState::Joined;
+  ctx.roomId = "r-1";
+  ctx.participantId = "p-1";
+
+  const imrtc::RoomOutput dropped = imrtc::reduceRoomAct(
+      ctx, "unsubscribe", imrtc::obj({{"track_id", Json::make("t-91")}}));
+  /*
+    **回归**：早先 unsubscribe 会无条件往 subscribe 表里塞一条 "unsubscribing"，
+    哪怕这条轨道压根没订阅过。而 subscribe 只看「表里有没有这个键」，
+    于是下一次订阅退化成 room.update_layer —— 服务端根本没在给这条流，
+    换层是个空操作，格子就一直黑着，两边都不报错。
+  */
+  CHECK_TRUE(dropped.state.subscribe.find("t-91") == dropped.state.subscribe.end(),
+             "没订阅过就不该凭空记一笔");
+
+  const imrtc::RoomOutput again = imrtc::reduceRoomAct(
+      dropped.state, "subscribe", imrtc::obj({{"track_id", Json::make("t-91")}}));
+  CHECK_EQ(again.send.size(), std::size_t{1}, "要发一帧");
+  CHECK_EQ(again.send[0].type, std::string(imrtc::frame::kRoomSubscribe), "是订阅，不是换层");
+
+  // 订阅中途再退订、再订阅：那条 "unsubscribing" 也不算「已订阅」。
+  const imrtc::RoomOutput mid = imrtc::reduceRoomAct(
+      again.state, "unsubscribe", imrtc::obj({{"track_id", Json::make("t-91")}}));
+  const imrtc::RoomOutput retry = imrtc::reduceRoomAct(
+      mid.state, "subscribe", imrtc::obj({{"track_id", Json::make("t-91")}}));
+  CHECK_EQ(retry.send[0].type, std::string(imrtc::frame::kRoomSubscribe),
+           "退订还没结算完就重订，也得重新订阅");
+}
+
+IMRTC_TEST(roomResumeAfterDropWhileJoining,
+           "房间机 —— join 还在飞的时候掉线：恢复后要重新 join，不许直接宣布 joined") {
+  // 向量里没有这一路（room_fsm.json 的两条 reconnect 用例都从 joined 出发），
+  // 但它在真机上是常事：进房请求刚发出去，地铁进隧道。
+  imrtc::RoomContext ctx;
+  ctx.state = imrtc::RoomState::Joining;
+  ctx.roomId = "r-1";
+  ctx.roomToken = "tk";
+  // participant_id 还是空的 —— room.join.ok 从没到过。
+
+  const imrtc::RoomOutput dropped =
+      imrtc::reduceRoom(ctx, imrtc::MachineInput::internal("disconnected"));
+  CHECK_TRUE(dropped.state.state == imrtc::RoomState::Joining,
+             "joining 不能塌进 reconnecting，否则恢复时分不出这两路");
+
+  const imrtc::RoomOutput resumed = imrtc::resumeRoom(dropped.state, true);
+  /*
+    **回归**：早先任何非 idle 状态都进 reconnecting，而 resumeRoom 看到 reconnecting
+    就一律置成 joined。于是一个服务端从没把我们加进去的房间被宣布成「已进房」：
+    participant_id 是空的，之后每一帧都换回 1201，而重新 join 又被「必须在 idle」
+    挡回来——这个房间再也出不去，只能 logout。
+
+    resumed=true 说的是「会话还在」，不是「成员关系还在」。
+  */
+  CHECK_EQ(resumed.send.size(), std::size_t{1}, "要重新发一条 room.join");
+  CHECK_EQ(resumed.send[0].type, std::string(imrtc::frame::kRoomJoin), "发的是 room.join");
+  CHECK_EQ(imrtc::str(resumed.send[0].data, "room_id"), std::string("r-1"), "还是原来那个房间");
+  CHECK_TRUE(resumed.state.state == imrtc::RoomState::Joining, "回到 joining 等 join.ok");
 }
 
 IMRTC_TEST(roomFsmStates, "room_fsm.json —— C++ 侧的房间状态集合与向量一致") {

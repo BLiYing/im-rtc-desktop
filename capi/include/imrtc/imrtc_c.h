@@ -84,8 +84,19 @@ typedef struct imrtc_v1_engine imrtc_v1_engine;
  */
 typedef int32_t imrtc_v1_bool;
 
+/*
+  下面这两个结构体是**按数组交出去的**（`on_active_speakers` / `on_network_quality`
+  收的是指针 + 个数），所以宿主是按 sizeof 的步长在里面走。
+
+  正因为如此，`struct_size` 在它们身上比在那些单个传的结构体上更要紧：将来哪怕只追加
+  一个字段，sizeof 一变，已经发出去的宿主读 `items[1]` 就会落在结构体中间，把半个指针
+  当成 `const char*` 解引用——而且没有任何版本信号能让它察觉。引擎填，宿主据此判版本
+  并决定按哪个步长走（CONVENTIONS §2 红线 2）。
+*/
+
 /** 一个正在说话的人。volume 0~100。 */
 typedef struct imrtc_v1_speaker {
+  uint32_t struct_size;
   const char* uid;
   const char* participant_id;
   int64_t volume;
@@ -93,6 +104,7 @@ typedef struct imrtc_v1_speaker {
 
 /** 一个人的网络质量，level 0~6（0 = unknown）。 */
 typedef struct imrtc_v1_quality {
+  uint32_t struct_size;
   const char* uid;
   const char* participant_id;
   int64_t level;

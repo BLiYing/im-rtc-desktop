@@ -37,8 +37,10 @@ void checkNumber(const Json& value, const std::string& path) {
               "；音量/质量/时长/码率一律用整数");
   }
   const std::int64_t number = value.asInt();
-  const std::int64_t magnitude = number < 0 ? -number : number;
-  if (magnitude > kMaxSafeProtocolInt) {
+  // **不要先取绝对值再比**：`-number` 在 number == INT64_MIN 时是有符号溢出（UB），
+  // 而且在常见的补码实现上会折回 INT64_MIN——那是个负数，于是 `> 上限` 恒为假，
+  // 一帧 `-9223372036854775808` 反而**绕过**了这道 2^53 的闸。直接两头比就没有这个洞。
+  if (number > kMaxSafeProtocolInt || number < -kMaxSafeProtocolInt) {
     badParams(path + ": 整数 " + std::to_string(number) + " 超出 ±(2^53-1)，会静默丢精度");
   }
 }

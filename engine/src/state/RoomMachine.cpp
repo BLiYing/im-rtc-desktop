@@ -84,7 +84,11 @@ RoomOutput subscribeTrack(const RoomContext& ctx, const Json& args) {
 
   RoomContext next = ctx;
   next.layers[trackId] = maxLayer;
-  if (ctx.subscribe.find(trackId) != ctx.subscribe.end()) {
+  // **只有还活着的订阅才算「已订阅」**。表里留着一条 "unsubscribing" 也当成已订阅的话，
+  // 「退订之后再订阅」会发成 room.update_layer —— 服务端根本没在给这条流，
+  // 换层是个空操作，格子就一直黑着，两边都不报错。
+  const auto existing = ctx.subscribe.find(trackId);
+  if (existing != ctx.subscribe.end() && existing->second != "unsubscribing") {
     return roomOut(next, {frameOf(frame::kRoomUpdateLayer,
                                   obj({{"track_id", Json::make(trackId)},
                                        {"max_layer", Json::make(maxLayer)}}))});
@@ -98,7 +102,11 @@ RoomOutput subscribeTrack(const RoomContext& ctx, const Json& args) {
 RoomOutput unsubscribeTrack(const RoomContext& ctx, const Json& args) {
   const std::string trackId = str(args, "track_id");
   RoomContext next = ctx;
-  next.subscribe[trackId] = "unsubscribing";
+  // **没订阅过就不要往表里塞条目**：那条凭空出现的记账会让后续的 subscribe
+  // 误判成「已订阅」。帧照发（退订是幂等的，R3），只是不记账。
+  if (next.subscribe.find(trackId) != next.subscribe.end()) {
+    next.subscribe[trackId] = "unsubscribing";
+  }
   return roomOut(next, {frameOf(frame::kRoomUnsubscribe,
                                 obj({{"track_id", Json::make(trackId)}}))});
 }
@@ -133,6 +141,14 @@ RoomOutput reduceRoomInternal(const RoomContext& ctx, const std::string& name) {
   if (name == "disconnected") {
     // 断线**不等于**离房：协议给了 30 秒恢复窗口，房内其他人这时还看得见我们。
     if (ctx.state == RoomState::Idle) return roomOut(ctx);
+    /*
+      **joining 不能也塌进 reconnecting**。reconnecting 的含义是「服务端那边还认我们
+      是房里的人，恢复了就接着用」；而 join 还在飞的时候掉线，服务端压根没把我们加进去。
+      两者混成一个状态，resumeRoom 就再也分不开，只能一律宣布 joined（见那边的注释）。
+
+      留在 joining 不影响缓存：不变量 R2 的缓存对 joining 与 reconnecting 一视同仁。
+    */
+    if (ctx.state == RoomState::Joining) return roomOut(ctx);
     RoomContext next = ctx;
     next.state = RoomState::Reconnecting;
     return roomOut(next);
@@ -213,6 +229,9 @@ RoomOutput reduceRoomAct(const RoomContext& ctx, const std::string& op, const Js
   if (op == "publish") return publishTrack(ctx, args);
   if (op == "unpublish") return unpublishTrack(ctx, args);
   if (op == "mute") {
+    // args 里的 track_id 是**服务端分配的那个**，不是本端 cid
+    // （room_fsm.json 的 join_publish_mute_leave 第 10 步钉死了这条契约）。
+    // 换算是调用方的事——媒体面手里只有 cid，见 MediaPlane::setMuted。
     return roomOut(ctx, {frameOf(frame::kRoomMute,
                                  obj({{"track_id", Json::make(str(args, "track_id"))},
                                       {"muted", Json::make(boolean(args, "muted"))}}))});
@@ -250,6 +269,28 @@ RoomOutput replayBuffered(const RoomContext& ctx) {
 
 RoomOutput resumeRoom(const RoomContext& ctx, bool resumed) {
   if (!resumed) return roomOut(clearedRoom(RoomState::Idle));
+
+  /*
+    **掉线时 join 还在飞的那一路要重新 join，不能直接宣布 joined。**
+
+    `resumed=true` 说的是「会话还在」，不是「成员关系还在」——join 没走完，服务端
+    从来没把我们加进这个房间。而在途的那条 `room.join` 已经被断线连带失败掉了
+    （门面对 2003 是刻意放过的，见 CallEngine::onRequestFailed），没有任何人会再管它。
+
+    照着 joined 走下去的后果：participant_id 是空的，之后每一帧都发向一个我们并不在
+    其中的房间（服务端回 1201），而重新 join 又会被 joinRoom 的「必须在 idle」挡回来，
+    这个房间**再也出不去**，只能 logout。
+  */
+  if (ctx.state == RoomState::Joining) {
+    RoomContext retry = ctx;
+    retry.state = RoomState::Idle;
+    // 走正常的 join 路径：状态、帧、以及攒下的意图全都跟着走一遍。
+    return reduceRoomAct(retry, "join",
+                         obj({{"room_id", Json::make(ctx.roomId)},
+                              {"room_token", Json::make(ctx.roomToken)},
+                              {"auto_subscribe", Json::make(ctx.autoSubscribe)}}));
+  }
+
   if (ctx.state != RoomState::Reconnecting) return roomOut(ctx);
   RoomContext next = ctx;
   next.state = RoomState::Joined;

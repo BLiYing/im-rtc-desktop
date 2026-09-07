@@ -92,7 +92,10 @@ if [ "$#" -gt 0 ]; then
 else
   SRC=()
   scan_dirs=()
-  for d in engine demo; do [ -d "$d" ] && scan_dirs+=("$d"); done
+  # **别只扫 engine 与 demo**：CONVENTIONS §3 的 600 行红线是全仓的，而 capi/ 恰恰是
+  # 增长最快的那部分——27 个回调，每个一段几乎一样的跳板。漏掉它，pre-commit 与
+  # test.sh 第 1 步会一路报绿，直到某天有人发现闸门从来没看过那个目录。
+  for d in engine capi transport demo tools; do [ -d "$d" ] && scan_dirs+=("$d"); done
   if [ ${#scan_dirs[@]} -gt 0 ]; then
     while IFS= read -r line; do SRC+=("$line"); done < <(find "${scan_dirs[@]}" \( -name "*.cpp" -o -name "*.h" -o -name "*.hpp" \) -not -path "*/build/*" 2>/dev/null | sort)
   fi

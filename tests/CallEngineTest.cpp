@@ -253,6 +253,34 @@ IMRTC_TEST(engineLogoutIsNotKickedOut, "CallEngine —— 主动 logout 不是�
   CHECK_EQ(harness.engine->roomState(), RoomState::Idle, "房间也清空");
 }
 
+IMRTC_TEST(engineLogoutIsQuietWithAnAsyncTransport,
+           "CallEngine —— logout 之后再 tick，不许冒出一条 onDisconnected（真实 Transport 是异步的）") {
+  Harness harness;
+  harness.net.deferClose = true;  // 像 IxTransport 那样：关闭事件排到 poll() 里放
+  harness.login();
+  harness.engine->call({"bob"}, "audio", false);
+  harness.reply(imrtc::okType(imrtc::frame::kCallInvite),
+                Json::parse("{\"call_id\":\"call-1\",\"room_id\":\"r-1\"}"));
+  harness.recorder->log.clear();
+
+  harness.engine->logout();
+  // 宿主的 tick 还在跑（Demo 里 disconnectFromServer 就明确又 tick 了一次）。
+  harness.engine->tick();
+
+  /*
+    **回归**：早先 logout() 只是把 tearingDown_ 竖起来、调完 close() 就立刻放平。
+    可真实 Transport 的关闭事件要到下一次 poll() 才出来，那时标记早清了，于是
+    「用户自己点的退出」还是会收到一条 onDisconnected——有的界面据此闪一下
+    「正在重连…」。假件当时是**同步**回调的，所以测试一路全绿。
+
+    现在 logout() 连同连接一起放掉，队列里攒着的事件随之丢弃。
+  */
+  for (const std::string& entry : harness.recorder->log) {
+    CHECK_TRUE(entry != "disconnected", "主动 logout 不许冒出 onDisconnected");
+  }
+  CHECK_EQ(harness.engine->connectionState(), imrtc::ConnectionState::Idle, "连接已经放掉了");
+}
+
 IMRTC_TEST(engineObserverIsWeak, "CallEngine —— 观察者放手即注销，回调不许打到已销毁的对象上") {
   Harness harness;
   harness.login();

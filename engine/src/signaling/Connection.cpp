@@ -62,6 +62,16 @@ Connection::Connection(ConnectionOptions options, ConnectionEvents events)
       events_(std::move(events)),
       pending_(options_.requestTimeoutMs) {}
 
+/**
+ * wallNowMs 给信封的 `ts` 用。
+ *
+ * **不能拿 tick 喂进来的 nowMs 去填**：那条时间线是单调时钟（心跳、超时、退避靠它），
+ * 填到线路上就是一个没有意义的开机计数，对端的日志再也对不上时间。
+ */
+std::int64_t Connection::wallNowMs() const {
+  return options_.wallClock ? options_.wallClock() : nowMs_;
+}
+
 Connection::~Connection() {
   // **先注销监听再放掉 Transport**：反过来的话，正在飞的回调会打到一个已析构的
   // 对象上——这正是 CONVENTIONS §5 说的「对象先死、回调后到」。
@@ -158,7 +168,8 @@ bool Connection::dispatch(const std::string& type, const Json& data, std::int64_
   const std::string reqId = nextReqId();
   std::string raw;
   try {
-    raw = encodeEnvelope(type, reqId, fields == nullptr ? data : decodeFields(*fields, data), nowMs);
+    raw = encodeEnvelope(type, reqId, fields == nullptr ? data : decodeFields(*fields, data),
+                         wallNowMs());
   } catch (const RtcError& error) {
     // 编不出来是我们自己的 bug（字段类型错、帧超长）。不发、不登记、直接报错。
     emitError(error.code(), type);
@@ -176,8 +187,8 @@ void Connection::sendFrame(const std::string& type, const std::string& reqId, co
   nowMs_ = nowMs;
   const FrameFields* fields = lookupFrame(type);
   try {
-    transport_->send(
-        encodeEnvelope(type, reqId, fields == nullptr ? data : decodeFields(*fields, data), nowMs));
+    transport_->send(encodeEnvelope(
+        type, reqId, fields == nullptr ? data : decodeFields(*fields, data), wallNowMs()));
   } catch (const RtcError& error) {
     emitError(error.code(), type);
   }
@@ -197,9 +208,19 @@ void Connection::onTransportMessage(const std::string& raw) {
     return;
   }
 
-  if (!envelope.reqId.empty() &&
-      pending_.settle(envelope, [this](const Envelope& env) { return decodeData(env); })) {
-    return;
+  if (!envelope.reqId.empty()) {
+    if (pending_.settle(envelope, [this](const Envelope& env) { return decodeData(env); })) return;
+    /*
+      带 req_id、却没人在等的 `.ok`：**那是一条迟到的应答，不是事件**。
+
+      早先它会一路掉进 dispatchEvent 被当成服务端主动推送。后果很隐蔽：一条超过
+      10 秒才回来的 `room.join.ok`——此时 expire() 已经报过超时、宿主已经收到
+      onRoomLeft——会把房间机重新推回 joined，界面上那个刚收掉的会议又活了过来。
+
+      事件的 req_id 恒为 ""（§2.2）；服务端主动发起的请求（sub 侧那条 room.offer）
+      带 req_id 但不是 `.ok`。所以这里只挡 `.ok` 这一类，别的照旧往下走。
+    */
+    if (isOkType(envelope.type)) return;
   }
   dispatchEvent(envelope);
 }

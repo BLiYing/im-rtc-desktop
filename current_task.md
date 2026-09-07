@@ -7,12 +7,28 @@
 ## 当前焦点
 
 **P5 进行中。第一~三刀 + 门面 + 媒体面接线 + 第五刀 capi + 第六刀 Qt Demo 已落地。**
-`./scripts/test.sh` **七步全绿**（macOS）：66 个引擎用例 + 21 个 Demo 界面用例，
-约 15300 行 C++17。第七步只在 `IMRTC_BUILD_DEMO=ON` 时存在（需要 Qt）。
+`./scripts/test.sh` **七步全绿**（macOS）：77 个引擎用例 + 23 个 Demo 界面用例，
+约 16700 行 C++17。第七步只在 `IMRTC_BUILD_DEMO=ON` 时存在（需要 Qt）。
 落地明细见 [current_task.archive.md](current_task.archive.md)。
 
+**刚跑完一轮 `/code-review max` 并把结论落地了**（15 条，13 修 / 1 记为待办 / 1 判为文档错）。
+其中五条是**测试当时全绿也照样存在**的：
+
+- `room.mute` 发的是本端 cid 而不是服务端 track_id —— 本端停发了，房里其他人的
+  麦克风图标永不变化，两端都不报错。（旧用例把错的值当成期望钉住了。）
+- `logout()` 的 `tearingDown_` 只在**假**传输上成立：真 Transport 异步投递关闭事件，
+  标记早清了，那条「已断开」照样弹给宿主。假件当时是同步回调的，所以测试看不见。
+- 心跳判死晚一个周期（60s vs 协议 §1.3 的 45s）。
+- join 还在飞时掉线，恢复后被直接宣布 `joined` —— 那个房间**再也出不去**。
+- 应答只按 `req_id` 认、不校验类型；超时后才回来的 `.ok` 会被当成服务端主动事件，
+  把状态机推回去。
+
+另外三条是**闸门本身**的问题：600 行体量门禁**从来没扫过 `capi/`**（只扫 engine 与 demo），
+`imrtc_v1_speaker` / `imrtc_v1_quality` 缺 `struct_size`（而它们恰恰是按**数组**交出去的），
+IxTransport 的投递队列无上限、且在锁内做 socket IO。都已修。
+
 **对外交付物已经成立**：`libim_rtc_engine_capi.dylib` + 一个 C 头，
-**导出面只有 26 个 `imrtc_v1_*` 符号**（`scripts/check-abi.sh` 守着，已进 test.sh）。
+**导出面只有 27 个 `imrtc_v1_*` 符号**（`scripts/check-abi.sh` 守着，已进 test.sh）。
 联调工具 `scripts/smoke.sh` **改成经 C ABI 走**——与 Qt / C# 宿主同一条路，
 对着真服务端跑通：握手 → 拨号 → `onCallEnd(offline)`。
 
@@ -104,9 +120,38 @@
      另有一个坑四端都钉了用例：**「要重启」和「要补一次协商」必须分开记**——
      忙的时候重启请求只能先记成待办，待办里不带「重启」这一位，补出来的就是个普通 offer，
      那条连接**永远重连不上，而日志里一切正常**。
-3. **按需**：C# / P&#8203;Invoke 绑定（C ABI 已经定型，这一层是薄的）。
+3. **回调顺序的重入问题**（code-review 记下的唯一一条待办）：`dispatchOutput` 是
+   **先发帧、再抛回调**（有意为之：宿主在 onCallBegin 里回调引擎时，状态不能比线路旧）。
+   但发帧失败会走 `failLocally` → 递归 `apply()`，于是**内层的回调先于外层抛出**——
+   `room.join` 发不出去时，宿主会先收到 onRoomLeft、再收到 onCallBegin，
+   生命周期是倒的。正解不是把两个循环调个头，而是让重入的 emit 攒到最外层 unwind
+   之后再放；这会影响所有 apply 路径（含媒体面的 dispatchAct），**得单独想清楚
+   哪些事件可以合法交错**，而且一致性向量没有覆盖这一段。
+4. **按需**：C# / P&#8203;Invoke 绑定（C ABI 已经定型，这一层是薄的）。
 
 ## 已知坑 / 限制
+
+- **C ABI 有两处不向后兼容的改动（2026-09-07，趁 0.1.0 还没有宿主接入时改掉）**：
+  - `imrtc_v1_speaker` / `imrtc_v1_quality` **各加了首字段 `uint32_t struct_size`**。
+    它们是唯二**按数组**交出去的结构体（`on_active_speakers` / `on_network_quality`
+    收指针 + 个数），宿主是按 `sizeof` 的步长在里面走 —— 没有这个字段，将来追加任何
+    字段都会让已发出去的宿主读 `items[1]` 落在结构体中间，而且**没有任何版本信号**
+    能让它察觉。已经照着 C 头重新编译过的宿主不受影响；抄过结构体定义的要同步。
+  - `CallEngineOptions` **多了一个 `wallClock`**（仅 C++ 内部接口，C ABI 不受影响）。
+    `clock` 的含义随之变成**单调时钟**，默认 `steadyClock()`；`wallClock` 默认
+    `systemClock()`，**只**用来填信封的 `ts`。原先两者是同一个墙上时钟，
+    NTP 往回校正一次就会让心跳、超时、退避集体停摆，而且一声不吭。
+
+- **`room.mute` 要的是服务端的 `track_id`，不是本端 cid**（§3.2、room_fsm.json 第 10 步）。
+  映射记在房间机的 `publishTrackIds` 里，媒体面经 `Deps::trackIdOfCid` 借出来查。
+  **`publish.ok` 还没回来的那个窗口里静音**：本端照常停发，但线路上发不出去 ——
+  当前是报一条 `invalid_state`。要做得更好就得把意图攒到 `publish.ok` 之后重放，
+  暂时没做。
+
+- **测试用的 `FakeTransport` 默认同步回调，真件是异步的。** 凡是依赖「close() 返回时
+  回调已经抛完」的逻辑，同步假件上全绿、真件上全错（`logout()` 就这么漏过一次）。
+  要守那类规则的用例，把 `FakeNet::deferClose` 打开 —— 它会像 IxTransport 那样
+  把关闭事件排到 `poll()` 里放。
 
 - **✅ 已决定（2026-09-06）：媒体推迟，Intel Mac 上先不支持声音与视频。**
   这是一个**决定**，不是一条待办——不要再拿它当「卡住了」重新讨论。
