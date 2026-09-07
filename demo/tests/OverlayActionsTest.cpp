@@ -178,7 +178,7 @@ void OverlayActionsTest::layerFollowsLayout() {
  * m 下发，而且完全没有症状。
  *
  * 顺带钉两件事：关摄像头（available=false）不该报，本端不该报——
- * 本端画面根本不经服务端下发，报上去只会换回一个 1306。
+ * 本端画面根本不经服务端下发，自己也不在 remoteTracks 里，报上去只会被丢掉。
  */
 void OverlayActionsTest::layerIsReportedOnVideoAvailable() {
   CallOverlay overlay;

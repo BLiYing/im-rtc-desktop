@@ -97,9 +97,10 @@ IMRTC_TEST(capiSetRemoteLayerRejectsBadLayer,
   CHECK_EQ(imrtc_v1_engine_create(&options, &engine), std::int32_t{IMRTC_V1_OK}, "create");
 
   /*
-    协议 §3.5 只认 none/l/m/h。**这是这条路上唯一的一道校验**——协议说非法值
-    回 1306，但服务端当前不校验（2026-09-07 实测），SFU 又把不认识的值兜底成
-    最低层。放过去的后果是那条流被永久锁在 l，画面糊而日志全干净。
+    协议 §2.4 规则 6 只认 none/l/m/h，并规定**集合外的值必须兜底**（兜到 l）
+    而不是报错——这是 §10 前向兼容的前提，所以服务端按设计不会拒绝我们
+    （2026-09-07 实测：发 "zzz" 照样回 .ok）。于是这道同步校验是**宿主唯一
+    会收到的反馈**，放过去的后果只是那条流被降到 l、画面糊。
   */
   for (const char* good : {"none", "l", "m", "h"}) {
     CHECK_EQ(imrtc_v1_set_remote_layer(engine, "bob", good), std::int32_t{IMRTC_V1_OK}, good);

@@ -354,8 +354,9 @@ IMRTC_TEST(engineSetRemoteLayerDropsUnknownUid,
   /*
     宿主在 onUserEnter 就把格子建好、顺手报个 l 是最自然的写法，而那个人的
     视频轨可能几百毫秒后才到。这时**什么都不做**是对的；发一帧 track_id 为空的
-    update_layer 上去，换回来的是 1306，界面上会冒出一个莫名其妙的错误提示。
-    宿主该在 onUserVideoAvailable 里补报一次——这条写在 imrtc_c.h 里。
+    update_layer 上去，换回来的是 1301 track_not_found，界面上会冒出一个
+    莫名其妙的错误提示。宿主该在 onUserVideoAvailable 里补报一次——
+    这条写在 imrtc_c.h 里。
   */
   Harness harness;
   joinedWithTracks(harness, "[]");
