@@ -41,3 +41,6 @@ third_party/*.zip
 *.swp
 # demo-shots.sh 的产物
 build/demo-shots/
+
+# CodeGraph 本地索引缓存，不进版本库
+.codegraph/
