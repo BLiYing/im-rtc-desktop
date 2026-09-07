@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <vector>
@@ -289,6 +290,79 @@ IMRTC_TEST(engineSubAnswerEchoesReqId, "CallEngine —— sub 侧的 answer 要�
   CHECK_EQ(imtest::field(answer, "type"), std::string("room.answer"), "该回一条 room.answer");
   CHECK_EQ(imtest::field(answer, "req_id"), serverReqId, "必须回显服务端那个 req_id");
   CHECK_EQ(imtest::field(answer, "pc"), std::string("sub"), "回的是 sub 那条 PC");
+}
+
+/**
+ * joinedWithTracks 把 harness 送进一个已经有远端轨道的房间。
+ *
+ * `tracks` 直接写进 `room.join.ok`——这与 `room.track_published` 走的是同一条
+ * 记账路径（RoomRecv.cpp），但少三帧噪声。
+ */
+void joinedWithTracks(Harness& harness, const std::string& tracksJson) {
+  harness.login();
+  harness.engine->joinRoom("r-1", "tk");
+  harness.reply(imrtc::okType(imrtc::frame::kRoomJoin),
+                Json::parse("{\"room_id\":\"r-1\",\"room_kind\":\"meeting\","
+                            "\"participant_id\":\"p-1\",\"participants\":[],\"tracks\":" +
+                            tracksJson + "}"));
+}
+
+IMRTC_TEST(engineSetRemoteLayerSendsUpdateLayer,
+           "CallEngine —— setRemoteLayer 发 room.update_layer，带那个人的 track_id（§3.5）") {
+  Harness harness;
+  joinedWithTracks(harness, "[{\"track_id\":\"t-bob-v\",\"uid\":\"bob\",\"kind\":\"video\"}]");
+
+  harness.engine->setRemoteLayer("bob", "h");
+
+  const Json frame = imtest::lastSent(harness.net.current());
+  CHECK_EQ(imtest::field(frame, "type"), std::string("room.update_layer"), "该发 room.update_layer");
+  CHECK_EQ(imtest::field(frame, "track_id"), std::string("t-bob-v"), "带的是 bob 那条视频轨");
+  CHECK_EQ(imtest::field(frame, "max_layer"), std::string("h"), "层上界是 h");
+  CHECK_TRUE(!imtest::field(frame, "req_id").empty(), "它是一次请求，必须有 req_id");
+}
+
+IMRTC_TEST(engineSetRemoteLayerCoversEveryVideoTrack,
+           "CallEngine —— 一个人有多条视频轨时每条都要报，音频轨不参与分层") {
+  /*
+    屏幕共享落地后一个人就是两条视频轨。只改第一条的话画面全对，
+    只是另一条白白多占带宽——**没有任何症状**，所以只能靠用例钉住。
+  */
+  Harness harness;
+  joinedWithTracks(harness,
+                   "[{\"track_id\":\"t-cam\",\"uid\":\"bob\",\"kind\":\"video\"},"
+                   "{\"track_id\":\"t-mic\",\"uid\":\"bob\",\"kind\":\"audio\"},"
+                   "{\"track_id\":\"t-screen\",\"uid\":\"bob\",\"kind\":\"video\"},"
+                   "{\"track_id\":\"t-carol\",\"uid\":\"carol\",\"kind\":\"video\"}]");
+
+  const std::size_t before = harness.net.current().sent.size();
+  harness.engine->setRemoteLayer("bob", "l");
+
+  std::vector<std::string> touched;
+  for (std::size_t i = before; i < harness.net.current().sent.size(); ++i) {
+    const Json frame = imtest::parseSent(harness.net.current(), i);
+    CHECK_EQ(imtest::field(frame, "type"), std::string("room.update_layer"), "只该发换层帧");
+    CHECK_EQ(imtest::field(frame, "max_layer"), std::string("l"), "每条都是 l");
+    touched.push_back(imtest::field(frame, "track_id"));
+  }
+  std::sort(touched.begin(), touched.end());
+  CHECK_EQ(touched, (std::vector<std::string>{"t-cam", "t-screen"}),
+           "bob 的两条视频轨都要报，音频轨与 carol 一概不碰");
+}
+
+IMRTC_TEST(engineSetRemoteLayerDropsUnknownUid,
+           "CallEngine —— 轨道还没发布时静默丢掉，不许发一帧空 track_id 上去") {
+  /*
+    宿主在 onUserEnter 就把格子建好、顺手报个 l 是最自然的写法，而那个人的
+    视频轨可能几百毫秒后才到。这时**什么都不做**是对的；发一帧 track_id 为空的
+    update_layer 上去，换回来的是 1306，界面上会冒出一个莫名其妙的错误提示。
+    宿主该在 onUserVideoAvailable 里补报一次——这条写在 imrtc_c.h 里。
+  */
+  Harness harness;
+  joinedWithTracks(harness, "[]");
+
+  const std::size_t before = harness.net.current().sent.size();
+  harness.engine->setRemoteLayer("bob", "h");
+  CHECK_EQ(harness.net.current().sent.size(), before, "一帧都不该发");
 }
 
 IMRTC_TEST(engineCallbackCoverage, "CallEngine —— 两台状态机能抛的每一个回调名，映射表里都有人接") {

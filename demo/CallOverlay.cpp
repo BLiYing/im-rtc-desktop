@@ -21,9 +21,6 @@ namespace {
 
 /** 结束态停留几秒让人看清原因，再自动关。 */
 constexpr int kEndedLingerMs = 2500;
-/** 九宫格：3×3（桌面与手机同值，草图 §05 / §06-S）。 */
-constexpr int kGridColumns = 3;
-
 }  // namespace
 
 CallOverlay::CallOverlay(QWidget* parent) : QWidget(parent) {

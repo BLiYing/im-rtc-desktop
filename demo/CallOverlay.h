@@ -121,6 +121,11 @@ signals:
   /** 本端预览走的是另一条口子（`attachLocalView`），见 SoloVideo.h。 */
   void attachLocalViewRequested(void* nativeHandle);
   void detachLocalViewRequested();
+  /**
+   * 报某人画面的**层上界**（协议 §3.5）。九宫格里是缩略图报 `"l"`，
+   * 1v1 铺满整屏报 `"h"`。**这一条不依赖媒体实现**，是纯信令。
+   */
+  void remoteLayerRequested(const QString& uid, const QString& layer);
   void closed();
 
 protected:
@@ -133,6 +138,8 @@ private:
   void rebuildTiles();
   /** 按当前状态决定 1v1 那一屏要不要画面层，并负责 attach / detach 的顺序。 */
   void syncSoloVideo();
+  /** 按当前版式报层上界：九宫格是缩略图（`l`），1v1 铺满（`h`）。 */
+  void reportLayer(const QString& uid);
   VideoTile* tileFor(const QString& uid);
   void updateTitle();
   bool isRoomMode() const { return !roomId_.isEmpty(); }

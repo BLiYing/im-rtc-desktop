@@ -48,19 +48,45 @@
 160×90 压在右下角。**但引擎侧没通电**——没有媒体适配器时那两个方法直接返回。
 等 `WebRTCAdapter` 落地就自动生效，Demo 这边不用改。`--fake-video` 能看到它。
 
-**C ABI 加了一个符号**（2026-09-07，追加式，没动任何已有的）：
-`imrtc_v1_attach_local_view(engine, handle)` —— **本端预览**。
-做 1v1 那一屏时才发现缺：`attachView` 是按 uid 找**远端**轨道的，而引擎
-不知道自己的 uid，本端画面也来自采集侧、根本没有 trackId。导出面 25 → 26。
+**C ABI 加了两个符号**（2026-09-07，都是追加式，已有的一个没动，25 → 27）：
+
+1. `imrtc_v1_attach_local_view(engine, handle)` —— **本端预览**。做 1v1 那一屏时
+   才发现缺：`attachView` 是按 uid 找**远端**轨道的，而引擎不知道自己的 uid，
+   本端画面也来自采集侧、根本没有 trackId。
+2. `imrtc_v1_set_remote_layer(engine, uid, layer)` —— **层上界**（协议 §3.5）。
+   底下全是现成的（`RoomMachine::updateLayer` + `remoteTracks` 记账早就有了），
+   缺的只是门面与 C ABI 这两层。Web 端一直有，桌面端漏了。
+
+**层上界这一条是唯一一个不用等媒体的**：`room.update_layer` 是纯信令帧。
+已对真服务端验过（2026-09-07）——用 `rtc-cli` 的 `publishStub` 那条路造一个
+只登记 Track、不做媒体协商的发布者占住会议房，桌面端进同一个房、收到
+`onUserVideoAvailable`、报 `l`，服务端回 `.ok`（持房 18 秒 > 10 秒请求超时，
+没有 2004，所以应答确实回来了）。Demo 里九宫格报 `l`、1v1 报 `h`。
+
+**顺带发现一个服务端的洞（已开任务，不在本仓修）**：协议 §3.5 说非法
+`max_layer` 回 1306，但**服务端不校验**——实测发 `"zzz"` 照样回 `.ok`、日志干净，
+而 `internal/sfu/layer.go` 的 `layerRank()` 把不认识的值兜底成 `0`（等同 `l`）。
+后果是写错一个字母那条流被**永久锁在最低层，没有报错也没有日志**。
+所以桌面端在 **C ABI 边界上自己挡了**这一类值（`isValidLayer`，名单从
+`imrtc::layers()` 读，不另抄一份）。
+
+**边界上还有一个洞（已知，未修）**：`probeMicrophone` / `startLocalPreview`
+在 `CallEngine.h` 的公开面上，**但不在 27 个导出符号里**——走纯 C ABI 的宿主
+（Qt / C#）根本调不到。原因是它们带 completion 回调，跨 C ABI 要另定形状，
+**与渲染路径 B 是同一类问题**，该一起定。现在没人踩到是因为没有媒体适配器时
+它们本来就是空操作。
 
 **还没有的**：真实媒体（没有 SDP、没有 ICE、没有声音画面）、设备枚举、
 渲染路径 B（原始帧回调）、共享屏幕、C# 绑定。**Windows 一次都没编译过。**
 
 ## 下一步
 
-1. **渲染路径 B（原始帧回调）**：C ABI 里还没有这个口子。它要定的是帧格式
-   （I420/NV12）、生命周期（那块内存谁free）、以及**回调频率**（30fps 跨 ABI
-   是个真问题）。等媒体落地一起开，但**形状可以先定**。
+1. **异步口子的形状**（一件事，两处用）：渲染路径 B 的原始帧回调，与
+   `probeMicrophone` / `startLocalPreview` 这两个还没出 C ABI 的方法，
+   卡的是同一个问题——**带 completion / 高频回调的东西怎么过 C ABI**。
+   要定：帧格式（I420/NV12）、那块内存谁 free、回调频率（30fps 跨 ABI 是真问题）、
+   completion 的 `user_data` 生命周期。**实现等媒体，形状现在就能定**，
+   而且该一次定完，别分两次定出两套风格。
 2. **`WebRTCAdapter`**：等 Apple Silicon 或 Windows 机器。宿主侧的坑已经清完了，
    到时候只剩一个文件。
 2. ~~**P5 第四刀下半 · `WebRTCAdapter`**~~ —— **已推迟，不在当前排期内**（2026-09-06 定）。
@@ -135,6 +161,16 @@
 
   代价是 `demo/i18n/imrtc_demo_en.ts`（132 条）**手工维护**：
   **加了新的 `tr()` 之后记得同步 .ts**，否则那条在英文下会静默退回中文，不报错。
+- **层上界的合法性只有我们这一道校验**：协议 §3.5 定义了 1306 `layer_unavailable`，
+  但**服务端从未使用它**（`internal/errcode` 里定义了，没有任何调用点），
+  `Room.UpdateLayer` 原样存下非法值，`internal/sfu/layer.go` 的 `layerRank()`
+  再 `default: return 0` 把它兜底成最低层。所以非法层名的症状是
+  **画面糊 + 日志全干净**。桌面端在 `imrtc_v1_set_remote_layer` 里同步挡回
+  `BAD_PARAMS`。服务端那边已开任务，**修好之前别把这道校验当冗余删掉**。
+- **报层要在 `onUserVideoAvailable` 里报，不能只在建格子时报**。格子通常在
+  `onUserEnter` 就建好，那时对方视频轨还没发布，引擎手里没有 track_id，
+  这次调用会被**静默丢掉**（返回 0，不是错误——先建格子后到轨道是正常时序）。
+  只报一次的结果是永远按默认的 `m` 下发，**没有任何症状**。
 - **本端预览必须走 `attachLocalView`，不是 `attachView(自己的 uid, …)`**。
   引擎不知道自己的 uid，本端画面也没有远端 trackId。别为此约定魔法 uid。
 - **隐藏控件不腾地方**：想让画面铺满时把头像 `hide()` 掉是不够的，

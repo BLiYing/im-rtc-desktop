@@ -211,6 +211,14 @@ public:
     return call(imrtc_v1_join_room(handle_, roomId.c_str(), roomToken.c_str()));
   }
   Error leaveRoom() { return call(imrtc_v1_leave_room(handle_)); }
+  /**
+   * setRemoteLayer 报某人画面的层上界（`"none"|"l"|"m"|"h"`，协议 §3.5）。
+   * 九宫格报 `"l"`、放大那一格报 `"h"`。轨道还没发布时这次会被丢掉且返回 0——
+   * 要在 `onUserVideoAvailable` 里再报一次。详见 imrtc_c.h。
+   */
+  Error setRemoteLayer(const std::string& uid, const std::string& layer) {
+    return call(imrtc_v1_set_remote_layer(handle_, uid.c_str(), layer.c_str()));
+  }
 
   Error openMic() { return call(imrtc_v1_open_mic(handle_)); }
   Error closeMic() { return call(imrtc_v1_close_mic(handle_)); }

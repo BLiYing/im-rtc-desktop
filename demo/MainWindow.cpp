@@ -351,6 +351,12 @@ void MainWindow::wireCall() {
           [this](void* handle) { bridge_->attachLocalView(handle); });
   connect(overlay_, &CallOverlay::detachLocalViewRequested, this,
           [this] { bridge_->attachLocalView(nullptr); });
+  // 层上界（协议 §3.5）。**这一条与画面无关，是纯信令**——媒体还没落地时
+  // 它已经真的发到服务端上了，所以这是渲染那一批里唯一现在就能验的。
+  connect(overlay_, &CallOverlay::remoteLayerRequested, this,
+          [this](const QString& uid, const QString& layer) {
+            bridge_->setRemoteLayer(uid, layer);
+          });
   connect(bridge_, &EngineBridge::activeSpeakers, overlay_, &CallOverlay::onSpeakers);
   connect(bridge_, &EngineBridge::networkQuality, overlay_, &CallOverlay::onQuality);
 

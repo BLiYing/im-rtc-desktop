@@ -64,6 +64,23 @@ void CallOverlay::onMemberVideo(const QString& uid, bool available) {
   // 这一条就是渲染路径 A 的触发点：对端一发布视频轨，格子就建原生子窗口
   // 并把句柄递给引擎。对端关摄像头就摘掉。
   if (VideoTile* tile = tileFor(uid)) tile->setVideoAvailable(available);
+  // **层上界必须在这里报，不能只在建格子的时候报**：格子通常在 onUserEnter
+  // 就建好了，那一刻对方的视频轨还没发布，引擎会把那次调用丢掉（不报错）。
+  // 结果是九宫格里每个人都按默认的 m 下发——画面完全正常，只是白花带宽，
+  // 没有任何症状能让人发现。这条坑写在 imrtc_c.h 的 set_remote_layer 上。
+  if (available) reportLayer(uid);
+}
+
+/**
+ * reportLayer 把「这一格有多大」翻译成协议 §3.5 的层上界。
+ *
+ * 九宫格里一格最多 153×88，要 720p 是纯浪费，报 `l`；1v1 铺满 520×208，报 `h`。
+ * **是上界不是命令**：服务端还会按带宽估计再压一次，所以报 `h` 不等于一定给 `h`。
+ */
+void CallOverlay::reportLayer(const QString& uid) {
+  if (uid.isEmpty() || uid == selfUid_) return;  // 本端画面不经服务端下发
+  const bool grid = isGroup_ || isRoomMode();
+  emit remoteLayerRequested(uid, grid ? QStringLiteral("l") : QStringLiteral("h"));
 }
 
 void CallOverlay::setFakeVideo(bool on) {

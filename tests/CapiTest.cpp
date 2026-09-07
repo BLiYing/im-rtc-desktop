@@ -80,12 +80,40 @@ IMRTC_TEST(capiNullHandleIsSafe, "C ABI —— 对空句柄调任何方法都返
            "attach_view");
   CHECK_EQ(imrtc_v1_attach_local_view(nullptr, nullptr), std::int32_t{IMRTC_V1_ERR_BAD_PARAMS},
            "attach_local_view");
+  CHECK_EQ(imrtc_v1_set_remote_layer(nullptr, "bob", "h"), std::int32_t{IMRTC_V1_ERR_BAD_PARAMS},
+           "set_remote_layer");
   std::int32_t state = -1;
   CHECK_EQ(imrtc_v1_get_call_state(nullptr, &state), std::int32_t{IMRTC_V1_ERR_BAD_PARAMS},
            "get_call_state");
   // destroy 对空指针必须是空操作——宿主的清理路径上传空是常态。
   imrtc_v1_engine_destroy(nullptr);
   CHECK_TRUE(true, "destroy(nullptr) 没崩");
+}
+
+IMRTC_TEST(capiSetRemoteLayerRejectsBadLayer,
+           "C ABI —— 非法层名在边界上就被挡回，不许上线路") {
+  imrtc_v1_options options = makeOptions();
+  imrtc_v1_engine* engine = nullptr;
+  CHECK_EQ(imrtc_v1_engine_create(&options, &engine), std::int32_t{IMRTC_V1_OK}, "create");
+
+  /*
+    协议 §3.5 只认 none/l/m/h。**这是这条路上唯一的一道校验**——协议说非法值
+    回 1306，但服务端当前不校验（2026-09-07 实测），SFU 又把不认识的值兜底成
+    最低层。放过去的后果是那条流被永久锁在 l，画面糊而日志全干净。
+  */
+  for (const char* good : {"none", "l", "m", "h"}) {
+    CHECK_EQ(imrtc_v1_set_remote_layer(engine, "bob", good), std::int32_t{IMRTC_V1_OK}, good);
+  }
+  for (const char* bad : {"high", "L", "", "1"}) {
+    CHECK_EQ(imrtc_v1_set_remote_layer(engine, "bob", bad),
+             std::int32_t{IMRTC_V1_ERR_BAD_PARAMS}, bad);
+  }
+  CHECK_EQ(imrtc_v1_set_remote_layer(engine, nullptr, "h"),
+           std::int32_t{IMRTC_V1_ERR_BAD_PARAMS}, "uid 为空");
+  CHECK_EQ(imrtc_v1_set_remote_layer(engine, "bob", nullptr),
+           std::int32_t{IMRTC_V1_ERR_BAD_PARAMS}, "layer 为空");
+
+  imrtc_v1_engine_destroy(engine);
 }
 
 IMRTC_TEST(capiLifecycle, "C ABI —— create → set_observer → 调用 → destroy 全程干净") {

@@ -252,6 +252,33 @@ IMRTC_API int32_t imrtc_v1_join_room(imrtc_v1_engine* engine, const char* room_i
                                      const char* room_token);
 IMRTC_API int32_t imrtc_v1_leave_room(imrtc_v1_engine* engine);
 
+/**
+ * 报某个 uid 的画面**层上界**（协议 §3.5，线路上是 `room.update_layer`）。
+ *
+ * `layer` 取 `"none"` / `"l"` / `"m"` / `"h"`，其余值直接回
+ * `IMRTC_V1_ERR_BAD_PARAMS`，**不会发到线路上**。`"none"` = 暂停下发该
+ * Track 的媒体，订阅关系保留。
+ *
+ * **这道校验必须在这里做，指望不上服务端**（2026-09-07 实测）：协议 §3.5 写着
+ * 非法 `max_layer` 回 1306，但当前服务端**不校验**——它照收，SFU 的 `layerRank()`
+ * 又把不认识的值兜底成 `0`（等同 `"l"`）。于是写错一个字母的后果是
+ * **那条流被永久锁在最低层，而且没有报错、没有日志**。
+ *
+ * 典型用法：九宫格缩略图报 `"l"`，双击放大那一格报 `"h"`。
+ *
+ * 三件事必须知道：
+ *   1. **是上界不是命令**。SFU 按 `min(你报的, 带宽估计允许的, 实际存在的)` 选层，
+ *      所以调完不保证立刻变，它还要等目标层的关键帧。
+ *   2. **不触发重协商**，是一条普通的信令请求。
+ *   3. **那个人的视频轨还没发布时这次调用会被丢掉**，返回值仍是 0。
+ *      宿主通常在 `on_user_enter` 就建好格子，而轨道晚几百毫秒才到——
+ *      所以**要在 `on_user_video_available` 里再报一次**。
+ *
+ * 这条**不需要媒体实现**：纯信令，`WebRTCAdapter` 没落地时也照发。
+ */
+IMRTC_API int32_t imrtc_v1_set_remote_layer(imrtc_v1_engine* engine, const char* uid,
+                                            const char* layer);
+
 /* ---- 媒体 ---- */
 
 IMRTC_API int32_t imrtc_v1_open_mic(imrtc_v1_engine* engine);

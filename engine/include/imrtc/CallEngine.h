@@ -120,6 +120,23 @@ public:
   /** leaveRoom 离房。 */
   void leaveRoom();
 
+  /**
+   * setRemoteLayer 报某人画面的**层上界**（协议 §3.5：`room.update_layer`）。
+   *
+   * 九宫格缩略图报 `"l"`、双击放大报 `"h"`。`layer` 取 `none | l | m | h`，
+   * `"none"` = 暂停下发该 Track 的媒体但保留订阅关系。
+   *
+   * **是上界不是命令**：SFU 按 `min(你报的上界, 带宽估计允许的层, 实际存在的层)` 选层，
+   * 所以调完不保证立刻变——它还要等目标层的关键帧。**不触发重协商**。
+   *
+   * 这条**不依赖媒体适配器**：它是一条纯信令帧，`WebRTCAdapter` 没落地时也照发。
+   *
+   * **那个人的视频轨还没发布时这次调用会被丢掉**（不报错）。宿主在 `onUserEnter`
+   * 就把格子建好是最自然的写法，而轨道可能几百毫秒后才到——所以**要在
+   * `onUserVideoAvailable` 里再报一次**。Web 端同样如此，两端行为一致。
+   */
+  void setRemoteLayer(const std::string& uid, const std::string& layer);
+
   // ---- 媒体（`mediaAdapter` 为空时全部是空操作）----
 
   /**

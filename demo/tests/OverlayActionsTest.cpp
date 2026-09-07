@@ -42,6 +42,8 @@ private slots:
   void captionsFollowHeadcount();
   void clickIsWiredToTheRule();
   void recordSummaryMatchesSpec();
+  void layerFollowsLayout();
+  void layerIsReportedOnVideoAvailable();
 };
 
 /** 会议房没有 call：必须 leaveRoom，发 hangup 会被本地拒成 2005。 */
@@ -130,6 +132,75 @@ void OverlayActionsTest::clickIsWiredToTheRule() {
 }
 
 /** 记录摘要要与设计稿 §09「Kit 文案定稿」那张表逐行对上。 */
+/**
+ * 层上界跟着版式走（协议 §3.5）：九宫格是缩略图报 `l`，1v1 铺满报 `h`。
+ *
+ * 报反了不会有任何症状——画面照样是对的，只是九宫格里每格都在收 720p，
+ * 上行、SFU 转发、下行三段带宽一起翻几倍。这种事只有量带宽才发现得了，
+ * 所以只能靠用例钉住。
+ */
+void OverlayActionsTest::layerFollowsLayout() {
+  CallOverlay group;
+  group.setSelfUid(QStringLiteral("alice"));
+  group.beginOutgoing({QStringLiteral("bob"), QStringLiteral("carol")},
+                      QStringLiteral("video"), true);
+  group.markConnected(QStringLiteral("caller"));
+  QSignalSpy groupSpy(&group, &CallOverlay::remoteLayerRequested);
+  group.onMemberVideo(QStringLiteral("bob"), true);
+  QCOMPARE(groupSpy.count(), 1);
+  QCOMPARE(groupSpy.at(0).at(0).toString(), QStringLiteral("bob"));
+  QCOMPARE(groupSpy.at(0).at(1).toString(), QStringLiteral("l"));
+
+  CallOverlay solo;
+  solo.setSelfUid(QStringLiteral("alice"));
+  solo.beginOutgoing({QStringLiteral("bob")}, QStringLiteral("video"), false);
+  solo.markConnected(QStringLiteral("caller"));
+  QSignalSpy soloSpy(&solo, &CallOverlay::remoteLayerRequested);
+  solo.onMemberVideo(QStringLiteral("bob"), true);
+  QCOMPARE(soloSpy.count(), 1);
+  QCOMPARE(soloSpy.at(0).at(1).toString(), QStringLiteral("h"));
+
+  // 会议房与群通话同版式，也是缩略图。
+  CallOverlay room;
+  room.setSelfUid(QStringLiteral("alice"));
+  room.beginRoom(QStringLiteral("r-1"));
+  QSignalSpy roomSpy(&room, &CallOverlay::remoteLayerRequested);
+  room.onMemberVideo(QStringLiteral("bob"), true);
+  QCOMPARE(roomSpy.count(), 1);
+  QCOMPARE(roomSpy.at(0).at(1).toString(), QStringLiteral("l"));
+}
+
+/**
+ * **必须在「对方视频轨可用」那一刻报，不能只在建格子时报。**
+ *
+ * 格子通常在 onUserEnter 就建好了，那时对方的视频轨还没发布，引擎会把那次
+ * setRemoteLayer 丢掉（不报错，见 imrtc_c.h）。只在建格子时报 = 永远按默认的
+ * m 下发，而且完全没有症状。
+ *
+ * 顺带钉两件事：关摄像头（available=false）不该报，本端不该报——
+ * 本端画面根本不经服务端下发，报上去只会换回一个 1306。
+ */
+void OverlayActionsTest::layerIsReportedOnVideoAvailable() {
+  CallOverlay overlay;
+  overlay.setSelfUid(QStringLiteral("alice"));
+  overlay.beginOutgoing({QStringLiteral("bob"), QStringLiteral("carol")},
+                        QStringLiteral("video"), true);
+  overlay.markConnected(QStringLiteral("caller"));
+
+  QSignalSpy spy(&overlay, &CallOverlay::remoteLayerRequested);
+  overlay.onMemberEntered(QStringLiteral("bob"));
+  QCOMPARE(spy.count(), 0);  // 进房还没发布轨道：报了也会被丢掉
+
+  overlay.onMemberVideo(QStringLiteral("bob"), true);
+  QCOMPARE(spy.count(), 1);
+
+  overlay.onMemberVideo(QStringLiteral("bob"), false);
+  QCOMPARE(spy.count(), 1);  // 关摄像头没什么层可报
+
+  overlay.onMemberVideo(QStringLiteral("alice"), true);
+  QCOMPARE(spy.count(), 1);  // 本端不经服务端下发
+}
+
 void OverlayActionsTest::recordSummaryMatchesSpec() {
   CallRecord record;
   record.peer = QStringLiteral("bob");

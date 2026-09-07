@@ -410,6 +410,12 @@ qint32 EngineBridge::attachLocalView(void* nativeHandle) {
   return engine_->attachLocalView(nativeHandle).code();
 }
 
+qint32 EngineBridge::setRemoteLayer(const QString& uid, const QString& layer) {
+  if (!engine_) return IMRTC_V1_ERR_INVALID_STATE;
+  qCInfo(lcBridge, "setRemoteLayer uid=%s layer=%s", qUtf8Printable(uid), qUtf8Printable(layer));
+  return engine_->setRemoteLayer(uid.toStdString(), layer.toStdString()).code();
+}
+
 qint32 EngineBridge::openMic() {
   return engine_ ? engine_->openMic().code() : IMRTC_V1_ERR_INVALID_STATE;
 }

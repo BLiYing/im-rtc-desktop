@@ -113,6 +113,12 @@ public:
    */
   qint32 attachLocalView(void* nativeHandle);
 
+  /**
+   * 报某人画面的层上界（协议 §3.5）。九宫格报 `"l"`、1v1 铺满报 `"h"`。
+   * **纯信令，不需要媒体实现**——这一条现在就真的发到服务端上。
+   */
+  qint32 setRemoteLayer(const QString& uid, const QString& layer);
+
   qint32 openMic();
   qint32 closeMic();
   qint32 openCamera();

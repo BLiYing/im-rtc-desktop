@@ -1,7 +1,9 @@
 #include "imrtc/CallEngine.h"
 
 #include <chrono>
+#include <string>
 #include <utility>
+#include <vector>
 
 #include "imrtc/Errors.h"
 #include "imrtc/MachineTypes.h"
@@ -193,6 +195,33 @@ void CallEngine::joinRoom(const std::string& roomId, const std::string& roomToke
 }
 
 void CallEngine::leaveRoom() { apply(MachineInput::act("leave"), ""); }
+
+void CallEngine::setRemoteLayer(const std::string& uid, const std::string& layer) {
+  /*
+    对**那个人的每一条视频轨**都报一遍，不是只报第一条。
+
+    现在一个人只有一条摄像头轨，但屏幕共享一落地就是两条，那时「只改了一条、
+    另一条还停在 m」是个看不出来的 bug——画面是对的，只是多花了带宽。
+    Web 端（packages/call-engine/src/engine.ts）也是这么循环的，两端保持一致。
+
+    音频轨不参与：分层只对视频有意义（§3.5）。
+
+    **先收集再发**：`apply()` 会整个换掉 `context_`（状态机是不可变风格，
+    每次转移产出一份新的 RoomContext），在 `remoteTracks` 上边遍历边 apply
+    就是拿着已经失效的迭代器走——ASan 抓得到，但那时已经是线上崩溃了。
+  */
+  std::vector<std::string> trackIds;
+  for (const auto& entry : context_.room.remoteTracks) {
+    if (entry.second.uid == uid && entry.second.kind == "video") trackIds.push_back(entry.first);
+  }
+
+  for (const std::string& trackId : trackIds) {
+    Json args = Json::makeObject();
+    args.set("track_id", Json::make(trackId));
+    args.set("max_layer", Json::make(layer));
+    apply(MachineInput::act("update_layer", args), "");
+  }
+}
 
 void CallEngine::notifyMediaReady() { apply(MachineInput::internal("media_ready"), ""); }
 

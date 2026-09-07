@@ -21,7 +21,7 @@ MSVC 与 MinGW 不通、`/MD` 与 `/MT` 不通、Debug 与 Release 的 CRT 不�
 libstdc++ 与 libc++ 不通。导出 C++ 类等于「只服务与我们同工具链的宿主」；
 导出 C 等于 Qt / MFC / WPF+C# / Delphi / Java / Python / Flutter / Swift 都能接。
 
-动态库的导出面只有 **26 个 `imrtc_v1_*` 符号**，有脚本守着（`scripts/check-abi.sh`）。
+动态库的导出面只有 **27 个 `imrtc_v1_*` 符号**，有脚本守着（`scripts/check-abi.sh`）。
 你可以自己核一遍：macOS 用 `dyld_info -exports`，Windows 用 `dumpbin /exports`。
 
 ---
@@ -390,6 +390,43 @@ imrtc_v1_attach_local_view(engine, handle);    // 本端：没有 uid 这一说
 也就是说这条线现在是**接好了但没通电**——等 `WebRTCAdapter` 落地就自动生效，
 你这边不用改。
 
+### 7.9 层上界：**格子多大就要多大的流**
+
+渲染路径 A 只解决「画面画到哪儿」，不解决「该收多大的流」。后者是
+`imrtc_v1_set_remote_layer(engine, uid, layer)`（协议 §3.5）。
+
+```c
+/* 九宫格里是缩略图 */          imrtc_v1_set_remote_layer(engine, "bob", "l");
+/* 双击放大 / 1v1 铺满 */       imrtc_v1_set_remote_layer(engine, "bob", "h");
+/* 暂时不看他（订阅关系保留） */ imrtc_v1_set_remote_layer(engine, "bob", "none");
+```
+
+**不报的后果不是报错，是白花带宽**：不报层时服务端按默认的 `m` 下发，
+九宫格里九个人就是九路中等分辨率往一个 153×88 的格子里塞。画面完全正常，
+只是上行、SFU 转发、下行三段带宽一起翻几倍——**没有任何症状**。
+
+四件事必须知道：
+
+| | |
+|---|---|
+| **是上界不是命令** | 服务端按 `min(你报的, 带宽估计允许的, 实际存在的)` 选层。报 `h` 不等于一定给 `h`，而且要等目标层的关键帧才生效 |
+| **不触发重协商** | 一条普通的信令请求，随便调 |
+| **不需要媒体实现** | 纯信令。`WebRTCAdapter` 没落地时它也**真的在工作**——这是渲染那一批里唯一现在就能验的 |
+| **轨道没发布时会被丢掉** | 返回值仍是 0，见下 |
+
+**最容易写错的一条：必须在 `on_user_video_available` 里报，不能只在建格子时报。**
+
+你通常在 `on_user_enter` 就把格子建好了，但那一刻对方的视频轨还没发布，
+引擎手里没有 track_id，这次调用会被**静默丢掉**（返回 0，不是错误——
+"格子先建、轨道后到" 是正常时序，不该报错）。只在建格子时报一次的结果就是
+永远按默认的 `m` 下发。`demo/CallOverlayMembers.cpp` 的 `onMemberVideo()`
+是照着做的，`demo/tests/OverlayActionsTest.cpp` 有用例钉着。
+
+**层名写错没人会告诉你**：协议 §3.5 说非法 `max_layer` 回 1306，但
+**当前服务端不校验**（2026-09-07 实测：发 `"zzz"` 照样回 `.ok`，日志干净），
+SFU 又把不认识的值兜底成最低层。所以 C ABI **在自己这一侧挡了**——
+非法层名同步返回 `IMRTC_V1_ERR_BAD_PARAMS`，不发上线路。你只要检查返回值即可。
+
 ## 8. 各宿主怎么接
 
 ### Qt
@@ -477,6 +514,7 @@ imrtc_v1_attach_local_view(engine, handle);    // 本端：没有 uid 这一说
 | 登录 / 心跳 / 断线重连 | ✅ macOS 验过 |
 | 拨号 / 来电 / 接听 / 拒接 / 取消 / 挂断 | ✅ macOS 验过 |
 | 群通话成员事件、进出房间、通话记录 | ✅ macOS 验过 |
+| 层上界 `set_remote_layer`（§7.9） | ✅ macOS 对真服务端验过（**纯信令，不用等媒体**） |
 | **声音与画面** | ⬜ **没有**。见下 |
 | 设备枚举与热插拔 | ⬜ 没有 |
 | 共享屏幕 | ⬜ 没有 |

@@ -1,10 +1,12 @@
 #include "imrtc/imrtc_c.h"
 
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <vector>
 
 #include "imrtc/CallEngine.h"
+#include "imrtc/Enums.h"
 #include "imrtc/Errors.h"
 #include "imrtc/IxTransport.h"
 
@@ -27,6 +29,17 @@ std::string cstr(const char* text) { return text == nullptr ? std::string() : st
 /** toBool / fromBool 在 C 的 int32 布尔与 C++ bool 之间转（见头文件里为什么不用 _Bool）。 */
 bool toBool(imrtc_v1_bool value) { return value != 0; }
 imrtc_v1_bool fromBool(bool value) { return value ? 1 : 0; }
+
+/**
+ * isValidLayer 认协议 §3.5 的那四个值。
+ *
+ * **名单从 `imrtc::layers()` 读，不在这里再抄一份**——协议加一个层的时候，
+ * 抄本会静默地把新值挡在门外，而症状是「宿主报了 h，画面还是 m」这种没人查得动的事。
+ */
+bool isValidLayer(const std::string& layer) {
+  const imrtc::EnumValues& allowed = imrtc::layers();
+  return std::find(allowed.begin(), allowed.end(), layer) != allowed.end();
+}
 
 std::vector<std::string> toStrings(const char* const* items, std::uint32_t count) {
   std::vector<std::string> out;
@@ -349,6 +362,25 @@ std::int32_t imrtc_v1_join_room(imrtc_v1_engine* engine, const char* room_id,
 
 std::int32_t imrtc_v1_leave_room(imrtc_v1_engine* engine) {
   return guard(engine, [](CallEngine& target) { target.leaveRoom(); });
+}
+
+std::int32_t imrtc_v1_set_remote_layer(imrtc_v1_engine* engine, const char* uid,
+                                       const char* layer) {
+  if (uid == nullptr || layer == nullptr) return IMRTC_V1_ERR_BAD_PARAMS;
+  /*
+    在**边界上**挡掉非法层名，不让它上线路。
+
+    协议 §3.5 只认 none/l/m/h，并且规定非法值回 1306。**但服务端当前不校验**
+    （2026-09-07 用一个 "zzz" 实测：照收、回 .ok、无日志；SFU 的 layerRank()
+    再把不认识的值兜底成 0，等同 "l"）。也就是说写错一个字母不会报错，
+    只会让那条流被永久锁在最低层——画面糊，日志干净，没人查得出来。
+
+    所以这道校验不是「省一个来回」，是**这条路上唯一的一道校验**。
+    枚举本可以从根上杜绝它，但本头里 media_type 等同类参数一律是字符串，
+    为一个参数换风格不划算。
+  */
+  if (!isValidLayer(cstr(layer))) return IMRTC_V1_ERR_BAD_PARAMS;
+  return guard(engine, [=](CallEngine& target) { target.setRemoteLayer(cstr(uid), cstr(layer)); });
 }
 
 std::int32_t imrtc_v1_open_mic(imrtc_v1_engine* engine) {
