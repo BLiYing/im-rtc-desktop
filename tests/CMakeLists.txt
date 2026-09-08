@@ -9,6 +9,7 @@ add_executable(im_rtc_engine_tests
   JsonTest.cpp
   CallFsmTest.cpp
   RoomFsmTest.cpp
+  LogTest.cpp
   HandshakeTest.cpp
   ConnectionTest.cpp
   ReconnectTest.cpp

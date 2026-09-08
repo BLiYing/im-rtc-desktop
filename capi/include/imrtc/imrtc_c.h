@@ -71,6 +71,43 @@ typedef enum imrtc_v1_call_state {
  * 五端契约（Android `IMKickedOutReason.*`，Web/iOS 的 `takenOver` /
  * `authExpired` / `configRejected`）。**显式赋值，绝不依赖声明顺序。**
  */
+/**
+ * 日志级别。**按「谁该被叫醒」分，不按「有多详细」分**
+ * （`im-rtc-server/docs/mechanism/LOGGING.md` §2，五仓统一）。
+ *
+ * 数值与另外四端同序，便于跨端比对。
+ */
+typedef enum imrtc_v1_log_level {
+  /** 每帧、每候选、每次协商。一次通话数百条，**生产默认关**。 */
+  IMRTC_V1_LOG_DEBUG = 10,
+  /** 状态跃迁：连上、进房、接通、结束、断开。**一次通话个位数条**。 */
+  IMRTC_V1_LOG_INFO = 20,
+  /** 可自愈异常：重连、恢复窗口到期、候选乱序。断线是 warn**不是** error。 */
+  IMRTC_V1_LOG_WARN = 30,
+  /** 需要人介入：内部错误。 */
+  IMRTC_V1_LOG_ERROR = 40
+} imrtc_v1_log_level;
+
+/**
+ * 一条日志的一个结构化字段。**按数组交给 sink**，所以带 struct_size——
+ * 宿主是按 `sizeof` 的步长在数组里走的，没有这个字段，将来追加任何字段都会让
+ * 已经发出去的宿主读错位置，而且没有任何版本信号能让它察觉。
+ */
+typedef struct imrtc_v1_log_field {
+  uint32_t struct_size;
+  /** 字段名，取值见 LOGGING.md §3（`request_id` / `call_id` / …）。 */
+  const char* key;
+  const char* value;
+} imrtc_v1_log_field;
+
+/**
+ * 日志 sink。字符串与数组**只在该次回调期间有效**，要留就自己拷。
+ *
+ * **可能在任意线程上被调到**（引擎内部线程），宿主自己切回去。
+ */
+typedef void (*imrtc_v1_log_sink)(void* user_data, imrtc_v1_log_level level, const char* message,
+                                  const imrtc_v1_log_field* fields, uint32_t field_count);
+
 typedef enum imrtc_v1_kicked_reason {
   /** 同账号同设备号在别处登录，或宿主吊销。**回登录页。** */
   IMRTC_V1_KICKED_TAKEN_OVER = 0,
@@ -228,6 +265,30 @@ typedef struct imrtc_v1_options {
   /** 请求超时毫秒；0 或负数按默认的 10000 处理。 */
   int64_t request_timeout_ms;
 } imrtc_v1_options;
+
+/* ---- 日志（进程级，不属于某一个 Engine）---- */
+
+/**
+ * 装一个日志 sink；传 NULL 卸掉。**进程级**，不是每个 Engine 一份。
+ *
+ * **是 fan-out 不是替换**：引擎内置的 stderr 那一路照旧。iOS 上踩过反例——
+ * 「装了 sink 就不再写控制台」，而宿主装的正是回传服务端的 sink，
+ * 于是网断的那一刻唯一的出口跟着一起没了。
+ */
+IMRTC_API void imrtc_v1_set_log_sink(imrtc_v1_log_sink sink, void* user_data);
+
+/** 设最低级别。**默认 INFO**——debug 是每帧每候选，生产默认关。 */
+IMRTC_API void imrtc_v1_set_log_level(imrtc_v1_log_level level);
+
+/**
+ * 宿主往**同一条流**里打一条（CONVENTIONS §8：demo 与宿主共用 engine 的日志入口）。
+ *
+ * 这样宿主的日志与引擎日志在同一个时间轴上，回传之后也在同一个文件里——
+ * 分两套的话「界面调了没有」与「引擎发了没有」就永远对不上时间。
+ * `fields` 可为 NULL（`field_count` 传 0）。
+ */
+IMRTC_API void imrtc_v1_log(imrtc_v1_log_level level, const char* message,
+                            const imrtc_v1_log_field* fields, uint32_t field_count);
 
 /* ---- 生命周期 ---- */
 

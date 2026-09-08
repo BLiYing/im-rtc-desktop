@@ -17,6 +17,7 @@
 class CallOverlay;
 class DialPage;
 class EngineBridge;
+class RemoteLogSink;
 class HistoryPage;
 class LoginPage;
 class SettingsPage;
@@ -84,6 +85,8 @@ private:
   void commitRecord(const QString& callId, const QString& reason, qint64 durationSec);
 
   EngineBridge* bridge_ = nullptr;
+  /** 日志回传。登录成功那一刻装上，**在连服务端之前**（握手的那几条最该留下）。 */
+  RemoteLogSink* logSink_ = nullptr;
   CallHistory* history_ = nullptr;
 
   QStackedWidget* stack_ = nullptr;

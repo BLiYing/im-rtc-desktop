@@ -132,7 +132,11 @@ MSVC 各大版本之间的 STL 布局，任何一处不一致就链不上或运�
 - **禁止 `std::cout` / `printf` / `qDebug()` 直接出现在业务代码**。
 - 必带字段：`callId` / `roomId` / `uid`（有哪个带哪个）。
 - **脱敏**：token 类凭据、完整 SDP 不整条打印；凭据只打前 6 位 + 长度。
-- **媒体热路径禁止日志**（每帧/每包都走的路径）。
+- **媒体热路径禁止日志**（每帧/每包都走的路径）。用 `// HOTPATH-BEGIN` / `// HOTPATH-END`
+  标出边界，闸门扫其间的日志调用。要观测就加原子计数器。
+- **硬闸 `scripts/check-logging.sh`**（`scripts/test.sh` 第 2 步）查上面三条，
+  并带 `--selftest`——闸门自己回归了会静默放行。
+  机制与五仓对齐见 `../im-rtc-server/docs/mechanism/LOGGING.md`。
 
 ## 9. 跨平台（Windows + macOS 共用一套代码）
 

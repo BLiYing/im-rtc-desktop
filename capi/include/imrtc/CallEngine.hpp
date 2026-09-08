@@ -22,6 +22,7 @@
  */
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -377,6 +378,60 @@ private:
   Observer* observer_ = nullptr;
   Error lastError_;
 };
+
+/**
+ * log 把一条日志打进**引擎那条流**（CONVENTIONS §8：demo 与宿主共用同一个入口）。
+ *
+ * 分两套的话「界面调了没有」与「引擎发了没有」永远对不上时间——
+ * 而那正是排查「按了没反应」时唯一要问的问题。
+ */
+inline void log(imrtc_v1_log_level level, const std::string& message,
+                const std::vector<std::pair<std::string, std::string>>& fields = {}) {
+  std::vector<imrtc_v1_log_field> items;
+  items.reserve(fields.size());
+  for (const auto& field : fields) {
+    imrtc_v1_log_field item{};
+    item.struct_size = static_cast<std::uint32_t>(sizeof(imrtc_v1_log_field));
+    item.key = field.first.c_str();
+    item.value = field.second.c_str();
+    items.push_back(item);
+  }
+  imrtc_v1_log(level, message.c_str(), items.empty() ? nullptr : items.data(),
+               static_cast<std::uint32_t>(items.size()));
+}
+
+/** LogSink 是 C++ 侧的 sink 形状。装法见 setLogSink。 */
+using LogSink = std::function<void(imrtc_v1_log_level level, const std::string& message,
+                                   const std::vector<std::pair<std::string, std::string>>& fields)>;
+
+/**
+ * setLogSink 装一个 C++ sink。**进程级**，传空则卸掉。
+ *
+ * sink 存在一个函数内静态里：C ABI 那层收的是裸函数指针 + `void*`，
+ * 而 `std::function` 过不去。宿主只会装一个，所以不需要更复杂的东西。
+ */
+inline void setLogSink(LogSink sink) {
+  static LogSink installed;
+  installed = std::move(sink);
+  if (!installed) {
+    imrtc_v1_set_log_sink(nullptr, nullptr);
+    return;
+  }
+  imrtc_v1_set_log_sink(
+      [](void* user_data, imrtc_v1_log_level level, const char* message,
+         const imrtc_v1_log_field* fields, std::uint32_t count) {
+        auto* target = static_cast<LogSink*>(user_data);
+        if (target == nullptr || !*target) return;
+        std::vector<std::pair<std::string, std::string>> out;
+        out.reserve(count);
+        for (std::uint32_t i = 0; i < count; ++i) {
+          out.emplace_back(fields[i].key == nullptr ? "" : fields[i].key,
+                           fields[i].value == nullptr ? "" : fields[i].value);
+        }
+        (*target)(level, message == nullptr ? "" : message, out);
+      },
+      &installed);
+}
 
 }  // namespace capi
 }  // namespace imrtc

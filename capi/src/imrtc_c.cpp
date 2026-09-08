@@ -8,6 +8,7 @@
 #include "imrtc/CallEngine.h"
 #include "imrtc/Enums.h"
 #include "imrtc/Errors.h"
+#include "imrtc/Log.h"
 #include "imrtc/IxTransport.h"
 
 /**
@@ -47,6 +48,27 @@ std::vector<std::string> toStrings(const char* const* items, std::uint32_t count
   out.reserve(count);
   for (std::uint32_t i = 0; i < count; ++i) out.push_back(cstr(items[i]));
   return out;
+}
+
+/** toLogLevel / fromLogLevel 在两套枚举之间互转。数值同序，但不许靠这个偷懒。 */
+imrtc_v1_log_level toLogLevel(imrtc::LogLevel level) {
+  switch (level) {
+    case imrtc::LogLevel::Debug: return IMRTC_V1_LOG_DEBUG;
+    case imrtc::LogLevel::Warn: return IMRTC_V1_LOG_WARN;
+    case imrtc::LogLevel::Error: return IMRTC_V1_LOG_ERROR;
+    case imrtc::LogLevel::Info: break;
+  }
+  return IMRTC_V1_LOG_INFO;
+}
+
+imrtc::LogLevel fromLogLevel(imrtc_v1_log_level level) {
+  switch (level) {
+    case IMRTC_V1_LOG_DEBUG: return imrtc::LogLevel::Debug;
+    case IMRTC_V1_LOG_WARN: return imrtc::LogLevel::Warn;
+    case IMRTC_V1_LOG_ERROR: return imrtc::LogLevel::Error;
+    case IMRTC_V1_LOG_INFO: break;
+  }
+  return imrtc::LogLevel::Info;
 }
 
 /** toKickedReason 把引擎枚举摊成 C 枚举。**显式列全**，加了新值编译器会提醒。 */
@@ -460,5 +482,56 @@ const char* imrtc_v1_error_name(std::int32_t code) {
 }
 
 const char* imrtc_v1_version(void) { return "0.1.0"; }
+
+void imrtc_v1_set_log_sink(imrtc_v1_log_sink sink, void* user_data) {
+  if (sink == nullptr) {
+    imrtc::setLogSink(nullptr);
+    return;
+  }
+  imrtc::setLogSink([sink, user_data](imrtc::LogLevel level, const std::string& message,
+                                      const imrtc::LogFields& fields) {
+    /*
+      摊成 C 数组再交出去。**每个元素都要填 struct_size**——宿主是按 sizeof 的
+      步长走这个数组的，不填它将来追加字段就会让已发出去的宿主读错位置。
+
+      指针指向的是本函数栈上的 vector 与 fields 里的 std::string，
+      两者都活到回调返回为止，正是头文件承诺的「只在该次回调期间有效」。
+    */
+    std::vector<imrtc_v1_log_field> items;
+    items.reserve(fields.size());
+    for (const auto& field : fields) {
+      imrtc_v1_log_field item{};
+      item.struct_size = static_cast<std::uint32_t>(sizeof(imrtc_v1_log_field));
+      item.key = field.first.c_str();
+      item.value = field.second.c_str();
+      items.push_back(item);
+    }
+    sink(user_data, toLogLevel(level), message.c_str(), items.empty() ? nullptr : items.data(),
+         static_cast<std::uint32_t>(items.size()));
+  });
+}
+
+void imrtc_v1_set_log_level(imrtc_v1_log_level level) {
+  imrtc::setLogLevel(fromLogLevel(level));
+}
+
+void imrtc_v1_log(imrtc_v1_log_level level, const char* message, const imrtc_v1_log_field* fields,
+                  std::uint32_t field_count) {
+  if (message == nullptr) return;
+  imrtc::LogFields out;
+  if (fields != nullptr) {
+    out.reserve(field_count);
+    for (std::uint32_t i = 0; i < field_count; ++i) {
+      // 宿主的头可能比我们旧（结构体更小），所以按它自报的 struct_size 走，
+      // 不能按我们自己的 sizeof —— 那正是 struct_size 存在的意义。
+      const auto* item = reinterpret_cast<const imrtc_v1_log_field*>(
+          reinterpret_cast<const unsigned char*>(fields) +
+          static_cast<std::size_t>(i) * fields[0].struct_size);
+      if (item->key == nullptr || item->value == nullptr) continue;
+      out.emplace_back(cstr(item->key), cstr(item->value));
+    }
+  }
+  imrtc::log(fromLogLevel(level), cstr(message), std::move(out));
+}
 
 }  // extern "C"

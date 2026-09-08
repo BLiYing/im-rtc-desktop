@@ -2,6 +2,7 @@
 #include <vector>
 
 #include "imrtc/CallEngine.h"
+#include "imrtc/Log.h"
 #include "imrtc/MachineTypes.h"
 
 namespace imrtc {
@@ -126,19 +127,63 @@ bool dispatchObserverEvent(CallEngineObserver& out, const EmittedEvent& event) {
   return true;
 }
 
+namespace {
+
+/**
+ * kStateTransitions 是**该进 info 的那几条**（LOGGING.md §2：info 只记状态跃迁，
+ * 一次通话个位数条）。
+ *
+ * 别把这张表扩成「所有回调」：`onUserAudioAvailable` 这类每次静音都抛，
+ * 加进来 info 的量就跟着操作数走，而 info 的量级约束是设计目标不是估计。
+ * 其余回调想看走 debug 的帧日志——那一层本来就一帧不落。
+ */
+bool isStateTransition(const std::string& cb) {
+  return cb == "onConnected" || cb == "onDisconnected" || cb == "onKickedOut" ||
+         cb == "onCallBegin" || cb == "onCallEnd" || cb == "onRoomJoined" ||
+         cb == "onRoomLeft" || cb == "onRoomClosed";
+}
+
+/** transitionFields 把这条跃迁的必带字段挑出来（有哪个带哪个）。 */
+LogFields transitionFields(const Json& args) {
+  LogFields fields;
+  for (const char* key : {logfield::kCallId, logfield::kRoomId, logfield::kSessionId,
+                          logfield::kUid, "reason", "role"}) {
+    const Json* value = args.find(key);
+    if (value != nullptr && value->isString() && !value->asString().empty()) {
+      fields.emplace_back(key, value->asString());
+    }
+  }
+  return fields;
+}
+
+}  // namespace
+
 void CallEngine::emitEvent(const EmittedEvent& event) {
+  /*
+    被踢那条要**先补原因再往下走**，日志与宿主看到的才是同一份 args。
+    **不改状态机**：那条 emit 的 args 是五仓共用的一致性向量钉死的 `{}`，
+    往里加字段等于单方面改五端契约。
+  */
+  EmittedEvent enriched = event;
+  if (event.cb == "onKickedOut") {
+    enriched.args.set("reason", Json::make(kickedReasonName(kickedReason_)));
+  }
+
+  /*
+    **日志在派发之前、且不受观察者有无影响。**
+
+    放在 `if (!target) return;` 后面的话，宿主还没装观察者的那一段（login 到
+    setObserver 之间，以及宿主放手之后）就一条日志都不留——而「事件抛了但界面没反应」
+    恰恰是要靠这段日志才能分清是没抛还是没接。
+  */
+  if (isStateTransition(enriched.cb)) {
+    log(LogLevel::Info, enriched.cb, transitionFields(enriched.args));
+  }
+
   const std::shared_ptr<CallEngineObserver> target = observer();
   // 观察者已经没了：宿主放手即注销，这里静默跳过而不是崩（CONVENTIONS §5）。
   if (!target) return;
-  if (event.cb == "onKickedOut") {
-    // 把连接层给的原因补进 args 再派发。**不改状态机**：那条 emit 的 args 是
-    // 五仓共用的一致性向量钉死的 `{}`，往里加字段等于单方面改五端契约。
-    EmittedEvent enriched = event;
-    enriched.args.set("reason", Json::make(kickedReasonName(kickedReason_)));
-    dispatchObserverEvent(*target, enriched);
-    return;
-  }
-  dispatchObserverEvent(*target, event);
+  dispatchObserverEvent(*target, enriched);
 }
 
 }  // namespace imrtc

@@ -18,6 +18,11 @@
  *   --fake-video                     每个格子都当成有画面并贴测试图案。
  *                                    用来在没有媒体的情况下验渲染路径 A 的宿主侧。
  *
+ * 日志级别走环境变量 `IMRTC_LOG_LEVEL=debug|info|warn|error`（默认 info）。
+ * **联调时把它开到 debug**：帧日志在 debug 上，而「帧到底发出去没有」正是
+ * 「按了没反应」那类问题唯一问得出答案的地方。开着它一次通话数百条，
+ * 所以不是默认值（LOGGING.md §2）。
+ *
  * `--profile` 是给「同一台机器上开两个实例互打」用的。macOS 的
  * QStandardPaths **不理会 $HOME**（它走的是密码库里的真实家目录），
  * 所以靠环境变量隔离不了——两个实例会写同一份 call-history.json 互相覆盖。
@@ -27,11 +32,23 @@
 #include <QApplication>
 #include <QCommandLineParser>
 
+#include "imrtc/imrtc_c.h"
+
 #include "Language.h"
 #include "MainWindow.h"
 
 int main(int argc, char** argv) {
   QApplication app(argc, argv);
+
+  // 日志级别在**做任何事之前**定下来：晚一步，启动那几条就已经按默认级别过滤掉了。
+  const QString level = qEnvironmentVariable("IMRTC_LOG_LEVEL").toLower();
+  if (level == QLatin1String("debug")) {
+    imrtc_v1_set_log_level(IMRTC_V1_LOG_DEBUG);
+  } else if (level == QLatin1String("warn")) {
+    imrtc_v1_set_log_level(IMRTC_V1_LOG_WARN);
+  } else if (level == QLatin1String("error")) {
+    imrtc_v1_set_log_level(IMRTC_V1_LOG_ERROR);
+  }
 
   // QSettings 要靠这三项定位存储路径（设备 id、上次填的服务器、语言都存在那）。
   QCoreApplication::setOrganizationName(QStringLiteral("im-rtc"));

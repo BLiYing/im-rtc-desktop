@@ -1,4 +1,5 @@
 #include "TestHarness.h"
+#include "imrtc/Log.h"
 
 #include <cstdio>
 #include <exception>
@@ -61,5 +62,13 @@ int runAll() {
 
 int main() {
   std::printf("== im-rtc-desktop 测试 ==\n");
+  /*
+    把日志压到 error：内置那一路写 stderr，而测试报告也在终端上——
+    默认的 info 会往里掺 80 多行，真正要看的失败信息就被冲走了。
+
+    **不是关掉**：要验日志本身的用例自己把级别调回来（见 LogTest.cpp），
+    关掉的话那些用例就只能验一个假的。
+  */
+  imrtc::setLogLevel(imrtc::LogLevel::Error);
   return imtest::runAll();
 }

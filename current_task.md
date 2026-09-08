@@ -6,6 +6,42 @@
 
 ## 当前焦点
 
+**日志设施落地了（2026-09-08）**，`./scripts/test.sh` **八步**全绿、98 个引擎用例
++ 23 个 Demo 用例。此前本仓**一行日志都没有**，出了问题只能靠单步。
+
+| 层 | 是什么 |
+|---|---|
+| engine | `imrtc::log`（`Log.h`）——可注入 sink、分级、结构化字段；`redact` / `redactSdp` / `redactCandidate` |
+| 帧日志 | `Connection` 上下行各一条 **debug**，带 `request_id` 与 `call_id`/`room_id`；ping/pong 不记 |
+| 状态跃迁 | `CallEngineEvents` 里一条 **info**，只认那 8 个回调（info 的量级约束是设计目标，不是估计） |
+| C ABI | 追加三个符号 `set_log_sink` / `set_log_level` / `log`，导出面 27 → 30，**追加式** |
+| 回传 | **在 Qt Demo 里**（`RemoteLogSink`）——engine 不认识 HTTP 也不该认识 |
+| 闸门 | `scripts/check-logging.sh`，进 `test.sh` 第 2 步，带 `--selftest` |
+
+**sink 是 fan-out 不是替换**：iOS 踩过反例——「装了 sink 就不写控制台」，
+而宿主装的正是回传服务端的 sink，于是网断那一刻唯一的出口跟着一起没了。
+
+**回传的三个坑**照 iOS/Android 的教训避开：超时显式设短（5 秒；iOS 踩过默认 60 秒 +
+发送闩，一个卡住的请求让后面所有日志静默丢掉）、队列满了丢最旧的、**发失败不重试不回队**。
+
+**怎么验的**：两个 Demo 实例对着真服务端互打一通（接通 4 秒挂断），两份
+`client-desktop-*.log` 落盘，`timeline.py --dir dev-logs` 把**两端 + 服务端**交错排出来，
+`call_id` / `request_id` / `session_id` 三者都对得上。`im-rtc-server/scripts/timeline.py`
+同轮补上 `desktop` 的识别与配色（此前只认 web/ios/android，桌面日志会被归成服务端的）。
+闸门三条违规各验过一次拦得住，并做过一次性能返工：**逐文件起进程那版要跑 2 分 45 秒**，
+改成一次 grep 扫全部文件之后 6 秒。
+
+**联调把级别开到 debug**：`IMRTC_LOG_LEVEL=debug ./scripts/demo.sh alice`。
+帧日志在 debug 上，而「帧到底发出去没有」正是「按了没反应」唯一问得出答案的地方。
+
+**已知限制**：进程被 SIGTERM/SIGKILL 掉时，攒着还没发的最后一批会丢
+（`uninstall()` 会 flush，但信号不跑析构）。正常退出不受影响。
+
+**没做**：环形缓冲 + `exportDiagnostics()`（LOGGING.md §7 把它列为 P3，四端都还没做）；
+Demo 里没有切级别的界面入口，只有环境变量。
+
+---
+
 **握手这一关补齐了（2026-09-08）**，`./scripts/test.sh` 七步全绿、**91 个引擎用例**
 + 23 个 Demo 用例；另**对真服务端验过两条**（见下）。四端里桌面是最后一个补的。
 
@@ -133,7 +169,10 @@
      那条连接**永远重连不上，而日志里一切正常**。
 4. **按需**：C# / P&#8203;Invoke 绑定（C ABI 已经定型，这一层是薄的）。
 5. **体量预警**：`engine/src/CallEngine.cpp` 已到 **567/600**（握手校验那一刀 +19），
-   `demo/MainWindow.cpp` 492。**下次动它们先拆**，别等触顶再拆。
+   `demo/MainWindow.cpp` 512、`capi/src/imrtc_c.cpp` 537（日志那三个符号 +95）。
+   **下次动它们先拆**，别等触顶再拆。
+6. **日志的下一步**：环形缓冲 + `exportDiagnostics()`（LOGGING.md §7 的 P3），
+   给宿主做「报告问题」按钮用。四端都还没做，做的时候该一起定形状。
 
 ## 已知坑 / 限制
 

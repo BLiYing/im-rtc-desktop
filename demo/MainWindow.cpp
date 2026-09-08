@@ -11,6 +11,10 @@
 #include <QTimer>
 #include <QVBoxLayout>
 
+#include "imrtc/CallEngine.hpp"
+
+#include "RemoteLogSink.h"
+
 #include "CallOverlay.h"
 #include "CallStrings.h"
 #include "DialPage.h"
@@ -129,6 +133,17 @@ void MainWindow::wireLogin() {
   });
 
   connect(bridge_, &EngineBridge::tokenReady, this, [this](const QString& token) {
+    /*
+      **在连之前装回传**：握手那几条（含被拒时的原因）正是最该留下的，
+      装晚一步就全丢了。
+
+      身份报成 `desktop-<uid>`，服务端落成 `client-desktop-<uid>.log`——
+      `im-rtc-server/scripts/timeline.py` 按这个前缀认端并上色。
+    */
+    if (logSink_ == nullptr) {
+      logSink_ = new RemoteLogSink(httpBase_, QStringLiteral("desktop-") + uid_, this);
+      logSink_->install();
+    }
     bridge_->connectToServer(wsUrl_, token);
   });
   connect(bridge_, &EngineBridge::tokenFailed, this, [this](const QString& message) {
@@ -318,14 +333,19 @@ void MainWindow::wireCall() {
   // 浮窗的结束态已经由 onCallEnd 显示了「对方忙线中 / 无人接听 / 对方已拒绝」，
   // 再弹一个模态就是同一件事说两遍，还挡住浮窗。宿主要单独用它们当然可以，
   // 那是宿主的选择——这里只把它们记进日志，证明确实收到了。
+  // 走引擎那条流而不是 qInfo：宿主日志与引擎日志同一个时间轴、同一份回传文件，
+  // 「界面收到了没有」与「引擎抛了没有」才对得上（CONVENTIONS §8）。
+  const auto logConvenience = [](const char* cb, const QString& who) {
+    imrtc::capi::log(IMRTC_V1_LOG_INFO, cb, {{"uid", who.toStdString()}});
+  };
   connect(bridge_, &EngineBridge::callBusy, this,
-          [](const QString& uid) { qInfo("onCallBusy %s", qUtf8Printable(uid)); });
+          [logConvenience](const QString& uid) { logConvenience("onCallBusy", uid); });
   connect(bridge_, &EngineBridge::callNoAnswer, this,
-          [](const QString& uid) { qInfo("onCallNoAnswer %s", qUtf8Printable(uid)); });
+          [logConvenience](const QString& uid) { logConvenience("onCallNoAnswer", uid); });
   connect(bridge_, &EngineBridge::callRejected, this,
-          [](const QString& uid) { qInfo("onCallRejected %s", qUtf8Printable(uid)); });
+          [logConvenience](const QString& uid) { logConvenience("onCallRejected", uid); });
   connect(bridge_, &EngineBridge::callCancelled, this,
-          [](const QString& by) { qInfo("onCallCancelled %s", qUtf8Printable(by)); });
+          [logConvenience](const QString& by) { logConvenience("onCallCancelled", by); });
   connect(bridge_, &EngineBridge::callMissed, this,
           [this](const QString& callId, const QString& caller, const QString& reason) {
             // 通话中被第三个人呼叫，服务端已经替我们回了忙线——**不要弹来电页**。

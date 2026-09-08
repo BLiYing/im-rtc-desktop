@@ -9,6 +9,8 @@ add_library(im_rtc_engine STATIC
   src/Reasons.cpp
   src/json/JsonValue.cpp
   src/json/JsonParser.cpp
+  src/observability/Log.cpp
+  src/observability/FrameLog.cpp
   src/signaling/Envelope.cpp
   src/signaling/Backoff.cpp
   src/signaling/Heartbeat.cpp

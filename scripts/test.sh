@@ -4,14 +4,15 @@
 #   ./scripts/test.sh              配置 + 编译 + 跑测试（默认 macos-clang / windows-msvc）
 #   IMRTC_PRESET=macos-clang-release ./scripts/test.sh
 #
-# 六步，任一步失败即整体失败：
+# 八步，任一步失败即整体失败：
 #   1) 体量门禁（防「上帝类」，CONVENTIONS §3）
-#   2) CMake 配置
-#   3) 编译（-Wall -Wextra -Wconversion，警告当错看待）
-#   4) 单测 + 一致性向量
-#   5) ABI 导出面体检（只许导出 imrtc_v1_*，CONVENTIONS §2 红线 1）
-#   6) C++ 包装头必须接满 C 回调表（漏接不会报错，只会让宿主收不到事件）
-#   7) Demo 界面测试（**只在打开了 IMRTC_BUILD_DEMO 时存在**，需要 Qt）
+#   2) 日志纪律（CONVENTIONS §8）——直接打印 / 热路径 / 脱敏
+#   3) CMake 配置
+#   4) 编译（-Wall -Wextra -Wconversion，警告当错看待）
+#   5) 单测 + 一致性向量
+#   6) ABI 导出面体检（只许导出 imrtc_v1_*，CONVENTIONS §2 红线 1）
+#   7) C++ 包装头必须接满 C 回调表（漏接不会报错，只会让宿主收不到事件）
+#   8) Demo 界面测试（**只在打开了 IMRTC_BUILD_DEMO 时存在**，需要 Qt）
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -23,25 +24,31 @@ case "$(uname -s)" in
 esac
 PRESET="${IMRTC_PRESET:-$DEFAULT_PRESET}"
 
-echo "== 1/7 体量门禁 =="
+echo "== 1/8 体量门禁 =="
 ./scripts/check-file-size.sh
 
 echo ""
-echo "== 2/7 CMake 配置（preset: ${PRESET}）=="
+echo "== 2/8 日志纪律 =="
+# 闸门自己回归了会静默放行，所以先让它自检一次再上岗（LOGGING.md §5）。
+./scripts/check-logging.sh --selftest
+./scripts/check-logging.sh
+
+echo ""
+echo "== 3/8 CMake 配置（preset: ${PRESET}）=="
 cmake --preset "$PRESET"
 
 echo ""
-echo "== 3/7 编译 =="
+echo "== 4/8 编译 =="
 cmake --build --preset "$PRESET"
 
 echo ""
-echo "== 4/7 单测 + 一致性向量 =="
+echo "== 5/8 单测 + 一致性向量 =="
 # 直接跑可执行文件而不是 ctest：一致性向量的失败信息（哪个用例第几步、期望什么）
 # 才是排障时真正要看的东西，ctest 的摘要会把它折叠掉。
 "./build/${PRESET}/tests/im_rtc_engine_tests"
 
 echo ""
-echo "== 5/7 ABI 导出面体检 =="
+echo "== 6/8 ABI 导出面体检 =="
 # 离线构建（-DIMRTC_WITH_IX_TRANSPORT=OFF）不出动态库，这一步自然跳过。
 if [ -f "build/${PRESET}/capi/libim_rtc_engine_capi.dylib" ]; then
   ./scripts/check-abi.sh
@@ -50,11 +57,11 @@ else
 fi
 
 echo ""
-echo "== 6/7 C++ 包装头回调覆盖 =="
+echo "== 7/8 C++ 包装头回调覆盖 =="
 ./scripts/check-wrapper-coverage.sh
 
 echo ""
-echo "== 7/7 Demo 界面测试 =="
+echo "== 8/8 Demo 界面测试 =="
 # Demo 默认不构建，所以这一步通常是跳过的。有它的时候必须跑：
 # 它守的是「看代码看不出来、跑真服务端才暴露」的那类规则。
 # **不要写死某一个文件名**：测试目标是按用例分文件的，写死会在改名后

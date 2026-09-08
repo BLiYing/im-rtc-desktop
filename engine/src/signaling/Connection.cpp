@@ -3,6 +3,7 @@
 #include <utility>
 
 #include "imrtc/Errors.h"
+#include "imrtc/FrameLog.h"
 #include "imrtc/Frames.h"
 #include "imrtc/Registry.h"
 
@@ -202,6 +203,14 @@ bool Connection::dispatch(const std::string& type, const Json& data, std::int64_
   }
 
   pending_.track(reqId, type, nowMs, std::move(handler));
+  /*
+    上行一条 debug。**这一条是「无法挂断」那类问题唯一的现场**——
+
+    没有它，服务端那侧只看得见「帧没来」，分不出是 Engine 压根没发、发了没到、
+    还是界面根本没调。iOS 上踩过一次：日志回传都做好了，可信令层不打帧日志，
+    于是那段现场在日志里是一段空白（CLIENT_PARITY v1.15）。
+  */
+  log(LogLevel::Debug, "→ 发出", frameLogFields(type, reqId, data));
   transport_->send(raw);
   return true;
 }
@@ -211,6 +220,8 @@ void Connection::sendFrame(const std::string& type, const std::string& reqId, co
   if (!transport_ || !transport_->isOpen()) return;
   nowMs_ = nowMs;
   const FrameFields* fields = lookupFrame(type);
+  // ping 不记：每 15 秒一条，会把真正要看的东西冲掉（LOGGING.md §2 的量级约束）。
+  if (type != frame::kPing) log(LogLevel::Debug, "→ 发出", frameLogFields(type, reqId, data));
   try {
     transport_->send(encodeEnvelope(
         type, reqId, fields == nullptr ? data : decodeFields(*fields, data), wallNowMs()));
@@ -231,6 +242,11 @@ void Connection::onTransportMessage(const std::string& raw) {
     emitError(error.code(), "");
     if (transport_) transport_->close(closecode::kBadProtocol, "undecodable frame");
     return;
+  }
+
+  // 下行一条 debug，与上面那条上行配成一对。pong 同样不记（每 15 秒一条）。
+  if (envelope.type != frame::kPong) {
+    log(LogLevel::Debug, "← 收到", frameLogFields(envelope.type, envelope.reqId, envelope.data));
   }
 
   if (!envelope.reqId.empty()) {

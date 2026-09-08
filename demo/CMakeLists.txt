@@ -74,6 +74,7 @@ qt_add_library(imrtc_demo_ui STATIC
   CallOverlayMembers.cpp
   Language.cpp
   EngineBridge.cpp
+  RemoteLogSink.cpp
   CallHistory.cpp
   CallStrings.cpp
   LoginPage.cpp
