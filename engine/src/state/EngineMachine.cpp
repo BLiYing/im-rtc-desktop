@@ -1,5 +1,7 @@
 #include "imrtc/EngineMachine.h"
 
+#include "imrtc/Log.h"
+
 #include <algorithm>
 #include <utility>
 
@@ -19,9 +21,11 @@ bool isCallAct(const std::string& op) {
 }
 
 bool isRoomAct(const std::string& op) {
-  static const std::vector<std::string> kOps = {"join",        "leave",     "publish",
-                                                "unpublish",   "mute",      "subscribe",
-                                                "unsubscribe", "update_layer"};
+  // **加房间层的 op 时这里也要加**：漏了的话它连房间机都到不了，
+  // 被当成未知动作本地拒掉，而症状是「什么都没发生」——没有帧、没有错、没有日志。
+  static const std::vector<std::string> kOps = {
+      "join",        "leave",        "publish",     "unpublish",      "mute",
+      "subscribe",   "unsubscribe",  "update_layer", "restart_pub_ice"};
   return std::find(kOps.begin(), kOps.end(), op) != kOps.end();
 }
 
@@ -188,6 +192,14 @@ EngineOutput reduceEngine(const EngineContext& ctx, const MachineInput& input,
 
   if (isCallAct(input.name)) return liftCall(ctx, reduceCall(ctx.call, input, nowMs));
   if (isRoomAct(input.name)) return liftRoom(ctx, reduceRoom(ctx.room, input));
+  /*
+    两张表都不认的动作**在这里被静默丢掉**：没有帧、没有回调、没有状态变化。
+
+    加房间层 op 时忘了往 isRoomAct 里加一行就是这个下场，而症状是「什么都没发生」——
+    最难查的那一类。（`restart_pub_ice` 落地时就正好踩了一次。）
+    留一条 warn，让下一个人一眼看见，而不是去单步状态机。
+  */
+  log(LogLevel::Warn, "未知动作，已本地丢弃", {{"op", input.name}});
   return EngineOutput{ctx, {}, {}};
 }
 

@@ -239,6 +239,19 @@ RoomOutput reduceRoomAct(const RoomContext& ctx, const std::string& op, const Js
   if (op == "subscribe") return subscribeTrack(ctx, args);
   if (op == "unsubscribe") return unsubscribeTrack(ctx, args);
   if (op == "update_layer") return updateLayer(ctx, args);
+  /*
+    上行那条 PC 断了，重新 offer 一次把 ICE 打回来（媒体层已经把重启位置好了）。
+
+    **刻意不进 isBufferable**：这是「此刻网断了」的即时反应，等到重放的时候那条 PC
+    早就换过一轮了，补发一个过期的重启只会白折腾一次协商。所以 joining / reconnecting
+    期间它会被上面那道 R2 的分支挡下来（缓存不了 → localReject 2005）——
+    这**不是漏洞而是设计**，会话恢复之后由门面重新发起一次（见 CallEngine 里
+    hello.ok 的 resumed 分支），那一次房间已经回到 joined。
+  */
+  if (op == "restart_pub_ice") {
+    return roomOut(ctx, {frameOf(frame::kRoomOffer, obj({{"pc", Json::make(std::string("pub"))},
+                                                         {"sdp", Json::make(std::string())}}))});
+  }
   return localReject(ctx);
 }
 

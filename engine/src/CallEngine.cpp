@@ -141,6 +141,15 @@ void CallEngine::login(const std::string& token) {
     data.set("session_id", Json::make(hello.sessionId));
     data.set("resumed", Json::make(hello.resumed));
     apply(MachineInput::recv(frame::kHelloOk, data), "");
+
+    /*
+      **恢复成功之后补一次上行协商**（协议 §1.4）。
+
+      顺序要紧：`apply` 先跑完，房间机才从 reconnecting 回到 joined，
+      这一帧才发得出去——反过来就正好撞上那条「不进缓冲、直接被拒」的路。
+      `resumed=false` 那条不走这里：房间已经归零，没有上行可谈。
+    */
+    if (hello.resumed && media_) media_->renegotiateAfterResume();
   };
   events.onKickedOut = [this](KickedReason reason) {
     kickedOutPending_ = true;

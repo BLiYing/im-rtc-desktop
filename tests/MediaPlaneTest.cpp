@@ -354,3 +354,123 @@ IMRTC_TEST(mediaNoAdapterIsPureSignaling, "CallEngine —— 不给适配器就�
   engine.attachLocalView(nullptr);
   CHECK_EQ(engine.callState(), CallState::Inviting, "状态机照常");
 }
+
+/**
+ * ICE 失败自愈与恢复后重协商（协议 §3.3 / §1.4）。
+ *
+ * 两个触发点**都要有**，理由见 MediaPlane.cpp 里那两段注释：
+ * `failed` 那条覆盖「信令还活着、只有媒体路径断了」；`resumed` 那条覆盖
+ * 「网整个断了」——后者才是它最该生效的场景，而恰恰是 failed 够不着的那个。
+ */
+IMRTC_TEST(iceRestartOnPubFailed, "ICE 自愈 —— pub 判 failed 就重启，并且那一帧真的带着重启位") {
+  Harness harness;
+  harness.enterRoom("audio");
+  const std::size_t before = harness.countSent(imrtc::frame::kRoomOffer);
+
+  harness.media->emitPcState(PcRole::Pub, PcState::Failed);
+  harness.engine->tick();
+
+  CHECK_EQ(harness.media->restartPubIceCalls, 1, "该置一次重启位");
+  CHECK_EQ(harness.countSent(imrtc::frame::kRoomOffer), before + 1, "该补发一条 room.offer");
+  CHECK_EQ(imtest::field(harness.findSent(imrtc::frame::kRoomOffer), "pc"), std::string("pub"),
+           "重启的是 pub 那条（sub 由服务端救）");
+  /*
+    **这一条才是重点。**「要重启」和「要补一次协商」必须分开记：位记在适配器上、
+    帧走状态机。位若跟着帧走，忙的时候排队一次就丢了，补出来的是个普通 offer——
+    那条连接**永远重连不上，而日志里一切正常**。四端都为这个坑钉了用例。
+  */
+  CHECK_EQ(harness.media->lastOfferHadIceRestart, true, "出去的 offer 必须带着重启位");
+}
+
+IMRTC_TEST(iceRestartNotOnDisconnected,
+           "ICE 自愈 —— disconnected 不动它（那是几秒的抖动，见着就重启是自造风暴）") {
+  Harness harness;
+  harness.enterRoom("audio");
+  const std::size_t before = harness.countSent(imrtc::frame::kRoomOffer);
+
+  harness.media->emitPcState(PcRole::Pub, PcState::Disconnected);
+  harness.engine->tick();
+
+  CHECK_EQ(harness.media->restartPubIceCalls, 0, "不该重启");
+  CHECK_EQ(harness.countSent(imrtc::frame::kRoomOffer), before, "不该多发帧");
+}
+
+IMRTC_TEST(iceRestartSubIsServersJob,
+           "ICE 自愈 —— sub 断了我们救不了（offerer 是服务端），只报给宿主") {
+  Harness harness;
+  harness.enterRoom("audio");
+  const std::size_t before = harness.countSent(imrtc::frame::kRoomOffer);
+
+  harness.media->emitPcState(PcRole::Sub, PcState::Failed);
+  harness.engine->tick();
+
+  CHECK_EQ(harness.media->restartPubIceCalls, 0, "不该去重启 pub");
+  CHECK_EQ(harness.countSent(imrtc::frame::kRoomOffer), before, "不该发 offer");
+  const std::vector<std::string>& log = harness.recorder->log;
+  CHECK_EQ(std::find(log.begin(), log.end(), std::string("error:2006/media_negotiation_failed")) !=
+               log.end(),
+           true, "该报一条给宿主");
+}
+
+IMRTC_TEST(iceRestartLostWhileReconnecting,
+           "ICE 自愈 —— reconnecting 期间的重启请求会被丢掉（**这就是光靠 failed 不够的原因**）") {
+  Harness harness;
+  harness.enterRoom("audio");
+  const std::size_t before = harness.countSent(imrtc::frame::kRoomOffer);
+
+  // 网断了：信令先断，房间进 reconnecting。PC 要再过约 30 秒才判 failed。
+  harness.net.remoteClose(imrtc::closecode::kGoingAway, "network lost");
+  harness.media->emitPcState(PcRole::Pub, PcState::Failed);
+  harness.engine->tick();
+
+  /*
+    位置上了，帧却发不出去：`restart_pub_ice` 刻意不进 isBufferable，
+    于是在 reconnecting 上被本地拒掉。**这不是 bug，是这条用例要钉住的现状**——
+    它正是「触发点必须挪到恢复之后」的全部依据（iOS 真机 2026-09-07 的实证）。
+  */
+  CHECK_EQ(harness.countSent(imrtc::frame::kRoomOffer), before, "reconnecting 期间发不出去");
+
+  // 恢复之后**只补一条**。
+  // 这一句同时钉住「不进 isBufferable」：真把它做成可缓冲的，重放会再补一条，
+  // 于是同一次恢复发出两条 offer——多一次没必要的协商，而且两条在飞会互相覆盖。
+  harness.now += 1000;
+  harness.engine->tick();
+  harness.net.open();
+  harness.reply(imrtc::okType(imrtc::frame::kHello), imtest::helloOkData("s-1", true));
+  CHECK_EQ(harness.countSent(imrtc::frame::kRoomOffer), std::size_t{1},
+           "恢复之后只补一条（新连接上的第一条）");
+}
+
+IMRTC_TEST(iceRestartAfterResume, "恢复后重协商 —— resumed=true 补一条 room.offer{pub}，且带重启位") {
+  Harness harness;
+  harness.enterRoom("audio");
+  const std::size_t before = harness.countSent(imrtc::frame::kRoomOffer);
+
+  harness.net.remoteClose(imrtc::closecode::kGoingAway, "network lost");
+  harness.now += 1000;
+  harness.engine->tick();  // 退避第一档到点，重连
+  harness.net.open();
+  harness.reply(imrtc::okType(imrtc::frame::kHello), imtest::helloOkData("s-1", true));
+
+  CHECK_EQ(harness.media->restartPubIceCalls, 1, "恢复之后该重启一次");
+  CHECK_EQ(harness.countSent(imrtc::frame::kRoomOffer), before + 1, "该补发一条 room.offer");
+  CHECK_EQ(imtest::field(harness.findSent(imrtc::frame::kRoomOffer), "pc"), std::string("pub"),
+           "补的是 pub 那条");
+  CHECK_EQ(harness.media->lastOfferHadIceRestart, true, "补出来的 offer 必须带着重启位");
+}
+
+IMRTC_TEST(noRenegotiateWhenNotResumed,
+           "恢复后重协商 —— resumed=false 不补（房间已归零，没有上行可谈）") {
+  Harness harness;
+  harness.enterRoom("audio");
+
+  harness.net.remoteClose(imrtc::closecode::kGoingAway, "network lost");
+  harness.now += 1000;
+  harness.engine->tick();
+  harness.net.open();
+  const std::size_t before = harness.countSent(imrtc::frame::kRoomOffer);
+  harness.reply(imrtc::okType(imrtc::frame::kHello), imtest::helloOkData("s-2", false));
+
+  CHECK_EQ(harness.media->restartPubIceCalls, 0, "不该重启");
+  CHECK_EQ(harness.countSent(imrtc::frame::kRoomOffer), before, "不该补帧");
+}

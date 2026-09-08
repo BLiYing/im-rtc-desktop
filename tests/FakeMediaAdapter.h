@@ -31,6 +31,12 @@ public:
   int resetCount = 0;
   int closeCount = 0;
   std::vector<std::string> calls;
+  /** restartPubICE 被调了几次。 */
+  int restartPubIceCalls = 0;
+  /** 那一位还挂着没被 offer 消费掉。 */
+  bool pubIceRestartPending = false;
+  /** 最近一次 createPubOffer 是不是带着重启出去的——**这才是真正要断言的东西**。 */
+  bool lastOfferHadIceRestart = false;
   std::vector<std::string> appliedPubAnswers;
   std::vector<std::string> answeredSubOffers;
   std::vector<std::string> remoteCandidates;
@@ -70,7 +76,17 @@ public:
                   cameraErrorCode);
   }
 
+  /** restartPubICE 只记一位，与真实适配器同形（下一个 offer 才生效）。 */
+  void restartPubICE() override {
+    ++restartPubIceCalls;
+    pubIceRestartPending = true;
+  }
+
   void createPubOffer(imrtc::SdpCompletion done) override {
+    // 真实适配器在这里把那一位交给 createOffer({iceRestart})，然后清掉。
+    // 假件只记录「这一次 offer 是不是带着重启出去的」，让用例能断言。
+    lastOfferHadIceRestart = pubIceRestartPending;
+    pubIceRestartPending = false;
     calls.push_back("createPubOffer");
     complete([done]() {
       if (done) done(true, "v=0\r\npub-offer", 0);

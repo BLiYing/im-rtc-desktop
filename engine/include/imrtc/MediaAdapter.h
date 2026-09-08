@@ -119,6 +119,22 @@ public:
 
   /** createPubOffer 生成上行 offer。**pub 的 offerer 恒为本端**（§3.3）。 */
   virtual void createPubOffer(SdpCompletion done) = 0;
+  /**
+   * restartPubICE 让**下一个**上行 offer 带上 ICE restart（换一对新 ufrag/pwd 重新打洞）。
+   *
+   * # 为什么是「置一位」而不是「立刻发一帧」
+   *
+   * 发帧是 engine 的事，媒体层不认识信令。更要紧的是：**这一位必须记在适配器上，
+   * 不能记在那条排队的 offer 上**。忙的时候重启请求只能先记成待办，而待办里若不带
+   * 「重启」这一位，补出来的就是个普通 offer——那条连接**永远重连不上，
+   * 日志里却一切正常**。四端都为这个坑钉了用例。
+   *
+   * # 谁重启哪一条
+   *
+   * `pub` 的 offerer 恒为本端，它断了只能自己救；`sub` 由服务端救（§3.3）。
+   * **各自重启自己 offer 的那条**——不需要新协议帧，也不会两边同时 offer 打架。
+   */
+  virtual void restartPubICE() = 0;
   /** applyPubAnswer 应用服务端对上行 offer 的应答。 */
   virtual void applyPubAnswer(const std::string& sdp, VoidCompletion done) = 0;
   /** answerSubOffer 应答服务端下发的下行 offer。**sub 的 offerer 恒为服务端**。 */

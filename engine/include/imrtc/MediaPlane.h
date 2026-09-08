@@ -92,6 +92,13 @@ public:
   void setMuted(MediaKind kind, bool muted);
 
   /** reset 一轮结束（通话终局 / 离房 / 被踢）时归零。 */
+  /**
+   * 会话恢复之后重新协商上行（§1.4）。**门面在 hello.ok 的 resumed 分支上调它。**
+   *
+   * 为什么不能只靠「PC 判 failed」那一条，见 .cpp 里的长注释。
+   */
+  void renegotiateAfterResume();
+
   void reset();
   /** close 彻底关掉（logout）。 */
   void close();
@@ -103,6 +110,8 @@ public:
 
 private:
   void publishTrack(const LocalTrack& track);
+  /** restartPubIce 置位 + 发帧，两个触发点共用。顺序不能反，见 .cpp。 */
+  void restartPubIce();
 
   std::shared_ptr<MediaAdapter> adapter_;
   Deps deps_;

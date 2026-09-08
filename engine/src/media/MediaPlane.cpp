@@ -1,5 +1,7 @@
 #include "imrtc/MediaPlane.h"
 
+#include "imrtc/Log.h"
+
 #include <utility>
 
 #include "imrtc/Errors.h"
@@ -64,7 +66,26 @@ void MediaPlane::attach() {
     if (pc == PcRole::Sub && state == PcState::Connected) {
       deps_.dispatchInternal("media_ready");
     }
+    /*
+      **ICE 失败不是终点，是该重连的信号**（协议 §3.3）。
+
+      不救的后果不是「画质差一点」：切网 / 休眠唤醒之后人**永久掉出这通通话**，
+      对端格子从此是一块黑，而界面上一切正常、计时还在走、谁也不挂断。
+
+      `pub` 的 offerer 恒为本端，只能自己救；`sub` 由服务端救——各自重启自己 offer
+      的那条，所以不需要新协议帧，也不会两边同时 offer 打架。
+      重启失败还会再进 failed，于是天然形成一个重试节奏。
+
+      **用 failed 不用 disconnected**：后者是几秒的抖动，见着就重启等于自己制造风暴。
+    */
+    if (pc == PcRole::Pub && state == PcState::Failed) {
+      log(LogLevel::Warn, "上行通路失败，重启 ICE");
+      restartPubIce();
+      return;
+    }
     if (state == PcState::Failed) {
+      // sub 那条我们救不了（offerer 是服务端），只能报给宿主。
+      log(LogLevel::Warn, "下行通路失败，等服务端重启");
       deps_.reportError(codeValue(ErrorCode::MediaNegotiationFailed), "");
     }
   };
@@ -207,6 +228,39 @@ void MediaPlane::setMuted(MediaKind kind, bool muted) {
   args.set("track_id", Json::make(trackId));
   args.set("muted", Json::make(muted));
   deps_.dispatchAct("mute", args);
+}
+
+/*
+  restartPubIce 是两个触发点共用的那两步：**先置位、再发帧**。
+
+  顺序不能反：帧一发出去，房间机就产出 `room.offer{pub, sdp:""}`，媒体面随即
+  被叫去 fillSdp → createPubOffer。那一刻若位还没置上，出去的就是个**普通 offer**，
+  ICE 不会重来，那条连接永远回不来而日志里一切正常。
+*/
+void MediaPlane::restartPubIce() {
+  if (!adapter_) return;
+  adapter_->restartPubICE();
+  deps_.dispatchAct("restart_pub_ice", Json::makeObject());
+}
+
+/*
+  会话恢复之后重新协商上行（协议 §1.4）。
+
+  **这个触发点是必需的，光有上面那条 failed 不够。**
+
+  网一断信令也跟着断，房间立刻变成 reconnecting，而 PC 要等约 30 秒才判 failed——
+  那时 `restart_pub_ice` 会被房间机以 2005 拒掉（它刻意不进 isBufferable），
+  于是**在它唯一该生效的场景里等于不存在**。iOS 真机 2026-09-07 抓到过实证
+  （`动作被状态机本地拒绝 op=restart_pub_ice room_state=reconnecting`），四端同一条路。
+
+  **不查 PC 当前状态、无条件重启**：换了连接就等于换了网络路径，旧候选多半已废；
+  服务端那侧也是无条件重启 sub，两边对称。多一次协商比漏一次自愈便宜得多。
+  房间不在 joined 时房间机自会拒掉，不必在这里判。
+*/
+void MediaPlane::renegotiateAfterResume() {
+  if (!attached_) return;
+  log(LogLevel::Info, "会话已恢复，重新协商上行");
+  restartPubIce();
 }
 
 void MediaPlane::reset() {
