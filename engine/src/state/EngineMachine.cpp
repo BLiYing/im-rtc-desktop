@@ -116,6 +116,32 @@ EngineOutput handleInternal(const EngineContext& ctx, const std::string& name,
     return EngineOutput{std::move(next), {}, std::move(call.emit)};
   }
 
+  /*
+    **服务端那一侧已经不可能再恢复这条会话了**（§1.4 的恢复窗口过了）。
+
+    语义与「重连上了但 resumed=false」完全一样，所以走同一段代码：房间归零、
+    通话本地合成一条 ended{network}。差别只在**不必等重连成功**——
+    网络一直不回来的话那一刻永远不会到，界面就永远停在「正在重连」、
+    连挂断都点不动（挂断只产出一帧发不出去的 call.hangup，本地状态按 §4.2 铁律 1
+    一动不动）。真机 2026-09-08 的 iOS 端就是这一幕，四端同形。
+
+    「什么时候算过了窗口」由连接层算（只有它知道心跳周期），见 Connection 的
+    giveUpDelayMs：上界是 3×ping + 30s，**不是恢复窗口那 30 秒**。
+  */
+  if (name == "session_unrecoverable") {
+    RoomOutput room = resumeRoom(ctx.room, false);
+    std::vector<EmittedEvent> emit = std::move(room.emit);
+    CallContext call = ctx.call;
+    if (ctx.call.state != CallState::Idle) {
+      CallOutput synthesized = synthesizeNetworkEnd(ctx.call, nowMs);
+      call = std::move(synthesized.state);
+      emit.insert(emit.end(), synthesized.emit.begin(), synthesized.emit.end());
+    }
+    EngineContext next;
+    next.room = std::move(room.state);
+    next.call = std::move(call);
+    return EngineOutput{std::move(next), std::move(room.send), std::move(emit)};
+  }
   if (name == "ws_closed_4403") {
     // 被踢：什么都不留。重连没有意义——那等于跟另一台设备打架。
     EngineContext next;

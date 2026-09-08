@@ -29,6 +29,7 @@ struct Harness {
   imtest::FakeNet net;
   std::vector<std::string> disconnected;
   int kickedOut = 0;
+  int unrecoverable = 0;
   std::unique_ptr<Connection> connection;
 
   Harness() {
@@ -44,6 +45,7 @@ struct Harness {
       disconnected.push_back(std::to_string(code) + (willReconnect ? "/retry" : "/stop"));
     };
     events.onKickedOut = [this]() { ++kickedOut; };
+    events.onSessionUnrecoverable = [this]() { ++unrecoverable; };
     connection = std::unique_ptr<Connection>(new Connection(options, events));
   }
 
@@ -206,4 +208,63 @@ IMRTC_TEST(reconnectCloseStops, "重连 —— 主动 close 之后不重连，�
 
   harness.connection->tick(kT0 + 60000);
   CHECK_EQ(harness.net.socketCount(), std::size_t{1}, "主动关闭之后不重连");
+}
+
+/*
+  「断得太久 → 服务端那一侧的会话已经没了」这条倒计时（§1.4）。
+
+  守的是真机 2026-09-08 的一幕：断网后停在「正在重连」，**不接网就永远停在
+  通话界面，连挂断都点不动**——本地放弃的唯一入口是「重连上了但 resumed=false」，
+  而网络不回来那一刻永远不会到。四端同形，本仓是最后一端。
+
+  上界取的是 `3×ping + 30s + 5s`（默认心跳 15 秒 → 80 秒），**不是恢复窗口那 30 秒**：
+  服务端的 30 秒是从**它自己察觉**算起，而它要连续 3 个心跳周期收不到东西才察觉（§1.3）。
+*/
+IMRTC_TEST(sessionUnrecoverableAfterResumeWindow,
+           "恢复窗口 —— 断开超过上界就报会话不可恢复") {
+  Harness harness;
+  harness.handshake();
+  harness.net.remoteClose(1001);
+
+  // 60 秒时服务端一定还没放弃（最快 2×ping 才察觉，再加 30 秒窗口）。
+  harness.connection->tick(kT0 + 60000);
+  CHECK_EQ(harness.unrecoverable, 0, "提前放弃会杀掉一通还能恢复的通话");
+
+  harness.connection->tick(kT0 + 80000);
+  CHECK_EQ(harness.unrecoverable, 1, "断了 80 秒还不放弃，界面就永远停在「正在重连」");
+}
+
+/*
+  **每次重连失败都重排的话，截止时刻就一直往后挪、永远不会到**——
+  而那正是这条倒计时要治的病。起点必须是第一次断开的那一刻。
+  生产里退避封顶 30 秒 < 80 秒，重排等于这条闸从来不会合上。
+*/
+IMRTC_TEST(sessionUnrecoverableDeadlineIsNotPushedBack,
+           "恢复窗口 —— 重连一直失败不许把截止时刻往后推") {
+  Harness harness;
+  harness.handshake();
+  harness.net.remoteClose(1001);
+
+  // 一路 tick 到 80 秒，中间不断制造「重连失败」。
+  for (std::int64_t t = 1000; t <= 80000; t += 1000) {
+    harness.connection->tick(kT0 + t);
+    harness.net.remoteClose(1001);  // 幂等：这一条已经关掉的话什么都不做
+  }
+  CHECK_EQ(harness.unrecoverable, 1, "截止时刻被重连失败一路推后 = 这条闸从来不会合上");
+}
+
+/** 连上了就撤掉——不撤的话会把一通已经恢复的通话杀掉。 */
+IMRTC_TEST(sessionUnrecoverableCancelledOnResume, "恢复窗口 —— 重连成功就把倒计时撤掉") {
+  Harness harness;
+  harness.handshake();
+  harness.net.remoteClose(1001);
+
+  harness.connection->tick(kT0 + 2000);  // 退避到点，重连
+  harness.net.open();
+  const std::string reqId = imtest::field(imtest::lastSent(harness.net.current()), "req_id");
+  harness.net.deliver(imtest::replyFrame(imrtc::okType(imrtc::frame::kHello), reqId,
+                                         imtest::helloOkData("s-1", true)));
+
+  harness.connection->tick(kT0 + 200000);
+  CHECK_EQ(harness.unrecoverable, 0, "已经连回来了还报不可恢复，会把正在进行的通话杀掉");
 }

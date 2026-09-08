@@ -119,6 +119,11 @@ void CallEngine::login(const std::string& token) {
     apply(MachineInput::recv(frame::kHelloOk, data), "");
   };
   events.onKickedOut = [this]() { kickedOutPending_ = true; };
+  events.onSessionUnrecoverable = [this]() {
+    if (tearingDown_) return;
+    // 与「重连上了但 resumed=false」同一件事，只是不必等重连成功。
+    apply(MachineInput::internal("session_unrecoverable"), "");
+  };
   events.onDisconnected = [this](int code, const std::string&, bool) {
     if (tearingDown_) return;
     const bool kicked = kickedOutPending_ || code == closecode::kKickedOut;

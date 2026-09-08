@@ -108,6 +108,9 @@ void Connection::close() {
   state_ = ConnectionState::Closed;
   reconnectStopped_ = true;
   reconnectAtMs_ = 0;
+  // **只有 logout 撤这条倒计时**：鉴权连续失败那条路要让它走完，
+  // 那时服务端那一侧的会话同样会过期，通话同样该收场。
+  unrecoverableAtMs_ = 0;
   heartbeat_.stop();
   pending_.failAll(codeValue(ErrorCode::InvalidState));
   if (transport_) transport_->close(closecode::kNormal, "client logout");
@@ -149,6 +152,9 @@ void Connection::handleHelloOk(const RequestResult& result) {
   authFailures_ = 0;
   reconnectAttempt_ = 0;
   reconnectStopped_ = false;
+  pingIntervalSec_ = hello.pingIntervalSec;
+  // 连上了就别再倒计时了——不管 resumed 是真是假，服务端都已经给出裁决。
+  unrecoverableAtMs_ = 0;
   heartbeat_.start(hello.pingIntervalSec, nowMs_);
   if (events_.onConnected) events_.onConnected(hello);
 }
@@ -288,7 +294,19 @@ void Connection::onTransportClosed(int code, const std::string& reason) {
     return;
   }
   state_ = ConnectionState::Reconnecting;
+  /*
+    起「服务端已经彻底放弃」的倒计时。
+
+    **只在第一次断开时起**：每一次重连失败都会走到这里，每次都重排的话截止时刻
+    就一直往后挪、永远不会到——而那正是它要治的病。起点是第一次断开的那一刻，
+    与服务端算的是同一笔账。
+  */
+  if (unrecoverableAtMs_ == 0) unrecoverableAtMs_ = nowMs_ + giveUpDelayMs();
   scheduleReconnect(nowMs_);
+}
+
+std::int64_t Connection::giveUpDelayMs() const {
+  return (kServerDeathPings * pingIntervalSec_ + kResumeWindowSec + kGiveUpGraceSec) * 1000;
 }
 
 void Connection::scheduleReconnect(std::int64_t nowMs) {
@@ -317,6 +335,13 @@ void Connection::tick(std::int64_t nowMs) {
       break;
     case Heartbeat::Action::None:
       break;
+  }
+
+  if (unrecoverableAtMs_ != 0 && nowMs >= unrecoverableAtMs_) {
+    unrecoverableAtMs_ = 0;
+    // 服务端已经丢掉这个会话，再拿它去要 resume 只会白跑一趟。
+    sessionId_.clear();
+    if (events_.onSessionUnrecoverable) events_.onSessionUnrecoverable();
   }
 
   if (reconnectAtMs_ != 0 && nowMs >= reconnectAtMs_ && !reconnectStopped_) {

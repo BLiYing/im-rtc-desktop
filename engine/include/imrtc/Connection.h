@@ -44,6 +44,15 @@ struct ConnectionEvents {
   std::function<void(int code, const std::string& reason, bool willReconnect)> onDisconnected;
   /** 被踢，或鉴权连续失败到上限。宿主该回登录页换票。 */
   std::function<void()> onKickedOut;
+  /**
+   * 断得太久了，**服务端那一侧的会话已经不可能再恢复**（§1.4 的恢复窗口过了）。
+   *
+   * 与「重连上了但 `resumed=false`」是同一件事，只是**不必等重连成功**——
+   * 网络一直不回来的话那一刻永远不会到。少了它，界面就永远停在「正在重连」、
+   * 连挂断都点不动（挂断只产出一帧发不出去的 `call.hangup`，本地状态按 §4.2
+   * 铁律 1 一动不动）。真机 2026-09-08 的 iOS 端就是这一幕，四端同形。
+   */
+  std::function<void()> onSessionUnrecoverable;
   /** 收到服务端主动推送的事件（req_id 为空的帧）。data 是**线路形状 + 默认值**。 */
   std::function<void(const std::string& type, const Json& data, const Envelope& envelope)> onEvent;
   /** 内部错误。 */
@@ -142,6 +151,12 @@ public:
 private:
   /** kMaxAuthFailures 是连续几次 4401 之后彻底放弃（§1.5）。见 .cpp 里的长注释。 */
   static constexpr int kMaxAuthFailures = 3;
+  /** 协议 §1.4 的恢复窗口：30 秒。**四端同一个值**，服务端的 ResumeWindow 也是它。 */
+  static constexpr std::int64_t kResumeWindowSec = 30;
+  /** 服务端判一条连接死掉要连续几个心跳周期收不到东西（§1.3）。 */
+  static constexpr std::int64_t kServerDeathPings = 3;
+  /** 余量：跨过服务端窗口到期那一刻再收场，别跟它抢同一秒。 */
+  static constexpr std::int64_t kGiveUpGraceSec = 5;
 
   void onTransportOpen() override;
   void onTransportMessage(const std::string& raw) override;
@@ -158,6 +173,24 @@ private:
   /** wallNowMs 是信封 `ts` 用的墙上时间——与 tick 的单调时间线刻意分开。 */
   std::int64_t wallNowMs() const;
   void scheduleReconnect(std::int64_t nowMs);
+
+  /*
+    断开多久之后可以断定「服务端那一侧的会话没了」。
+
+    # 为什么不是恢复窗口那 30 秒
+
+    服务端的 30 秒**不是从我们断开的那一刻算起的**，是从**它自己察觉**的那一刻算起。
+    而它靠读超时察觉：连续 3 个心跳周期收不到任何东西才判死（§1.3）。
+    我们断开时距离上一帧最多一个心跳周期，所以最晚的到期时刻是
+    `断开 + 3×ping + 30s`——按默认 15 秒心跳就是 45 + 30 = 75 秒，再加一点余量。
+
+    # 为什么必须取上界
+
+    取短了就会撒谎：真机 2026-09-08 实测，断开 14 秒后重连**成功恢复**，通话照常继续。
+    在那之前宣布「通话已结束」是把一通还能救回来的电话杀掉，而且服务端还认为我们在房里，
+    房间会挂着一个幽灵成员。**宁可让用户多看几十秒「正在重连」，也不能提前下结论。**
+  */
+  std::int64_t giveUpDelayMs() const;
   void emitError(std::int32_t code, const std::string& forType);
 
   ConnectionOptions options_;
@@ -169,6 +202,10 @@ private:
   std::int64_t seq_ = 0;
   /** tick 喂进来的最后一个时刻。回调里要发帧时用得上（回调本身不带时间）。 */
   std::int64_t nowMs_ = 0;
+  /** 服务端最近一次告知的心跳周期。[giveUpDelayMs] 要拿它推算服务端何时判死。 */
+  std::int64_t pingIntervalSec_ = 15;
+  /** 「服务端已经彻底放弃这条会话」的时刻。0 = 没在倒计时。 */
+  std::int64_t unrecoverableAtMs_ = 0;
 
   PendingRequests pending_;
   Heartbeat heartbeat_;
