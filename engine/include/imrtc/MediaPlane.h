@@ -29,8 +29,13 @@ class MediaPlane {
 public:
   /** Deps 是这条接线用到的全部东西。**显式列出来**，反向依赖门面会让边界看不见。 */
   struct Deps {
-    /** 发一帧（请求或应答都走它，reqId 空串表示由连接层分配）。 */
-    std::function<void(const std::string& type, const std::string& reqId, const Json& data)> send;
+    /**
+     * 发一帧（请求或应答都走它，reqId 空串表示由连接层分配）。
+     *
+     * **返回值是「有没有真的走出去」**：上行协商闸门靠它释放。发不出去却当成发出去，
+     * 闸门就永远停在「有一个在飞」，上行从此协商不出去而日志里一切正常。
+     */
+    std::function<bool(const std::string& type, const std::string& reqId, const Json& data)> send;
     /** 往状态机喂一个内部事件（media_ready / …）。 */
     std::function<void(const std::string& name)> dispatchInternal;
     /** 往状态机喂一次宿主动作（publish / …）。 */
@@ -99,6 +104,14 @@ public:
    */
   void renegotiateAfterResume();
 
+  /**
+   * releasePubOffer 放上行协商的闸；有攒着的就立刻补一条。
+   *
+   * 公开是因为**「offer 这个请求失败了」只有门面看得见**（它才是发请求的人）。
+   * 那是四个终局里的一个，漏掉就是上行永久沉默。
+   */
+  void releasePubOffer();
+
   void reset();
   /** close 彻底关掉（logout）。 */
   void close();
@@ -112,6 +125,15 @@ private:
   void publishTrack(const LocalTrack& track);
   /** restartPubIce 置位 + 发帧，两个触发点共用。顺序不能反，见 .cpp。 */
   void restartPubIce();
+  /** startPubOffer 起一轮上行协商；已经有一个在飞就攒着。见 .cpp 的长注释。 */
+  void startPubOffer();
+  /** resetPubNegotiation 无条件清零。**换连接时必须调**，否则上行永久沉默。 */
+  void resetPubNegotiation();
+
+  /** 上行协商闸门：同一时刻只许一个 pub offer 在飞（§3.3）。 */
+  bool pubOfferInFlight_ = false;
+  /** 闸门关着时攒下的那一条。攒一条就够——offer 描述的是当前全部轨道的状态。 */
+  bool pubOfferQueued_ = false;
 
   std::shared_ptr<MediaAdapter> adapter_;
   Deps deps_;

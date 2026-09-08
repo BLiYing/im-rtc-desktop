@@ -41,22 +41,26 @@ CallEngine::CallEngine(CallEngineOptions options) : options_(std::move(options))
 
   MediaPlane::Deps deps;
   deps.send = [this](const std::string& type, const std::string& reqId, const Json& data) {
-    if (!connection_) return;
+    // **返回「这一帧到底有没有走出去」**：上行协商闸门要靠它才关得住。
+    // 发不出去却当成发出去了，闸门就永远停在「有一个在飞」，上行从此协商不出去
+    // 而日志里一切正常——正是这道闸要防的那种病。
+    if (!connection_) return false;
     const std::int64_t now = options_.clock();
     // 媒体面产出的帧里，pub offer 是**我们发起的请求**，其余（answer / 候选）是应答
     // 或单向通知（§3.3）。这里的判断与 sendOne 里那条是同一条规则。
     if (type == frame::kRoomOffer && str(data, "pc") == "pub") {
       const std::string offerType = type;
-      connection_->request(offerType, data, now, [this, offerType](const RequestResult& result) {
-        if (!result.ok) {
-          onRequestFailed(offerType, result);
-          return;
-        }
-        handleIncoming(result.envelope.type, "", result.data);
-      });
-      return;
+      return connection_->request(offerType, data, now,
+                                  [this, offerType](const RequestResult& result) {
+                                    if (!result.ok) {
+                                      onRequestFailed(offerType, result);
+                                      return;
+                                    }
+                                    handleIncoming(result.envelope.type, "", result.data);
+                                  });
     }
     connection_->sendFrame(type, reqId, data, now);
+    return true;
   };
   deps.dispatchInternal = [this](const std::string& name) {
     apply(MachineInput::internal(name), "");
@@ -523,6 +527,15 @@ void CallEngine::sendOne(const OutgoingFrame& frame, const std::string& replyReq
 }
 
 void CallEngine::onRequestFailed(const std::string& type, const RequestResult& result) {
+  /*
+    **先放上行协商的闸，再谈要不要报错。**
+
+    这一条在 tearingDown_ 与 2003 两个 return 之前：那两条 return 说的是
+    「这次失败不该打扰宿主」，而闸门是引擎自己的记账——offer 失败了 answer 就不会
+    再来，不放闸的话上行从此协商不出去，而且没有任何症状可查。
+  */
+  if (media_ && type == frame::kRoomOffer) media_->releasePubOffer();
+
   // 拆除期间的失败是我们自己造成的，不往外传（见 logout() 的注释）。
   if (tearingDown_) return;
   /*

@@ -474,3 +474,180 @@ IMRTC_TEST(noRenegotiateWhenNotResumed,
   CHECK_EQ(harness.media->restartPubIceCalls, 0, "不该重启");
   CHECK_EQ(harness.countSent(imrtc::frame::kRoomOffer), before, "不该补帧");
 }
+
+/**
+ * 上行协商闸门（协议 §3.3）：**同一时刻只许一个 pub offer 在飞**。
+ *
+ * 不加的后果不是「多一次协商」：offer#2 的 setLocalDescription 覆盖掉 offer#1，
+ * answer#1 回来时本端已经不是当初那个 offer 了。iOS 真机上是
+ * `Called in wrong state: stable (INVALID_STATE)`（那次自愈了），
+ * **Android 上同一个缺陷的后果是上行再也协商不出去**。
+ */
+namespace {
+
+/** answerPubOffer 回一条 pub answer，走 req_id 配对（§3.3：answer 就是 offer 的应答）。 */
+void answerPubOffer(Harness& harness, const std::string& reqId) {
+  harness.net.deliver(imtest::replyFrame(
+      imrtc::frame::kRoomAnswer, reqId,
+      Json::parse("{\"pc\":\"pub\",\"sdp\":\"v=0\\r\\npub-answer\"}")));
+}
+
+/** lastOfferReqId 取线路上最后一条 pub offer 的 req_id。 */
+std::string lastOfferReqId(Harness& harness) {
+  return imtest::field(harness.findSent(imrtc::frame::kRoomOffer), "req_id");
+}
+
+/**
+ * reqIdsOf 按顺序列出线路上某类型每一帧的 req_id。
+ *
+ * **不能用 Harness::reply**：它回的是「最后发出去的那一帧」的 req_id，
+ * 而两条轨道时最后一帧是第二条 publish，第一条就再也答不上了——
+ * 应答类型对不上会被当成事件静默忽略，于是用例在一个假的前提上绿。
+ */
+std::vector<std::string> reqIdsOf(Harness& harness, const std::string& type) {
+  std::vector<std::string> ids;
+  for (const std::string& raw : harness.net.current().sent) {
+    const Json frame = Json::parse(raw);
+    if (imtest::field(frame, "type") == type) ids.push_back(imtest::field(frame, "req_id"));
+  }
+  return ids;
+}
+
+/** publishOk 用指定的 req_id 回一条 room.publish.ok。 */
+void publishOk(Harness& harness, const std::string& reqId, const std::string& trackId,
+               const std::string& cid) {
+  harness.net.deliver(imtest::replyFrame(imrtc::okType(imrtc::frame::kRoomPublish), reqId,
+                                         Json::parse("{\"track_id\":\"" + trackId +
+                                                     "\",\"cid\":\"" + cid + "\"}")));
+}
+
+}  // namespace
+
+IMRTC_TEST(pubOfferGateHoldsSecond,
+           "上行协商闸门 —— 两条轨道两次 publish.ok，第二条 offer 要等第一条的 answer") {
+  Harness harness;
+  harness.enterRoom("video");  // 视频通话发 audio + video 两条轨道
+
+  const std::vector<std::string> publishIds = reqIdsOf(harness, imrtc::frame::kRoomPublish);
+  CHECK_EQ(publishIds.size(), std::size_t{2}, "视频通话发了两条 room.publish");
+
+  // 第一条轨道的 publish.ok → 第一条 offer 出去。
+  publishOk(harness, publishIds[0], "t-1", "local-mic-1");
+  CHECK_EQ(harness.countSent(imrtc::frame::kRoomOffer), std::size_t{1}, "第一条 offer 出去了");
+  const std::string firstReqId = lastOfferReqId(harness);
+
+  /*
+    第二条轨道的 publish.ok 紧跟着来——**真机上就是这个时序**（audio 与 video
+    几乎同时发布）。第二条 offer 必须被拦住，否则它的 setLocalDescription 会盖掉
+    第一条，第一条的 answer 回来就落在一个对不上的本地描述上。
+  */
+  publishOk(harness, publishIds[1], "t-2", "local-cam-1");
+  CHECK_EQ(harness.countSent(imrtc::frame::kRoomOffer), std::size_t{1}, "第二条要被闸住");
+  CHECK_EQ(harness.media->callCount("createPubOffer"), 1, "连 offer 都不该生成");
+
+  // 第一条的 answer 落地 → 放闸 → 补发攒下的那一条。
+  answerPubOffer(harness, firstReqId);
+  CHECK_EQ(harness.countSent(imrtc::frame::kRoomOffer), std::size_t{2}, "放闸后补发第二条");
+  CHECK_EQ(harness.media->callCount("createPubOffer"), 2, "这时才生成第二份 offer");
+  CHECK_TRUE(lastOfferReqId(harness) != firstReqId, "补发的是一条新请求");
+}
+
+IMRTC_TEST(pubOfferGateCoalesces,
+           "上行协商闸门 —— 闸住期间来三条也只补一条（offer 描述的是当前全部轨道）") {
+  Harness harness;
+  harness.enterRoom("audio");
+  harness.reply(imrtc::okType(imrtc::frame::kRoomPublish),
+                Json::parse("{\"track_id\":\"t-1\",\"cid\":\"local-mic-1\"}"));
+  const std::string firstReqId = lastOfferReqId(harness);
+
+  // 闸住期间连来三次重启请求。
+  for (int i = 0; i < 3; ++i) {
+    harness.media->emitPcState(PcRole::Pub, PcState::Failed);
+    harness.engine->tick();
+  }
+  CHECK_EQ(harness.countSent(imrtc::frame::kRoomOffer), std::size_t{1}, "全被闸住");
+
+  answerPubOffer(harness, firstReqId);
+  // 攒一条就够：offer 描述的是**当前**全部轨道的状态，三条待办合成一条不丢任何东西。
+  CHECK_EQ(harness.countSent(imrtc::frame::kRoomOffer), std::size_t{2}, "只补一条，不是三条");
+}
+
+IMRTC_TEST(pubOfferGateReleasedOnAnswerFailure,
+           "上行协商闸门 —— answer 应用失败也要放闸（不会再有第二条 answer 回来）") {
+  Harness harness;
+  harness.enterRoom("audio");
+  harness.reply(imrtc::okType(imrtc::frame::kRoomPublish),
+                Json::parse("{\"track_id\":\"t-1\",\"cid\":\"local-mic-1\"}"));
+  const std::string firstReqId = lastOfferReqId(harness);
+
+  harness.media->applyPubAnswerAllowed = false;  // 让 answer 落地失败
+  answerPubOffer(harness, firstReqId);
+
+  // 闸放了才谈得上下一轮：再来一次重启应当真的发得出去。
+  harness.media->emitPcState(PcRole::Pub, PcState::Failed);
+  harness.engine->tick();
+  CHECK_EQ(harness.countSent(imrtc::frame::kRoomOffer), std::size_t{2}, "失败之后闸门必须是开的");
+}
+
+IMRTC_TEST(pubOfferGateSurvivesSendFailure,
+           "上行协商闸门 —— offer 生成到一半连接断了：不崩、不卡死，恢复后照样协商") {
+  Harness harness;
+  harness.enterRoom("audio");
+
+  /*
+    构造「createPubOffer 还没回来，连接就断了」这个窗口：把假适配器改成异步完成，
+    发起协商之后再断线，然后 poll —— 完成回调这时才跑，`deps_.send` 返回 false。
+
+    **这一条是安全网，不是唯一防线**：真到了这一步，房间已经在 reconnecting，
+    随后的恢复会走 resetPubNegotiation 把闸门清零。所以它单独拿掉也不会让
+    下面的断言变红——留着是因为「四个终局一个都不能少」，漏一个就是上行永久沉默，
+    而这种病没有任何症状可查。真正把它钉住的是代码里那句注释与这里的路径覆盖。
+  */
+  harness.media->deferCompletions = true;
+  harness.reply(imrtc::okType(imrtc::frame::kRoomPublish),
+                Json::parse("{\"track_id\":\"t-1\",\"cid\":\"local-mic-1\"}"));
+  CHECK_EQ(harness.media->callCount("createPubOffer"), 1, "已经去要 offer 了");
+  CHECK_EQ(harness.countSent(imrtc::frame::kRoomOffer), std::size_t{0}, "还没发出去");
+
+  harness.net.remoteClose(imrtc::closecode::kGoingAway, "network lost");
+  harness.engine->tick();  // 完成回调在这里跑，send 会失败
+  CHECK_EQ(harness.countSent(imrtc::frame::kRoomOffer), std::size_t{0}, "断了就发不出去");
+
+  // 恢复之后上行照样协商得起来。
+  harness.media->deferCompletions = false;
+  harness.now += 1000;
+  harness.engine->tick();
+  harness.net.open();
+  harness.reply(imrtc::okType(imrtc::frame::kHello), imtest::helloOkData("s-1", true));
+  CHECK_EQ(harness.countSent(imrtc::frame::kRoomOffer), std::size_t{1},
+           "新连接上补得出来（闸门没被卡死）");
+}
+
+IMRTC_TEST(pubOfferGateResetOnResume,
+           "上行协商闸门 —— 会话恢复要清零：旧 answer 永远不会回来了") {
+  Harness harness;
+  harness.enterRoom("audio");
+  harness.reply(imrtc::okType(imrtc::frame::kRoomPublish),
+                Json::parse("{\"track_id\":\"t-1\",\"cid\":\"local-mic-1\"}"));
+  CHECK_EQ(harness.countSent(imrtc::frame::kRoomOffer), std::size_t{1}, "第一条在飞");
+
+  /*
+    断线时那条 offer 的 answer **永远不会回来**（在途请求被 2003 结掉，
+    而门面对 2003 是刻意放过的）。闸门不清就是 Android 上那个「上行永久沉默」：
+    它停在「有一个在飞」，而那个东西活在一条已经不存在的连接上。
+
+    **这条断言钉的是「两条放闸路径至少得留一条」**，不是其中某一条。实测过：
+    单独拿掉「恢复时清零」或单独拿掉「请求失败放闸」，这里都不会红——两者互为兜底；
+    **两条一起拿掉才红**。是刻意留的冗余，不是重复代码：一条走门面（它才看得见
+    请求失败），一条走媒体面（换连接这件事只有恢复那一刻知道），
+    将来动其中任何一条，另一条还在。
+  */
+  harness.net.remoteClose(imrtc::closecode::kGoingAway, "network lost");
+  harness.now += 1000;
+  harness.engine->tick();
+  harness.net.open();
+  harness.reply(imrtc::okType(imrtc::frame::kHello), imtest::helloOkData("s-1", true));
+
+  CHECK_EQ(harness.countSent(imrtc::frame::kRoomOffer), std::size_t{1},
+           "新连接上补的那一条发得出去");
+}

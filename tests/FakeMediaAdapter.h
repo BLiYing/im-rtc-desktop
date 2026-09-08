@@ -23,6 +23,8 @@ public:
   bool deferCompletions = false;
   bool micAllowed = true;
   bool cameraAllowed = true;
+  /** answer 落地失败的开关（闸门要在失败时也放）。 */
+  bool applyPubAnswerAllowed = true;
   std::int32_t micErrorCode = 2001;     // device_permission_denied
   std::int32_t cameraErrorCode = 2001;
 
@@ -96,8 +98,9 @@ public:
   void applyPubAnswer(const std::string& sdp, imrtc::VoidCompletion done) override {
     calls.push_back("applyPubAnswer");
     appliedPubAnswers.push_back(sdp);
-    complete([done]() {
-      if (done) done(true, 0);
+    const bool allowed = applyPubAnswerAllowed;
+    complete([done, allowed]() {
+      if (done) done(allowed, allowed ? 0 : 2006);
     });
   }
 

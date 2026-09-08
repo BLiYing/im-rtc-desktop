@@ -142,13 +142,7 @@ bool MediaPlane::fillSdp(const std::string& type, const std::string& reqId, cons
   if (!str(data, "sdp").empty()) return false;
 
   if (type == frame::kRoomOffer && str(data, "pc") == "pub") {
-    adapter_->createPubOffer([this](bool ok, const std::string& sdp, std::int32_t code) {
-      if (!ok) {
-        deps_.reportError(code, frame::kRoomOffer);
-        return;
-      }
-      deps_.send(frame::kRoomOffer, "", sdpFrame(PcRole::Pub, sdp));
-    });
+    startPubOffer();
     return true;
   }
   if (type == frame::kRoomAnswer && str(data, "pc") == "sub") {
@@ -183,6 +177,9 @@ void MediaPlane::onSignalingFrame(const std::string& type, const std::string& re
   if (type == frame::kRoomAnswer && str(data, "pc") == "pub") {
     adapter_->applyPubAnswer(str(data, "sdp"), [this](bool ok, std::int32_t code) {
       if (!ok) deps_.reportError(code, frame::kRoomAnswer);
+      // **落地与落地失败都要放闸**：失败了也不会再有第二条 answer 回来，
+      // 不放就是把上行永久锁死。
+      releasePubOffer();
     });
     return;
   }
@@ -231,6 +228,80 @@ void MediaPlane::setMuted(MediaKind kind, bool muted) {
 }
 
 /*
+  上行协商闸门：**同一时刻只许有一个 pub offer 在飞**（协议 §3.3）。
+
+  # 不加会怎样
+
+  发布 audio 与 video 两条轨道 → 两次 `room.publish.ok` → 房间机连吐两帧
+  `room.offer{pub}`。两个一起在飞时，offer#2 的 setLocalDescription 覆盖掉 offer#1，
+  answer#1 回来时本端已经不是当初那个 offer 了：iOS 真机上是
+  `Called in wrong state: stable (INVALID_STATE)` + `error 1501`，那次自愈了；
+  **Android 上同一个缺陷的后果是上行再也协商不出去**。
+
+  # 为什么闸门在这一层（与 iOS 刻意不同）
+
+  iOS 把闸放在 `IMFrameLoop`，因为在它那儿只有帧泵能表达「这一帧先别发」。
+  本仓不一样：`fillSdp` 本身就是**帧的接管点**——返回 true 等于「这一帧我收下了，
+  什么时候真发由我说了算」。闸门放在这里最短，也不必再给帧泵加一个它不关心的概念。
+
+  另外两处与 iOS 相同、与 Android 不同，理由值得记住：
+  - **不用锁**：本仓是单线程 tick 模型，适配器的回调按约定也投递在宿主线程。
+  - **不记 pendingIceRestart**：那一位在适配器上（见 MediaAdapter::restartPubICE），
+    排队等一轮再发也不会弄丢——这正是「位记在适配器上」的价值。
+
+  # 放闸的四个终局，一个都不能少
+
+  answer 落地 / answer 应用失败 / 帧根本没发出去 / 会话恢复与收场（resetPubNegotiation）。
+  漏掉任何一个，闸门就永远停在「有一个在飞」，上行从此沉默而日志里一切正常。
+*/
+void MediaPlane::startPubOffer() {
+  if (!adapter_) return;
+  if (pubOfferInFlight_) {
+    // **不是丢掉，是攒下来**：放闸时补一条。攒一条就够——offer 描述的是当前全部
+    // 轨道的状态，两条待办合成一条不丢任何东西。
+    pubOfferQueued_ = true;
+    log(LogLevel::Debug, "上行协商进行中，这一条先攒着");
+    return;
+  }
+  pubOfferInFlight_ = true;
+  adapter_->createPubOffer([this](bool ok, const std::string& sdp, std::int32_t code) {
+    if (!ok) {
+      deps_.reportError(code, frame::kRoomOffer);
+      releasePubOffer();
+      return;
+    }
+    if (!deps_.send(frame::kRoomOffer, "", sdpFrame(PcRole::Pub, sdp))) {
+      // 帧根本没走出去（没连接 / 连接不在 connected）。**这一条最容易漏**：
+      // 不放闸的话下一次协商永远等一个不会回来的 answer。
+      log(LogLevel::Warn, "上行 offer 没发出去，放闸");
+      releasePubOffer();
+    }
+  });
+}
+
+/** releasePubOffer 放闸；有攒着的就立刻补一条。 */
+void MediaPlane::releasePubOffer() {
+  pubOfferInFlight_ = false;
+  if (!pubOfferQueued_) return;
+  pubOfferQueued_ = false;
+  log(LogLevel::Debug, "补发攒下的上行协商");
+  startPubOffer();
+}
+
+/*
+  resetPubNegotiation 无条件清零。
+
+  **会话恢复时必须调**：换了连接，旧那条 offer 的 answer **永远不会回来**了
+  （在途请求在断线时已被 2003 结掉，而门面对 2003 是刻意放过的）。
+  不清零就是 Android 上那个「上行永久沉默」——闸门停在「有一个在飞」，
+  而那个「在飞」的东西活在一条已经不存在的连接上。
+*/
+void MediaPlane::resetPubNegotiation() {
+  pubOfferInFlight_ = false;
+  pubOfferQueued_ = false;
+}
+
+/*
   restartPubIce 是两个触发点共用的那两步：**先置位、再发帧**。
 
   顺序不能反：帧一发出去，房间机就产出 `room.offer{pub, sdp:""}`，媒体面随即
@@ -260,16 +331,22 @@ void MediaPlane::restartPubIce() {
 void MediaPlane::renegotiateAfterResume() {
   if (!attached_) return;
   log(LogLevel::Info, "会话已恢复，重新协商上行");
+  // **先清零再重启**：闸门可能还停在断线前那条 offer 上，而它的 answer 永远不会
+  // 回来了。不清零，下面这一条就会被自己的闸挡住，上行从此沉默。
+  resetPubNegotiation();
   restartPubIce();
 }
 
 void MediaPlane::reset() {
+  // 一轮结束，闸门跟着归零：那条 offer 的 answer 不会再来了。
+  resetPubNegotiation();
   localCids_.clear();
   pendingSubOffer_.clear();
   if (adapter_) adapter_->reset();
 }
 
 void MediaPlane::close() {
+  resetPubNegotiation();
   localCids_.clear();
   pendingSubOffer_.clear();
   attached_ = false;
