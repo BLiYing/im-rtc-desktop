@@ -213,6 +213,13 @@ private:
   void handleIncoming(const std::string& type, const std::string& reqId, const Json& data);
   void dispatchOutput(EngineOutput output, const std::string& replyReqId);
   void emitEvent(const EmittedEvent& event);
+  /** emitAll 抛一批事件给宿主，再让媒体面跟着这批事件动。 */
+  void emitAll(const std::vector<EmittedEvent>& events);
+  /**
+   * emitOrDefer 抛一条本地补的事件；正处在某一层发帧循环里时先攒着。
+   * 见 dispatchOutput 里关于重入顺序的长注释。
+   */
+  void emitOrDefer(EmittedEvent event);
   /** reactToEvents 让媒体面跟着通话/房间的生命周期走（进房推流、终局归零）。 */
   void reactToEvents(const std::vector<EmittedEvent>& events);
   /** videoTrackOf 找某个 uid 的远端视频轨道；没有则空串。 */
@@ -237,6 +244,14 @@ private:
    * 都是），所以用一个一次性标记把两者合成状态机认识的 `ws_closed_4403`。
    */
   bool kickedOutPending_ = false;
+  /**
+   * sendDepth_ 是「正在几层发帧循环里」。>0 意味着**这一层还没轮到抛事件**，
+   * 此刻产生的任何事件都要攒进 deferredEmits_，等最外层 unwind 之后再放。
+   * 见 dispatchOutput 的长注释。
+   */
+  int sendDepth_ = 0;
+  /** deferredEmits_ 是重入期间攒下的事件，按产生顺序排队。 */
+  std::vector<EmittedEvent> deferredEmits_;
   /**
    * 正在执行 `logout()`。这期间连接层抛上来的东西**一概不往外传**——
    * 是宿主自己要拆的，见 logout() 里的注释。

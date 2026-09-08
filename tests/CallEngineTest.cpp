@@ -147,6 +147,42 @@ IMRTC_TEST(engineHappyPath, "CallEngine —— 主叫全程：login → call →
            "完整回调序列");
 }
 
+IMRTC_TEST(engineEmitOrderOnSendFailure,
+           "CallEngine —— 帧发不出去时，事件顺序不许倒过来（onCallBegin 要在 onRoomLeft 前）") {
+  Harness harness;
+  harness.login();
+  harness.engine->call({"bob"}, "video", false);
+  harness.reply(imrtc::okType(imrtc::frame::kCallInvite),
+                Json::parse("{\"call_id\":\"call-1\",\"room_id\":\"r-1\"}"));
+  harness.event(imrtc::frame::kCallAccepted,
+                Json::parse("{\"call_id\":\"call-1\",\"uid\":\"bob\"}"));
+
+  /*
+    线路**悄悄发不出去了**（帧还进得来，但 send 走不掉）。真实里就是这个形状：
+    TCP 已经断了而关闭事件还没到，或者对端半关。
+
+    call.connected 这一步同时产出 **onCallBegin（事件）与一帧 room.join（要发）**，
+    正好是重入顺序问题的复现点：room.join 发不出去 → failLocally → 内层 apply
+    跑完整个 dispatchOutput，把 onError / onRoomLeft 都抛了，
+    而外层的 onCallBegin 还一条没抛。
+  */
+  harness.net.current().open = false;
+  harness.event(imrtc::frame::kCallConnected,
+                Json::parse("{\"call_id\":\"call-1\",\"room_id\":\"r-1\",\"room_token\":\"tk\","
+                            "\"media_type\":\"video\",\"is_group\":false,"
+                            "\"connected_at_ms\":1756876812000,\"accepted_by\":\"bob\"}"));
+
+  /*
+    要守的就是这个顺序：**先有这通电话，才谈得上它为什么结束**。
+    修之前这里是 error → roomLeft → callBegin，宿主拿着一条「结束」去关一个
+    它还不知道存在的通话，界面收不了场。
+  */
+  const std::vector<std::string> want{"connected:s-1/fresh", "userAccept:bob",
+                                      "callBegin:call-1/caller", "error:2003/network_unreachable",
+                                      "roomLeft:r-1"};
+  CHECK_EQ(harness.recorder->log, want, "生命周期顺序：先 callBegin，再失败，最后 roomLeft");
+}
+
 IMRTC_TEST(engineInviteFailure, "CallEngine —— invite 被拒要回 idle 并抛 onCallEnd，否则界面永远收不了场") {
   Harness harness;
   harness.login();

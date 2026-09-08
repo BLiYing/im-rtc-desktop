@@ -57,7 +57,10 @@ bool dispatchObserverEvent(CallEngineObserver& out, const EmittedEvent& event) {
   } else if (cb == "onKickedOut") {
     target->onKickedOut();
   } else if (cb == "onError") {
-    target->onError(static_cast<std::int32_t>(num(args, "code")), str(args, "name"), "");
+    // for_type 是「哪一帧没成」。状态机产出的 onError 不带它，本地补的那条
+    // （CallEngine::failLocally）带——取不到就是空串，与原先的行为一致。
+    target->onError(static_cast<std::int32_t>(num(args, "code")), str(args, "name"),
+                    str(args, "for_type"));
   } else if (cb == "onCallReceived") {
     target->onCallReceived(CallInvite{str(args, "call_id"), str(args, "caller"),
                                       stringsOf(args, "callee_ids"), str(args, "media_type"),

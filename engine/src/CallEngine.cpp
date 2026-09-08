@@ -66,9 +66,17 @@ CallEngine::CallEngine(CallEngineOptions options) : options_(std::move(options))
   };
   deps.reportError = [this](std::int32_t code, const std::string& forType) {
     if (tearingDown_) return;
-    if (const std::shared_ptr<CallEngineObserver> target = observer()) {
-      target->onError(code, errorName(code), forType);
-    }
+    /*
+      也走队列。媒体面的错误多半是异步回来的（那时 sendDepth_ 是 0，就地抛），
+      但**同步的适配器会让它落在发帧循环里**：sendOne → fillSdp → createPubOffer
+      当场失败 → 这里。就地抛的话又是一次「错误跑到它所属的那次转移的事件前面」。
+      让所有抛给宿主的事件都走同一条路，比在每个入口各自判断可靠。
+    */
+    Json args = Json::makeObject();
+    args.set("code", Json::make(static_cast<std::int64_t>(code)));
+    args.set("name", Json::make(errorName(code)));
+    args.set("for_type", Json::make(forType));
+    emitOrDefer(EmittedEvent{"onError", args});
   };
   deps.uidOf = [this](const std::string& trackId) {
     const auto it = context_.room.remoteTracks.find(trackId);
@@ -354,22 +362,71 @@ void CallEngine::apply(const MachineInput& input, const std::string& replyReqId)
   dispatchOutput(reduceEngine(context_, input, options_.clock()), replyReqId);
 }
 
+/**
+ * dispatchOutput 把一次状态转移的产物落地：换状态 → 发帧 → 抛事件。
+ *
+ * # 三条顺序，各有各的理由
+ *
+ * **先发帧再抛回调**：回调里宿主很可能立刻再调 Engine（比如 onCallBegin 里就开麦），
+ * 那时状态已经是新的、该发的帧也已经在路上，不会出现「回调看到的状态比线路超前」。
+ *
+ * **先把事件抛给宿主，再让媒体面动**。反过来的话，采集失败的 onError 会跑到
+ * onRoomJoined 前面——宿主还不知道自己进了房，就先收到一条「麦克风被拒」，
+ * 界面上没有任何上下文可以挂这条错误。
+ * （「媒体面动得晚了会不会影响宿主在 onRoomJoined 里调 openCamera」不成立：
+ * 采集本来就是异步的，那时候轨道无论如何还没到手。）
+ *
+ * **重入期间产生的事件要等外层抛完再放**——这一条是上面那条「先发帧」的代价。
+ * 发帧可能就地失败（`sendOne` → `failLocally` → `apply`），于是内层跑完了整个
+ * dispatchOutput、事件全抛了，而**外层的事件一条都还没抛**。`call.connected` 那一步
+ * 同时产出 onCallBegin 与一帧 room.join：room.join 发不出去时，宿主先收到
+ * onRoomLeft、再收到 onCallBegin，生命周期是倒的，界面拿它没法收场。
+ *
+ * 正解不是把两个循环调个头（那会毁掉上面第一条），而是让重入的事件排队：
+ * 发帧循环期间 `sendDepth_ > 0`，此时产生的事件一律进 `deferredEmits_`；
+ * 回到最外层后先抛自己的，再按产生顺序放队列里的。于是顺序恢复成
+ * onCallBegin → onError → onRoomLeft。
+ *
+ * **宿主在回调里回调进来不受影响**：那时 `sendDepth_` 已经归零，是一次新的最外层
+ * 派发，事件照常就地抛出——它本来就该是同步可见的。
+ */
 void CallEngine::dispatchOutput(EngineOutput output, const std::string& replyReqId) {
   context_ = std::move(output.state);
 
-  // **先发帧再抛回调**：回调里宿主很可能立刻再调 Engine（比如 onCallBegin 里就开麦），
-  // 那时状态已经是新的、该发的帧也已经在路上，不会出现「回调看到的状态比线路超前」。
+  ++sendDepth_;
   for (const OutgoingFrame& frame : output.send) sendOne(frame, replyReqId);
-  /*
-    **先把事件抛给宿主，再让媒体面动**。反过来的话，采集失败的 onError 会跑到
-    onRoomJoined 前面——宿主还不知道自己进了房，就先收到一条「麦克风被拒」，
-    界面上没有任何上下文可以挂这条错误。
+  --sendDepth_;
 
-    「媒体面动得晚了会不会影响宿主在 onRoomJoined 里调 openCamera」不成立：
-    采集本来就是异步的，那时候轨道无论如何还没到手。
+  if (sendDepth_ > 0) {
+    // 自己是内层：把事件交给外层排队，等它抛完自己的再轮到这些。
+    deferredEmits_.insert(deferredEmits_.end(), output.emit.begin(), output.emit.end());
+    return;
+  }
+
+  emitAll(output.emit);
+  /*
+    再放重入期间攒下的。每一批都先搬到局部再抛：抛的过程中宿主可能回调进来，
+    而那条路上的失败会往 deferredEmits_ 里继续追加——直接迭代成员容器会边遍历边扩容。
+    循环到空为止，保证一条都不会漏在队列里过夜。
   */
-  for (const EmittedEvent& event : output.emit) emitEvent(event);
-  reactToEvents(output.emit);
+  while (!deferredEmits_.empty()) {
+    std::vector<EmittedEvent> batch;
+    batch.swap(deferredEmits_);
+    emitAll(batch);
+  }
+}
+
+void CallEngine::emitAll(const std::vector<EmittedEvent>& events) {
+  for (const EmittedEvent& event : events) emitEvent(event);
+  reactToEvents(events);
+}
+
+void CallEngine::emitOrDefer(EmittedEvent event) {
+  if (sendDepth_ > 0) {
+    deferredEmits_.push_back(std::move(event));
+    return;
+  }
+  emitEvent(event);
 }
 
 /**
@@ -456,9 +513,17 @@ void CallEngine::onRequestFailed(const std::string& type, const RequestResult& r
 }
 
 void CallEngine::failLocally(const std::string& type, std::int32_t code) {
-  if (const std::shared_ptr<CallEngineObserver> target = observer()) {
-    target->onError(code, errorName(code), type);
-  }
+  /*
+    走 emitOrDefer 而不是直接调 observer：failLocally 几乎总是在**某一层的发帧循环里**
+    被调到（帧没发出去才叫失败）。直接抛的话，这条错误会跑到「它所属的那次状态转移」
+    自己的事件前面去——宿主先看见 onError，才看见 onCallBegin。见 dispatchOutput。
+  */
+  Json args = Json::makeObject();
+  args.set("code", Json::make(static_cast<std::int64_t>(code)));
+  args.set("name", Json::make(errorName(code)));
+  // for_type 让宿主知道是哪一帧没成。状态机产出的 onError 不带它，取不到就是空串。
+  args.set("for_type", Json::make(type));
+  emitOrDefer(EmittedEvent{"onError", args});
 
   /*
     两个帧的失败必须让状态机退回 idle，否则界面永远收不了场：
