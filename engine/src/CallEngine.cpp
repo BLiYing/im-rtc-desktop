@@ -101,6 +101,22 @@ void CallEngine::setObserver(std::weak_ptr<CallEngineObserver> observer) {
 }
 
 void CallEngine::login(const std::string& token) {
+  /*
+    `device_id` 在**开 socket 之前**校验（协议 §2.5）。
+
+    不拦的症状是「登录失败，没有下文」：服务端一律回 1004，而它那句说得很清楚的
+    「device_id 只允许 [A-Za-z0-9_-]」到不了宿主手里，宿主看到的只有一个 bad_params。
+    Android 真机上踩过一次——`Build.MODEL` 就是 `Pixel 2 XL`，带空格。
+
+    抛的是 `bad_params`(1004)，**和服务端拒绝时同一个码**，宿主不用为「本地拦的」
+    和「服务端拒的」写两遍分支。C ABI 那一层还会更早地同步拒掉（engine_create），
+    这一条守的是直接用 C++ 门面的那条路。
+  */
+  if (!deviceIdValid(options_.deviceId)) {
+    failLocally(frame::kHello, codeValue(ErrorCode::BadParams));
+    return;
+  }
+
   ConnectionOptions connectionOptions;
   connectionOptions.url = options_.url;
   connectionOptions.token = token;
@@ -126,7 +142,10 @@ void CallEngine::login(const std::string& token) {
     data.set("resumed", Json::make(hello.resumed));
     apply(MachineInput::recv(frame::kHelloOk, data), "");
   };
-  events.onKickedOut = [this]() { kickedOutPending_ = true; };
+  events.onKickedOut = [this](KickedReason reason) {
+    kickedOutPending_ = true;
+    kickedReason_ = reason;
+  };
   events.onSessionUnrecoverable = [this]() {
     if (tearingDown_) return;
     // 与「重连上了但 resumed=false」同一件事，只是不必等重连成功。

@@ -198,13 +198,28 @@ void MainWindow::wireConnection() {
     overlay_->onReconnecting(true);
   });
 
-  connect(bridge_, &EngineBridge::kickedOut, this, [this] {
-    // 4401 连续失败或别处登录：回登录页换票，别在原地空转。
+  connect(bridge_, &EngineBridge::kickedOut, this, [this](imrtc_v1_kicked_reason reason) {
+    /*
+      三个原因**说三句不同的话**。合成一句「已在别处登录，或票据已失效」是错的：
+      device_id 不合规时它既不是别处登录、也不是票的问题，用户照着提示重登一百次
+      也好不了——该去改的是宿主传进来的那个参数。
+    */
     bridge_->disconnectFromServer();
     hideOverlay();
     stack_->setCurrentWidget(login_);
     login_->setBusy(false);
-    login_->showError(tr("已在别处登录，或票据已失效。请重新登录。"));
+    switch (reason) {
+      case IMRTC_V1_KICKED_AUTH_EXPIRED:
+        login_->showError(tr("票据已失效，请重新登录以换取新票。"));
+        break;
+      case IMRTC_V1_KICKED_CONFIG_REJECTED:
+        // 这一条是给接入方看的，不是给终端用户看的——它意味着宿主传错了参数。
+        login_->showError(tr("接入参数不合规（如 device_id 含非法字符），请检查配置。"));
+        break;
+      case IMRTC_V1_KICKED_TAKEN_OVER:
+        login_->showError(tr("您的账号已在别处登录。"));
+        break;
+    }
   });
 
   connect(bridge_, &EngineBridge::engineError, this,

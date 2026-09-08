@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 
+#include "imrtc/Handshake.h"
+
 namespace imrtc {
 
 /**
@@ -88,8 +90,14 @@ public:
   }
   /** 信令通道断开。Engine 会按退避档自动重连，除非关闭码明说不该重连。 */
   virtual void onDisconnected() {}
-  /** 被踢，或鉴权连续失败到上限。**只能重新 login**。 */
-  virtual void onKickedOut() {}
+  /**
+   * 被踢、鉴权连续失败到上限、或握手被拒。**不会自动重连，只能重新 login。**
+   *
+   * `reason` 决定宿主该做什么：`TakenOver` 回登录页、`AuthExpired` 换一枚票再来、
+   * `ConfigRejected` 去改配置。**三者不许合并**——把「换票就能好」报成「去改配置」，
+   * 宿主只能把可以静默恢复的场景也弹成「请重新登录」。
+   */
+  virtual void onKickedOut(KickedReason reason) { (void)reason; }
   /** 任意内部错误。`name` 是机读名，`forType` 是出错的请求帧。 */
   virtual void onError(std::int32_t code, const std::string& name, const std::string& forType) {
     (void)code;

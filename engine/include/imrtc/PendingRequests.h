@@ -27,6 +27,14 @@ struct RequestResult {
   std::string errorName;
   /** 出错的请求 type。 */
   std::string forType;
+  /**
+   * 错误帧上自带的 `retryable`。**只在本端不认识 `errorCode` 时才该信它**——
+   * 认识的码一律以本地错误码表为准（那张表是一致性向量的一部分）。
+   *
+   * **默认 true**：本地结算（超时 / 断线 / logout）与「帧上没写这一位」都落在这里，
+   * 语义是「不认识就先退避着」，与另外三端一致。
+   */
+  bool wireRetryable = true;
   /** 成功时的应答信封。 */
   Envelope envelope;
   /** 成功时**已按帧声明解码**的 data（线路形状 + 默认值）。 */

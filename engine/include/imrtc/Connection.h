@@ -5,6 +5,7 @@
 #include <string>
 
 #include "imrtc/Backoff.h"
+#include "imrtc/Handshake.h"
 #include "imrtc/Heartbeat.h"
 #include "imrtc/PendingRequests.h"
 #include "imrtc/Transport.h"
@@ -42,8 +43,13 @@ struct ConnectionEvents {
   std::function<void(const HelloOk&)> onConnected;
   /** 连接断开。willReconnect=false 时不会再自动回来。 */
   std::function<void(int code, const std::string& reason, bool willReconnect)> onDisconnected;
-  /** 被踢，或鉴权连续失败到上限。宿主该回登录页换票。 */
-  std::function<void()> onKickedOut;
+  /**
+   * 被踢、鉴权连续失败到上限、或**握手被拒且重试不可能变好**。**不会自动重连。**
+   *
+   * `reason` 决定宿主该做什么，三者处置完全不同（见 `KickedReason`）——
+   * 合并成一类等于给宿主一条错的建议。
+   */
+  std::function<void(KickedReason reason)> onKickedOut;
   /**
    * 断得太久了，**服务端那一侧的会话已经不可能再恢复**（§1.4 的恢复窗口过了）。
    *
@@ -164,6 +170,7 @@ private:
 
   void sendHello(std::int64_t nowMs);
   void handleHelloOk(const RequestResult& result);
+  void abortIfHandshakeRejected(const RequestResult& result);
   /** dispatch 不检查连接状态——**sys.hello 本身就要在 connecting 状态下发出去**。 */
   bool dispatch(const std::string& type, const Json& data, std::int64_t nowMs,
                 ResponseHandler handler);

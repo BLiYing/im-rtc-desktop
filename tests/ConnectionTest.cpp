@@ -31,6 +31,7 @@ struct Harness {
   std::vector<std::string> connected;
   std::vector<std::string> disconnected;
   int kickedOut = 0;
+  imrtc::KickedReason kickedReason = imrtc::KickedReason::TakenOver;
   std::vector<std::string> events;
   std::vector<std::int32_t> errors;
   std::unique_ptr<Connection> connection;
@@ -53,7 +54,10 @@ struct Harness {
     events_.onDisconnected = [this](int code, const std::string&, bool willReconnect) {
       disconnected.push_back(std::to_string(code) + (willReconnect ? "/retry" : "/stop"));
     };
-    events_.onKickedOut = [this]() { ++kickedOut; };
+    events_.onKickedOut = [this](imrtc::KickedReason reason) {
+      ++kickedOut;
+      kickedReason = reason;
+    };
     events_.onEvent = [this](const std::string& type, const Json&, const imrtc::Envelope&) {
       events.push_back(type);
     };

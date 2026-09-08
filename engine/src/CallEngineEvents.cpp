@@ -55,7 +55,15 @@ bool dispatchObserverEvent(CallEngineObserver& out, const EmittedEvent& event) {
   } else if (cb == "onDisconnected") {
     target->onDisconnected();
   } else if (cb == "onKickedOut") {
-    target->onKickedOut();
+    /*
+      原因**不是状态机给的**，是门面在派发前塞进 args 的（见 CallEngine::emitEvent）。
+
+      状态机这条 emit 的 args 在一致性向量里就是 `{}`（room_fsm.json 的
+      `ws_closed_4403`）——它只关心状态怎么走，而「为什么被踢」它压根不知道：
+      同一个内部事件既被 4403 复用，也被「鉴权失败到顶」复用。取不到就兜底成
+      TakenOver，那是 4403 的含义。
+    */
+    target->onKickedOut(parseKickedReason(str(args, "reason")));
   } else if (cb == "onError") {
     // for_type 是「哪一帧没成」。状态机产出的 onError 不带它，本地补的那条
     // （CallEngine::failLocally）带——取不到就是空串，与原先的行为一致。
@@ -122,6 +130,14 @@ void CallEngine::emitEvent(const EmittedEvent& event) {
   const std::shared_ptr<CallEngineObserver> target = observer();
   // 观察者已经没了：宿主放手即注销，这里静默跳过而不是崩（CONVENTIONS §5）。
   if (!target) return;
+  if (event.cb == "onKickedOut") {
+    // 把连接层给的原因补进 args 再派发。**不改状态机**：那条 emit 的 args 是
+    // 五仓共用的一致性向量钉死的 `{}`，往里加字段等于单方面改五端契约。
+    EmittedEvent enriched = event;
+    enriched.args.set("reason", Json::make(kickedReasonName(kickedReason_)));
+    dispatchObserverEvent(*target, enriched);
+    return;
+  }
   dispatchObserverEvent(*target, event);
 }
 

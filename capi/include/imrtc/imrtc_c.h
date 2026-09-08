@@ -65,6 +65,21 @@ typedef enum imrtc_v1_call_state {
 } imrtc_v1_call_state;
 
 /** 房间状态，与 §5.3 一一对应。 */
+/**
+ * 被踢的原因。**三类的处置完全不同，不许合并成一个「被踢」。**
+ *
+ * 五端契约（Android `IMKickedOutReason.*`，Web/iOS 的 `takenOver` /
+ * `authExpired` / `configRejected`）。**显式赋值，绝不依赖声明顺序。**
+ */
+typedef enum imrtc_v1_kicked_reason {
+  /** 同账号同设备号在别处登录，或宿主吊销。**回登录页。** */
+  IMRTC_V1_KICKED_TAKEN_OVER = 0,
+  /** 票的问题（过期 / 被吊销 / 签名密钥轮换）。**换一枚票再来。** */
+  IMRTC_V1_KICKED_AUTH_EXPIRED = 1,
+  /** 参数不合规。**去改配置**——换票和重试都救不了 device_id 里的空格。 */
+  IMRTC_V1_KICKED_CONFIG_REJECTED = 2
+} imrtc_v1_kicked_reason;
+
 typedef enum imrtc_v1_room_state {
   IMRTC_V1_ROOM_IDLE = 0,
   IMRTC_V1_ROOM_JOINING = 1,
@@ -163,7 +178,12 @@ typedef struct imrtc_v1_observer {
   /* 连接 */
   void (*on_connected)(void* user_data, const char* session_id, imrtc_v1_bool resumed);
   void (*on_disconnected)(void* user_data);
-  void (*on_kicked_out)(void* user_data);
+  /**
+   * 被踢、鉴权连续失败到上限、或**握手被拒**。**不会自动重连。**
+   *
+   * `reason` 决定宿主该做什么，见 imrtc_v1_kicked_reason。
+   */
+  void (*on_kicked_out)(void* user_data, imrtc_v1_kicked_reason reason);
   void (*on_error)(void* user_data, int32_t code, const char* name, const char* for_type);
 
   /* 来电与拨出 */

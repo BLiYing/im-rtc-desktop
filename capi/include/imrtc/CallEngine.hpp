@@ -72,7 +72,8 @@ public:
 
   virtual void onConnected(const std::string& sessionId, bool resumed) { (void)sessionId; (void)resumed; }
   virtual void onDisconnected() {}
-  virtual void onKickedOut() {}
+  /** 被踢 / 鉴权用尽 / 握手被拒。`reason` 决定宿主该做什么，见 imrtc_v1_kicked_reason。 */
+  virtual void onKickedOut(imrtc_v1_kicked_reason reason) { (void)reason; }
   virtual void onError(std::int32_t code, const std::string& name, const std::string& forType) {
     (void)code; (void)name; (void)forType;
   }
@@ -277,8 +278,8 @@ private:
   static void cbDisconnected(void* u) {
     if (Observer* o = self(u)) o->onDisconnected();
   }
-  static void cbKickedOut(void* u) {
-    if (Observer* o = self(u)) o->onKickedOut();
+  static void cbKickedOut(void* u, imrtc_v1_kicked_reason reason) {
+    if (Observer* o = self(u)) o->onKickedOut(reason);
   }
   static void cbError(void* u, std::int32_t code, const char* name, const char* forType) {
     if (Observer* o = self(u)) o->onError(code, text(name), text(forType));

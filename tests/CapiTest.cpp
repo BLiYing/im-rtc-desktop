@@ -90,6 +90,35 @@ IMRTC_TEST(capiNullHandleIsSafe, "C ABI —— 对空句柄调任何方法都返
   CHECK_TRUE(true, "destroy(nullptr) 没崩");
 }
 
+IMRTC_TEST(capiRejectsBadDeviceId,
+           "C ABI —— device_id 不合规在 create 就被挡回（协议 §2.5）") {
+  imrtc_v1_engine* engine = nullptr;
+
+  /*
+    挡在**最早**的地方：create 本来就返回错误码，比 login 更早，而且是同步的。
+    真机上那次是 Android 的 `Build.MODEL == "Pixel 2 XL"`——带空格。
+
+    **只校验不改写**：`MI 8` 与 `MI8` 是两款不同的机器，「删掉非法字符」会让它们
+    撞成同一个 device_id，后果是两台设备互相顶号、轮流把对方踢下线。
+  */
+  for (const char* bad : {"Pixel 2 XL", "", "mac.abi", "mac/abi", "\xe8\xae\xbe-1"}) {
+    imrtc_v1_options options = makeOptions();
+    options.device_id = bad;
+    CHECK_EQ(imrtc_v1_engine_create(&options, &engine), std::int32_t{IMRTC_V1_ERR_BAD_PARAMS},
+             bad);
+    CHECK_EQ(engine == nullptr, true, "拒了就不该交出句柄");
+  }
+
+  // 别把校验写成谁都拦。
+  for (const char* good : {"mac-abi-1", "Pixel_2_XL", "a"}) {
+    imrtc_v1_options options = makeOptions();
+    options.device_id = good;
+    CHECK_EQ(imrtc_v1_engine_create(&options, &engine), std::int32_t{IMRTC_V1_OK}, good);
+    imrtc_v1_engine_destroy(engine);
+    engine = nullptr;
+  }
+}
+
 IMRTC_TEST(capiSetRemoteLayerRejectsBadLayer,
            "C ABI —— 非法层名在边界上就被挡回，不许上线路") {
   imrtc_v1_options options = makeOptions();

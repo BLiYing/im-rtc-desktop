@@ -29,6 +29,7 @@ struct Harness {
   imtest::FakeNet net;
   std::vector<std::string> disconnected;
   int kickedOut = 0;
+  imrtc::KickedReason kickedReason = imrtc::KickedReason::TakenOver;
   int unrecoverable = 0;
   std::unique_ptr<Connection> connection;
 
@@ -44,7 +45,10 @@ struct Harness {
     events.onDisconnected = [this](int code, const std::string&, bool willReconnect) {
       disconnected.push_back(std::to_string(code) + (willReconnect ? "/retry" : "/stop"));
     };
-    events.onKickedOut = [this]() { ++kickedOut; };
+    events.onKickedOut = [this](imrtc::KickedReason reason) {
+      ++kickedOut;
+      kickedReason = reason;
+    };
     events.onSessionUnrecoverable = [this]() { ++unrecoverable; };
     connection = std::unique_ptr<Connection>(new Connection(options, events));
   }
@@ -67,7 +71,87 @@ bool willReconnectFor(int code) {
   return harness.disconnected[0].find("/retry") != std::string::npos;
 }
 
+/**
+ * rejectHandshake 让服务端拒掉在飞的那次握手，然后**照真实服务端那样关掉连接**。
+ *
+ * 关连接这一步不能省。少了它，「不再重连」那条断言是**空的**——没有任何东西会去
+ * 排下一次重连，于是把修复整个删掉用例也照样绿。Web 与 iOS 补这条时都踩过一次。
+ */
+void rejectHandshake(Harness& harness, std::int32_t code, const std::string& name, bool retryable,
+                     int closeCode) {
+  const std::string reqId = imtest::field(imtest::lastSent(harness.net.current()), "req_id");
+  imrtc::Json data = imrtc::Json::makeObject();
+  data.set("code", imrtc::Json::make(static_cast<std::int64_t>(code)));
+  data.set("name", imrtc::Json::make(name));
+  data.set("msg", imrtc::Json::make(name));
+  data.set("for_type", imrtc::Json::make(std::string("sys.hello")));
+  data.set("retryable", imrtc::Json::make(retryable));
+  harness.net.deliver(imtest::replyFrame("sys.error", reqId, std::move(data)));
+  harness.net.remoteClose(closeCode, name);
+}
+
 }  // namespace
+
+IMRTC_TEST(handshakeRejectedGivesUpAtOnce,
+           "握手被拒 —— 不可重试的一次就放弃，并按「谁救得了」给出原因") {
+  Harness harness;
+  harness.connection->connect(kT0);
+  harness.net.open();
+
+  /*
+    用 1106 app_disabled + 4401：这是**最能说明问题**的一组。
+
+    服务端对「票验不过」一律关 4401（gateway/handshake.go），而 4401 的既定处置是
+    「换新票后重连、三次才放弃」。可 app_disabled 是这个应用被停了，**重连一万次
+    它还是停着的**——照 4401 走就是白白三轮，然后还报成「票的问题」。
+
+    （`device_id` 不合规那一条服务端关的是 4400，本来就不重连；但宿主同样只收得到
+    一个光秃秃的 onError，不知道该去改配置。原因这一半是这里补的。）
+  */
+  rejectHandshake(harness, 1106, "app_disabled", false, imrtc::closecode::kUnauthorized);
+
+  CHECK_EQ(harness.kickedOut, 1, "应当抛一次 onKickedOut");
+  CHECK_EQ(harness.kickedReason, imrtc::KickedReason::ConfigRejected,
+           "1106 换票救不了，该让宿主去改配置");
+  CHECK_EQ(harness.disconnected.size(), std::size_t{1}, "抛一次 onDisconnected");
+  CHECK_EQ(harness.disconnected[0].find("/stop") != std::string::npos, true, "且明说不会再回来");
+
+  // 载重的那一半：把时间推过所有退避档，一条新连接都不许出现。
+  harness.connection->tick(kT0 + 60000);
+  CHECK_EQ(harness.net.socketCount(), std::size_t{1}, "不许再重连");
+  CHECK_EQ(harness.connection->state(), ConnectionState::Closed, "停在 closed");
+}
+
+IMRTC_TEST(handshakeRejectedRetryableStillReconnects,
+           "握手被拒 —— 可重试的照常退避重连（别误伤 token_expired）") {
+  Harness harness;
+  harness.connection->connect(kT0);
+  harness.net.open();
+
+  // 1102 token_expired 是**可重试**的：重连的那一刻宿主可能已经 updateToken 了。
+  rejectHandshake(harness, 1102, "token_expired", true, imrtc::closecode::kUnauthorized);
+
+  CHECK_EQ(harness.kickedOut, 0, "不该抛 onKickedOut");
+  harness.connection->tick(kT0 + 1000);
+  CHECK_EQ(harness.net.socketCount(), std::size_t{2}, "第一档到点就重连");
+}
+
+IMRTC_TEST(logoutDuringHandshakeIsNotRejection,
+           "握手被拒 —— logout 结掉在飞的握手不算被拒（否则静默续期会把人踹回登录页）") {
+  Harness harness;
+  harness.connection->connect(kT0);
+  harness.net.open();
+
+  /*
+    close() 会拿 2005 invalid_state 把在飞的 sys.hello 结算掉，而 2005 的
+    `retryable` 就是 false。照「不可重试就放弃」判的话，**一次正常的 logout 会被
+    报成「服务端拒了你的参数」**——而静默续期正是「先 logout 再换票」，
+    等于每次续期都把用户踹回登录页。local 组的码必须直接放行。
+  */
+  harness.connection->close();
+
+  CHECK_EQ(harness.kickedOut, 0, "宿主自己按的退出，不是被踢");
+}
 
 IMRTC_TEST(reconnectCarriesSessionId, "重连 —— 第二次 sys.hello 带上旧 session_id 请求恢复") {
   Harness harness;

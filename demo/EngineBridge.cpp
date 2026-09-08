@@ -219,9 +219,9 @@ void EngineBridge::onDisconnected() {
   emit disconnected();
 }
 
-void EngineBridge::onKickedOut() {
+void EngineBridge::onKickedOut(imrtc_v1_kicked_reason reason) {
   assertOnGuiThread("onKickedOut");
-  emit kickedOut();
+  emit kickedOut(reason);
 }
 
 void EngineBridge::onError(std::int32_t code, const std::string& name,

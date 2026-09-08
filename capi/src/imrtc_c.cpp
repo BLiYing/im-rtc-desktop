@@ -49,6 +49,16 @@ std::vector<std::string> toStrings(const char* const* items, std::uint32_t count
   return out;
 }
 
+/** toKickedReason 把引擎枚举摊成 C 枚举。**显式列全**，加了新值编译器会提醒。 */
+imrtc_v1_kicked_reason toKickedReason(imrtc::KickedReason reason) {
+  switch (reason) {
+    case imrtc::KickedReason::AuthExpired: return IMRTC_V1_KICKED_AUTH_EXPIRED;
+    case imrtc::KickedReason::ConfigRejected: return IMRTC_V1_KICKED_CONFIG_REJECTED;
+    case imrtc::KickedReason::TakenOver: break;
+  }
+  return IMRTC_V1_KICKED_TAKEN_OVER;
+}
+
 /**
  * CObserver 把 §7.5 的回调表转发到 C 的函数指针。
  *
@@ -66,8 +76,8 @@ public:
   void onDisconnected() override {
     if (table_.on_disconnected) table_.on_disconnected(table_.user_data);
   }
-  void onKickedOut() override {
-    if (table_.on_kicked_out) table_.on_kicked_out(table_.user_data);
+  void onKickedOut(imrtc::KickedReason reason) override {
+    if (table_.on_kicked_out) table_.on_kicked_out(table_.user_data, toKickedReason(reason));
   }
   void onError(std::int32_t code, const std::string& name, const std::string& forType) override {
     if (table_.on_error) table_.on_error(table_.user_data, code, name.c_str(), forType.c_str());
@@ -262,6 +272,18 @@ std::int32_t imrtc_v1_engine_create(const imrtc_v1_options* options,
   // 比我们旧则说明它连必填字段都不全，拒掉。
   if (options->struct_size < sizeof(imrtc_v1_options)) return IMRTC_V1_ERR_BAD_PARAMS;
   if (options->url == nullptr || options->device_id == nullptr) return IMRTC_V1_ERR_BAD_PARAMS;
+  /*
+    `device_id` 在**边界上**同步拒掉（协议 §2.5：非空 / ≤64 字节 / [A-Za-z0-9_-]）。
+
+    不拦的症状是「登录失败，没有下文」——服务端一律回 1004，而它那句说得很清楚的
+    charset 说明到不了宿主手里。Android 真机上踩过：`Build.MODEL` 是 `Pixel 2 XL`，
+    带空格，于是 1004 + 无限退避重连，界面只写「登录失败」。
+
+    **只校验不改写**：`device_id` 要跨重启稳定，SDK 悄悄改掉，宿主自己那套设备管理
+    就跟服务端对不上账；而「删掉非法字符」更糟——`MI 8` 与 `MI8` 删完撞成同一个 id，
+    两台设备会互相顶号。清洗是宿主的事。
+  */
+  if (!imrtc::deviceIdValid(cstr(options->device_id))) return IMRTC_V1_ERR_BAD_PARAMS;
 
   try {
     CallEngineOptions engineOptions;

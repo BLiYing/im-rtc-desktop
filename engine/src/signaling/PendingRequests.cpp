@@ -9,13 +9,14 @@
 namespace imrtc {
 namespace {
 
-/** failureOf 拼一个失败结果。 */
-RequestResult failureOf(std::int32_t code, const std::string& forType) {
+/** failureOf 拼一个失败结果。`wireRetryable` 的默认值见 RequestResult 的注释。 */
+RequestResult failureOf(std::int32_t code, const std::string& forType, bool wireRetryable = true) {
   RequestResult result;
   result.ok = false;
   result.errorCode = code;
   result.errorName = errorName(code);
   result.forType = forType;
+  result.wireRetryable = wireRetryable;
   return result;
 }
 
@@ -47,10 +48,14 @@ bool PendingRequests::settle(const Envelope& envelope, const DecodeFn& decode) {
   if (envelope.type == frame::kError) {
     const Json* code = envelope.data.find("code");
     const Json* forType = envelope.data.find("for_type");
+    // 帧上的 retryable 要原样带出去：本端不认识这个码时，它是**唯一**的判据。
+    // 缺席则保持默认的 true——「不认识、又没说」按可重试处理。
+    const Json* retryable = envelope.data.find("retryable");
     finish(envelope.reqId,
            failureOf(code != nullptr && code->isInt() ? static_cast<std::int32_t>(code->asInt())
                                                       : codeValue(ErrorCode::Internal),
-                     forType != nullptr && forType->isString() ? forType->asString() : type));
+                     forType != nullptr && forType->isString() ? forType->asString() : type,
+                     retryable == nullptr || !retryable->isBool() || retryable->asBool()));
     return true;
   }
 

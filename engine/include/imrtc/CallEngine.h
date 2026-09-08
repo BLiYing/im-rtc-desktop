@@ -245,6 +245,14 @@ private:
    */
   bool kickedOutPending_ = false;
   /**
+   * 上一次被踢的原因，由 Connection 给出。
+   *
+   * **它绕开状态机**：状态机那条 emit 的 args 在一致性向量里就是 `{}`
+   * （room_fsm.json 的 `ws_closed_4403`），而且同一个内部事件被 4403 与
+   * 「鉴权失败到顶」两条路复用，它没有条件知道原因。门面在派发前补进 args。
+   */
+  KickedReason kickedReason_ = KickedReason::TakenOver;
+  /**
    * sendDepth_ 是「正在几层发帧循环里」。>0 意味着**这一层还没轮到抛事件**，
    * 此刻产生的任何事件都要攒进 deferredEmits_，等最外层 unwind 之后再放。
    * 见 dispatchOutput 的长注释。

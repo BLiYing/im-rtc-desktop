@@ -27,6 +27,16 @@
  */
 namespace {
 
+/** kickedReasonText 把 C 枚举摊成一句人话。三个原因的处置完全不同，别合并。 */
+const char* kickedReasonText(imrtc_v1_kicked_reason reason) {
+  switch (reason) {
+    case IMRTC_V1_KICKED_AUTH_EXPIRED: return "auth_expired —— 换一枚票再来";
+    case IMRTC_V1_KICKED_CONFIG_REJECTED: return "config_rejected —— 去改配置";
+    case IMRTC_V1_KICKED_TAKEN_OVER: break;
+  }
+  return "taken_over —— 回登录页";
+}
+
 class Printer : public imrtc::capi::Observer {
 public:
   bool connected = false;
@@ -39,8 +49,9 @@ public:
     connected = true;
   }
   void onDisconnected() override { std::printf("  · onDisconnected\n"); }
-  void onKickedOut() override {
-    std::printf("  ✗ onKickedOut（被踢或鉴权用尽）\n");
+  void onKickedOut(imrtc_v1_kicked_reason reason) override {
+    // 这个工具走 C ABI，拿到的是 C 枚举——引擎侧那个 imrtc::KickedReason 到不了这里。
+    std::printf("  ✗ onKickedOut（%s）\n", kickedReasonText(reason));
     finished = true;
     kicked = true;
   }

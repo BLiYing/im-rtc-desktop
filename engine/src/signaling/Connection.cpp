@@ -143,6 +143,7 @@ void Connection::handleHelloOk(const RequestResult& result) {
     // 握手失败不在这里重连：随后必有一条 close（服务端 100ms 内断开，§1.2），
     // 由 onTransportClosed 统一按关闭码决定重连与否。两处都排会让退避档一次涨两级。
     emitError(result.errorCode, frame::kHello);
+    abortIfHandshakeRejected(result);
     return;
   }
 
@@ -157,6 +158,24 @@ void Connection::handleHelloOk(const RequestResult& result) {
   unrecoverableAtMs_ = 0;
   heartbeat_.start(hello.pingIntervalSec, nowMs_);
   if (events_.onConnected) events_.onConnected(hello);
+}
+
+/*
+  握手被拒且重试不可能变好时**一次就放弃**，并按「谁救得了」把原因告诉宿主。
+
+  **放弃靠的是 reconnectStopped_ 这个闩，不是取消一次定时器。** 一次握手失败会从
+  两条路走到重连：这里，以及随后那条 close 事件。只撤定时器的话，迟到的那条会把
+  重连重新排上——闩才拦得住两条。
+
+  **不在这里主动关连接**：服务端拒了握手就会关（§1.2 的 100ms），而我们提前关会
+  抢在它前面把关闭码换成自己的，日志上就看不出到底是谁先挂的。
+*/
+void Connection::abortIfHandshakeRejected(const RequestResult& result) {
+  KickedReason reason = KickedReason::TakenOver;
+  if (!handshakeGiveUpReason(result.errorCode, result.wireRetryable, reason)) return;
+  reconnectStopped_ = true;
+  reconnectAtMs_ = 0;
+  if (events_.onKickedOut) events_.onKickedOut(reason);
 }
 
 bool Connection::request(const std::string& type, const Json& data, std::int64_t nowMs,
@@ -237,7 +256,10 @@ void Connection::dispatchEvent(const Envelope& envelope) {
     const std::int32_t value = code != nullptr && code->isInt()
                                    ? static_cast<std::int32_t>(code->asInt())
                                    : codeValue(ErrorCode::Internal);
-    if (value == codeValue(ErrorCode::KickedOut) && events_.onKickedOut) events_.onKickedOut();
+    // 服务端主动推来的 1104：与 4403 同义（吊销名单走的正是这一对），宿主回登录页。
+    if (value == codeValue(ErrorCode::KickedOut) && events_.onKickedOut) {
+      events_.onKickedOut(KickedReason::TakenOver);
+    }
     emitError(value, readString(envelope.data, "for_type"));
     return;
   }
@@ -265,7 +287,10 @@ void Connection::onTransportClosed(int code, const std::string& reason) {
   heartbeat_.stop();
   pending_.failAll(codeValue(ErrorCode::NetworkUnreachable));
 
-  if (code == closecode::kKickedOut && events_.onKickedOut) events_.onKickedOut();
+  // 4403 = 同 uid 同 device_id 在别处登录，或宿主吊销。宿主该回登录页。
+  if (code == closecode::kKickedOut && events_.onKickedOut) {
+    events_.onKickedOut(KickedReason::TakenOver);
+  }
 
   /*
     4401 要计数。重连**带的是同一枚 token**，所以协议 §1.5 那句「换新 token 后重连」
@@ -280,7 +305,8 @@ void Connection::onTransportClosed(int code, const std::string& reason) {
     exhausted = authFailures_ >= kMaxAuthFailures;
     if (exhausted) {
       reconnectStopped_ = true;
-      if (events_.onKickedOut) events_.onKickedOut();
+      // 4401 用尽 = 票的问题（§1.5 的处置就是「换新 token 后重连」），不是被顶号。
+      if (events_.onKickedOut) events_.onKickedOut(KickedReason::AuthExpired);
     }
   }
 

@@ -32,7 +32,10 @@ public:
     log.push_back("connected:" + sessionId + (resumed ? "/resumed" : "/fresh"));
   }
   void onDisconnected() override { log.push_back("disconnected"); }
-  void onKickedOut() override { log.push_back("kickedOut"); }
+  void onKickedOut(imrtc::KickedReason reason) override {
+    // 原因一起记：合并成一句「被踢」正是这一条要防的事。
+    log.push_back(std::string("kickedOut:") + imrtc::kickedReasonName(reason));
+  }
   void onError(std::int32_t code, const std::string& name, const std::string&) override {
     log.push_back("error:" + std::to_string(code) + "/" + name);
   }
@@ -62,10 +65,10 @@ struct Harness {
   std::int64_t now = kT0;
   std::unique_ptr<CallEngine> engine;
 
-  Harness() {
+  explicit Harness(const std::string& deviceId = "mac-8f3a") {
     CallEngineOptions options;
     options.url = "wss://rtc.example.com/v1/ws";
-    options.deviceId = "mac-8f3a";
+    options.deviceId = deviceId;
     options.transportFactory = net.factory();
     options.random = []() { return 0.5; };
     options.clock = [this]() { return now; };
@@ -252,10 +255,36 @@ IMRTC_TEST(engineKickedOut, "CallEngine —— 4403 被踢：抛 onKickedOut + o
   harness.recorder->log.clear();
 
   harness.net.remoteClose(imrtc::closecode::kKickedOut, "logged in elsewhere");
-  CHECK_EQ(harness.recorder->log, std::vector<std::string>({"kickedOut", "disconnected"}),
-           "被踢的回调顺序");
+  // 原因是 taken_over 而不是别的两个：4403 的含义就是「别处登录 / 被吊销」，
+  // 宿主该回登录页。**它要穿过状态机到达宿主**——状态机那条 emit 的 args 是空的。
+  CHECK_EQ(harness.recorder->log,
+           std::vector<std::string>({"kickedOut:taken_over", "disconnected"}),
+           "被踢的回调顺序，且带上原因");
   CHECK_EQ(harness.engine->callState(), CallState::Idle, "通话清空");
   CHECK_EQ(harness.engine->roomState(), RoomState::Idle, "房间清空");
+}
+
+IMRTC_TEST(engineRejectsBadDeviceId,
+           "CallEngine —— device_id 不合规时连 socket 都不开，抛的是和服务端同一个 1004") {
+  /*
+    真机上就是这个：Android 的 `Build.MODEL` 是 `Pixel 2 XL`，带空格违反协议 §2.5。
+
+    不拦的话服务端回 1004，而它那句说得很清楚的 charset 说明到不了宿主手里——
+    宿主看到的只有一个光秃秃的 bad_params，界面上只有「登录失败」。
+  */
+  Harness harness("Pixel 2 XL");
+  harness.engine->login("tk-1");
+
+  CHECK_EQ(harness.net.socketCount(), std::size_t{0}, "**一个 socket 都不该开**");
+  CHECK_EQ(harness.recorder->log, std::vector<std::string>{"error:1004/bad_params"},
+           "抛的码与服务端拒绝时同一个，宿主不用写两遍分支");
+}
+
+IMRTC_TEST(engineAcceptsValidDeviceId,
+           "CallEngine —— 合法 device_id 照常连（别把校验写成谁都拦）") {
+  Harness harness("Pixel_2_XL");
+  harness.login();
+  CHECK_EQ(harness.recorder->log, std::vector<std::string>{"connected:s-1/fresh"}, "照常握手");
 }
 
 IMRTC_TEST(engineLogoutIsNotKickedOut, "CallEngine —— 主动 logout 不是被踢：不许抛 onKickedOut") {

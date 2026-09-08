@@ -138,7 +138,7 @@ signals:
 
   void connected(const QString& sessionId, bool resumed);
   void disconnected();
-  void kickedOut();
+  void kickedOut(imrtc_v1_kicked_reason reason);
   void engineError(qint32 code, const QString& name, const QString& forType);
 
   void callReceived(const QString& callId, const QString& caller, const QStringList& calleeIds,
@@ -172,7 +172,7 @@ private:
   /* ---- imrtc::capi::Observer。全部只做「翻译成信号」这一件事。 ---- */
   void onConnected(const std::string& sessionId, bool resumed) override;
   void onDisconnected() override;
-  void onKickedOut() override;
+  void onKickedOut(imrtc_v1_kicked_reason reason) override;
   void onError(std::int32_t code, const std::string& name, const std::string& forType) override;
   void onCallReceived(const std::string& callId, const std::string& caller,
                       const std::vector<std::string>& calleeIds, const std::string& mediaType,

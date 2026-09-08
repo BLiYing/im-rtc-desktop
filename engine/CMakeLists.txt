@@ -13,6 +13,7 @@ add_library(im_rtc_engine STATIC
   src/signaling/Backoff.cpp
   src/signaling/Heartbeat.cpp
   src/signaling/PendingRequests.cpp
+  src/signaling/Handshake.cpp
   src/signaling/Connection.cpp
   src/signaling/Discipline.cpp
   src/signaling/FieldSpec.cpp
