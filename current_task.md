@@ -253,6 +253,11 @@ Demo 里没有切级别的界面入口，只有环境变量。
 
 ## 下一步
 
+- **本仓的静默失败点清单**（P0×2 / P1×4 / P2×6，2026-09-09 扫描）见
+  `../im-rtc-server/docs/ops/silent-failure/desktop.md`，跨端结论与修复顺序见同目录的
+  `SILENT_FAILURE_AUDIT.md`。**逐条状态只在那里维护，别抄回本文件。**
+  未修的头两条：`onDisconnected()` 无参把关闭码/原因/willReconnect 全抹平（Demo 永远显示「正在重连…」）、`deps.send` 对非请求帧无条件返回 true。
+
 1. **异步口子的形状**（一件事，两处用）：渲染路径 B 的原始帧回调，与
    `probeMicrophone` / `startLocalPreview` 这两个还没出 C ABI 的方法，
    卡的是同一个问题——**带 completion / 高频回调的东西怎么过 C ABI**。
