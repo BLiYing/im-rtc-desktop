@@ -245,6 +245,37 @@ IMRTC_TEST(roomResumeAfterDropWhileJoining,
   CHECK_TRUE(resumed.state.state == imrtc::RoomState::Joining, "回到 joining 等 join.ok");
 }
 
+IMRTC_TEST(roomLeaveRejectedStillSettles,
+           "房间机 —— 离房被拒也要退回 idle，否则媒体永远停不掉") {
+  /*
+    `room.leave` 被拒是真事：服务端在「会话已不在房间里」时回 1203
+    （两人同时离房、或房间刚被销毁）。而被拒的语义恰恰是**我们已经不在房里了**。
+
+    不接这一条的代价（另外三端的注释里都写着）：房间机永久停在 leaving，
+    摄像头与前台资源一直开着，再 leave 被 R1 拒成 2005，再 join 因为「不在 idle」
+    也被拒 —— 除非 logout，这台 Engine 再也进不了任何房间。
+  */
+  imrtc::RoomContext ctx;
+  ctx.state = imrtc::RoomState::Leaving;
+  ctx.roomId = "r-1";
+
+  const imrtc::RoomOutput out =
+      imrtc::reduceRoom(ctx, imrtc::MachineInput::internal("leave_failed"));
+  CHECK_TRUE(out.state.state == imrtc::RoomState::Idle, "离房被拒要退回 idle");
+  CHECK_EQ(out.emit.size(), std::size_t{1}, "要抛一条收场事件");
+  CHECK_EQ(out.emit[0].cb, std::string("onRoomLeft"), "收场信号就是 onRoomLeft");
+  CHECK_EQ(imrtc::str(out.emit[0].args, "room_id"), std::string("r-1"), "带上是哪个房间");
+
+  // 不在 leaving 时是空操作 —— 与 join_failed 只认 joining 同一个道理。
+  imrtc::RoomContext joined;
+  joined.state = imrtc::RoomState::Joined;
+  joined.roomId = "r-2";
+  const imrtc::RoomOutput ignored =
+      imrtc::reduceRoom(joined, imrtc::MachineInput::internal("leave_failed"));
+  CHECK_TRUE(ignored.state.state == imrtc::RoomState::Joined, "没在离房就不该被这条打断");
+  CHECK_EQ(ignored.emit.size(), std::size_t{0}, "也不该凭空抛 onRoomLeft");
+}
+
 IMRTC_TEST(roomFsmStates, "room_fsm.json —— C++ 侧的房间状态集合与向量一致") {
   const Json vector = imtest::loadVector("room_fsm.json");
   std::vector<std::string> allowed;

@@ -135,6 +135,18 @@ private:
   /** 闸门关着时攒下的那一条。攒一条就够——offer 描述的是当前全部轨道的状态。 */
   bool pubOfferQueued_ = false;
 
+  /**
+   * pub 侧 ICE 自愈的放弃阈值（协议 §7.2）。
+   *
+   * 自愈本身没有终点，所以必须有个「救不回来了」的判据，否则宿主永远收不到信号：
+   * 重启失败会再进 failed，形成永久重试节奏，而对端的格子早就黑了、计时还在走。
+   * 连续 kPubIceGiveUp 次重启后仍判 failed 就抛一次 2006；之后继续重试但不再重复抛。
+   * 回到 connected 时两个都清零——那是新一轮。
+   */
+  static constexpr int kPubIceGiveUp = 3;
+  int pubIceRestarts_ = 0;
+  bool pubIceGaveUp_ = false;
+
   std::shared_ptr<MediaAdapter> adapter_;
   Deps deps_;
   bool attached_ = false;

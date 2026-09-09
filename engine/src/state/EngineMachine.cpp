@@ -168,7 +168,7 @@ EngineOutput handleInternal(const EngineContext& ctx, const std::string& name,
     // 交给通话机回 idle；它抛的 onCallEnd 会顺带把房间也清掉（见 liftCall）。
     return liftCall(ctx, reduceCall(ctx.call, MachineInput::internal(name), nowMs));
   }
-  if (name == "join_failed") {
+  if (name == "join_failed" || name == "leave_failed") {
     return liftRoom(ctx, reduceRoom(ctx.room, MachineInput::internal(name)));
   }
   // 其余内部事件（media_ready）交给通话机。
