@@ -33,6 +33,7 @@ add_library(im_rtc_engine STATIC
   src/media/MediaEnums.cpp
   src/media/MediaPlane.cpp
   src/CallEngineEvents.cpp
+  src/CallEngineSession.cpp
 )
 
 target_include_directories(im_rtc_engine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
