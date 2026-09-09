@@ -6,6 +6,23 @@
 
 ## 当前焦点
 
+**2026-09-09：补齐两条 parity 裂缝（分支 `fix/parity-leave-failed-and-2006`）。113 个用例全绿。**
+
+**① 本仓此前是四端里唯一没有 `leave_failed` 的**（Web / iOS / Android 早就有）。
+离房被拒是真事：服务端在「会话已不在房间里」时回 1203，而那语义恰恰是**我们已经不在房里了**，
+本地却还停在 `leaving`——媒体停不掉（摄像头与前台资源一直开着），再 leave 被 R1 拒成 2005，
+再 join 因为「不在 idle」也被拒，**除非 logout 这台 Engine 再也进不了任何房间**。
+补了三处：`CallEngine::failLocally` 认 `room.leave`、`RoomMachine` 新增 `leave_failed`
+分支（归零 + `onRoomLeft`，与 `leave.ok` 同一个收场）、`EngineMachine` 路由给房间机。
+
+**② pub 侧 ICE 自愈补上放弃阈值**（协议 §7.2）：连续 `kPubIceGiveUp`（3）次重启仍 failed
+抛一次 2006，之后继续重试但不再重复抛；回 connected 清零。
+本仓原先 sub 报、pub 不报，pub 那条于是永久静默重试。
+计数在 `MediaPlane::resetPubNegotiation()` 里归零（换连接即新一轮）。
+
+新增用例：`RoomFsmTest.cpp` 的 `roomLeaveRejectedStillSettles`、
+`MediaPlaneTest.cpp` 的三条 `iceRestartPub*`。**仍只证明了 Darwin，Windows 未验证。**
+
 **`CallEngine.cpp` 拆完了（2026-09-08）：589 → 459，新增 `engine/src/CallEngineSession.cpp`（153 行）。**
 搬走的是 `login / logout / updateToken` 三个方法整段，纯位移——**没有改动一行逻辑**，
 八步门禁全绿、109 个引擎用例 + 23 个 Demo 用例照旧。

@@ -76,10 +76,25 @@ void MediaPlane::attach() {
       的那条，所以不需要新协议帧，也不会两边同时 offer 打架。
       重启失败还会再进 failed，于是天然形成一个重试节奏。
 
+      **但重试节奏不能没有尽头**（协议 §7.2）：一律自愈、永不上报的话，宿主从头到尾
+      收不到任何信号——对端格子已经黑了、计时器还在走，而界面上一切正常。
+      所以连续 kPubIceGiveUp 次重启后仍判 failed，抛一次 2006；之后继续重试但不再重复抛。
+
       **用 failed 不用 disconnected**：后者是几秒的抖动，见着就重启等于自己制造风暴。
     */
+    if (pc == PcRole::Pub && state == PcState::Connected) {
+      // 救回来了，下一轮重新计数。
+      pubIceRestarts_ = 0;
+      pubIceGaveUp_ = false;
+    }
     if (pc == PcRole::Pub && state == PcState::Failed) {
       log(LogLevel::Warn, "上行通路失败，重启 ICE");
+      ++pubIceRestarts_;
+      if (pubIceRestarts_ >= kPubIceGiveUp && !pubIceGaveUp_) {
+        pubIceGaveUp_ = true;
+        log(LogLevel::Error, "上行通路连续重启仍失败，上报宿主");
+        deps_.reportError(codeValue(ErrorCode::MediaNegotiationFailed), "");
+      }
       restartPubIce();
       return;
     }
@@ -299,6 +314,9 @@ void MediaPlane::releasePubOffer() {
 void MediaPlane::resetPubNegotiation() {
   pubOfferInFlight_ = false;
   pubOfferQueued_ = false;
+  // 换连接 / 一轮结束都算新一轮，ICE 放弃计数跟着归零（协议 §7.2）。
+  pubIceRestarts_ = 0;
+  pubIceGaveUp_ = false;
 }
 
 /*

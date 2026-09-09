@@ -446,6 +446,11 @@ void CallEngine::failLocally(const std::string& type, std::int32_t code) {
     - room.join 失败 → 房间机停在 joining，之后每次 publish 都被 R1 拒成 2005，
       界面停在「正在进入会议…」。
 
+    - room.leave 失败 → 房间机停在 leaving，**媒体停不掉**（摄像头与前台资源一直开着），
+      之后 leave 被 R1 拒成 2005、join 因为「不在 idle」也被拒——除非 logout，
+      这台 Engine 再也进不了任何房间。而服务端回 1203 的语义恰恰是
+      **我们已经不在房里了**，正是最该收场的时刻。
+
     其余帧的失败只报错：它们不改变「有没有一通电话 / 在不在房里」。
     **请求超时（2004）走的也是这条路**——十秒没应答，那通电话确实没建起来。
   */
@@ -453,6 +458,8 @@ void CallEngine::failLocally(const std::string& type, std::int32_t code) {
     apply(MachineInput::internal("call_failed"), "");
   } else if (type == frame::kRoomJoin) {
     apply(MachineInput::internal("join_failed"), "");
+  } else if (type == frame::kRoomLeave) {
+    apply(MachineInput::internal("leave_failed"), "");
   }
 }
 

@@ -412,6 +412,80 @@ IMRTC_TEST(iceRestartSubIsServersJob,
            true, "该报一条给宿主");
 }
 
+namespace {
+
+/** countErrors 数宿主收到了几条某个码的错误。 */
+std::size_t countErrors(const std::vector<std::string>& log, const std::string& tag) {
+  return static_cast<std::size_t>(std::count(log.begin(), log.end(), tag));
+}
+
+const char* const kNegotiationFailed = "error:2006/media_negotiation_failed";
+
+}  // namespace
+
+/*
+  **重试节奏不能没有尽头**（协议 §7.2）。
+
+  一律自愈、永不上报的话，宿主从头到尾收不到任何信号：上行永久失败，
+  对端格子已经黑了、计时还在走，而界面上一切正常、谁也不挂断。
+  连续 3 次重启后仍 failed 抛一次 2006；之后继续重试但不再重复抛。
+*/
+IMRTC_TEST(iceRestartPubGivesUpAfterThree,
+           "ICE 自愈 —— pub 连续三次仍失败要上报一次 2006，且仍在继续救") {
+  Harness harness;
+  harness.enterRoom("audio");
+
+  for (int i = 0; i < 3; ++i) {
+    harness.media->emitPcState(PcRole::Pub, PcState::Failed);
+    harness.engine->tick();
+  }
+  CHECK_EQ(countErrors(harness.recorder->log, kNegotiationFailed), std::size_t{1},
+           "第 3 次才放弃，且只抛一次");
+  CHECK_EQ(harness.media->restartPubIceCalls, 3, "三次都要救");
+
+  // 放弃是「告诉宿主一声」，不是「不救了」。
+  harness.media->emitPcState(PcRole::Pub, PcState::Failed);
+  harness.engine->tick();
+  CHECK_EQ(countErrors(harness.recorder->log, kNegotiationFailed), std::size_t{1},
+           "同一轮只抛一次");
+  CHECK_EQ(harness.media->restartPubIceCalls, 4, "上报之后照样继续救");
+}
+
+IMRTC_TEST(iceRestartPubStaysQuietOnTransientFailures,
+           "ICE 自愈 —— 前两次是切网抖动，不该惊动宿主") {
+  Harness harness;
+  harness.enterRoom("audio");
+
+  harness.media->emitPcState(PcRole::Pub, PcState::Failed);
+  harness.engine->tick();
+  harness.media->emitPcState(PcRole::Pub, PcState::Failed);
+  harness.engine->tick();
+
+  CHECK_EQ(countErrors(harness.recorder->log, kNegotiationFailed), std::size_t{0},
+           "抖动不该报成「通话废了」");
+  CHECK_EQ(harness.media->restartPubIceCalls, 2, "但两次都要救");
+}
+
+IMRTC_TEST(iceRestartPubCounterResetsAfterRecovery,
+           "ICE 自愈 —— 救回来过就是新一轮，不拿旧账凑够三次") {
+  Harness harness;
+  harness.enterRoom("audio");
+
+  harness.media->emitPcState(PcRole::Pub, PcState::Failed);
+  harness.engine->tick();
+  harness.media->emitPcState(PcRole::Pub, PcState::Failed);
+  harness.engine->tick();
+  harness.media->emitPcState(PcRole::Pub, PcState::Connected);
+  harness.engine->tick();
+  harness.media->emitPcState(PcRole::Pub, PcState::Failed);
+  harness.engine->tick();
+  harness.media->emitPcState(PcRole::Pub, PcState::Failed);
+  harness.engine->tick();
+
+  CHECK_EQ(countErrors(harness.recorder->log, kNegotiationFailed), std::size_t{0},
+           "connected 之后要重新计数");
+}
+
 IMRTC_TEST(iceRestartLostWhileReconnecting,
            "ICE 自愈 —— reconnecting 期间的重启请求会被丢掉（**这就是光靠 failed 不够的原因**）") {
   Harness harness;
