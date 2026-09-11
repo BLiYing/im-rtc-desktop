@@ -12,6 +12,7 @@
 #include "imrtc/MediaAdapter.h"
 #include "imrtc/MediaPlane.h"
 #include "imrtc/Transport.h"
+#include "imrtc/Version.h"
 
 namespace imrtc {
 
@@ -43,7 +44,7 @@ struct CallEngineOptions {
   /** ≤64，同一 uid 下唯一且跨重启稳定（§2.5）。 */
   std::string deviceId;
   /** 仅用于日志与灰度，**禁止参与逻辑**。 */
-  std::string sdk = "desktop/0.0.1";
+  std::string sdk = std::string("desktop/") + kSdkVersion;
   /** 请求超时，协议建议 10 秒（§2.2）。 */
   std::int64_t requestTimeoutMs = 10000;
   /** 必填：造 Transport 的工厂。engine 不认识任何具体的 WS 库。 */

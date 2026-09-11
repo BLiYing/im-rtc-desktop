@@ -432,6 +432,18 @@ Is the server running? (scripts/dev.sh)</translation>
         <translation>Language</translation>
     </message>
     <message>
+        <source>日志</source>
+        <translation>Logging</translation>
+    </message>
+    <message>
+        <source>详细日志</source>
+        <translation>Verbose logging</translation>
+    </message>
+    <message>
+        <source>debug 级别：含每一帧信令的收发，一次通话数百条。排查「按了没反应」时再开，勾上立刻生效。启动时若设了环境变量 IMRTC_LOG_LEVEL，以环境变量为准。</source>
+        <translation>Debug level: every signalling frame sent and received, hundreds per call. Turn it on when chasing “I pressed it and nothing happened”; takes effect immediately. If IMRTC_LOG_LEVEL is set at launch, the environment variable wins.</translation>
+    </message>
+    <message>
         <source>本次会话</source>
         <translation>This session</translation>
     </message>
@@ -457,6 +469,7 @@ Is the server running? (scripts/dev.sh)</translation>
     </message>
     <message>
         <source>SDK %1，经 C ABI 调用（与集成方拿到的是同一个 .dylib / .dll + 一个 C 头）。
+libwebrtc：未接入（计划锁 m150.7871.3.2 / M150）。
 
 ✅ 已经是真的：登录、心跳、断线重连、拨号、来电、接听/拒接/取消/挂断、群通话成员事件、加入与离开房间、通话记录。
 
@@ -464,6 +477,7 @@ Is the server running? (scripts/dev.sh)</translation>
 
 ⬜ 也还没有：设备枚举与热插拔、共享屏幕、Windows 侧的任何验证。</source>
         <translation>SDK %1, called through the C ABI — the same .dylib / .dll and C header an integrator receives.
+libwebrtc: not integrated yet (planned pin: m150.7871.3.2 / M150).
 
 ✅ Real already: login, heartbeat, reconnect, dialling, incoming calls, accept/reject/cancel/hang up, group participant events, joining and leaving rooms, call history.
 

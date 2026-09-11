@@ -3,6 +3,7 @@
 #include <vector>
 
 #include "TestHarness.h"
+#include "imrtc/CallEngine.h"
 #include "imrtc/CallEngine.hpp"
 #include "imrtc/imrtc_c.h"
 
@@ -23,7 +24,7 @@ imrtc_v1_options makeOptions() {
   options.struct_size = sizeof(options);
   options.url = "ws://127.0.0.1:1/v1/ws";
   options.device_id = "mac-abi-1";
-  options.sdk = "desktop-test/0.0.1";
+  options.sdk = "desktop-test/1.0.0";
   options.request_timeout_ms = 10000;
   return options;
 }
@@ -207,6 +208,11 @@ IMRTC_TEST(capiErrorNamesAreStatic, "C ABI —— error_name / version 返回静
   // 那种指针出了函数就悬空了。
   CHECK_TRUE(imrtc_v1_error_name(2005) == imrtc_v1_error_name(2005), "静态串，指针稳定");
   CHECK_TRUE(std::strlen(imrtc_v1_version()) > 0, "version 非空");
+  // 五端统一在 1.0.0（2026-09-11）。升版本时这条跟着改——它就是用来逼人记得同步另外四端的。
+  CHECK_EQ(std::string(imrtc_v1_version()), std::string("1.0.0"), "SDK 版本");
+  CHECK_TRUE(imrtc_v1_version() == imrtc_v1_version(), "静态串，指针稳定");
+  CHECK_EQ(imrtc::CallEngineOptions{}.sdk, std::string("desktop/1.0.0"), "引擎 sdk 默认串同源");
+  CHECK_EQ(imrtc::ConnectionOptions{}.sdk, std::string("desktop/1.0.0"), "连接 sdk 默认串同源");
 }
 
 namespace {

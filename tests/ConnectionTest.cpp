@@ -41,7 +41,7 @@ struct Harness {
     options.url = "wss://rtc.example.com/v1/ws";
     options.token = "tk-1";
     options.deviceId = "mac-8f3a";
-    options.sdk = "desktop/0.0.1";
+    options.sdk = "desktop/1.0.0";
     options.requestTimeoutMs = requestTimeoutMs;
     options.transportFactory = net.factory();
     // 抖动固定成 0：退避档才是确定的，测试才好写。抖动本身单独测。

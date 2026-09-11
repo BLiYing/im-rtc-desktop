@@ -18,9 +18,10 @@
  *   --fake-video                     每个格子都当成有画面并贴测试图案。
  *                                    用来在没有媒体的情况下验渲染路径 A 的宿主侧。
  *
- * 日志级别走环境变量 `IMRTC_LOG_LEVEL=debug|info|warn|error`（默认 info）。
- * **联调时把它开到 debug**：帧日志在 debug 上，而「帧到底发出去没有」正是
- * 「按了没反应」那类问题唯一问得出答案的地方。开着它一次通话数百条，
+ * 日志级别：设置页「详细日志」勾上 = debug，默认 info，存在 QSettings `log/verbose`。
+ * 环境变量 `IMRTC_LOG_LEVEL=debug|info|warn|error` **设了就以它为准**（启动时不读存的值），
+ * 脚本联调不必先去界面上点。**联调时开到 debug**：帧日志在 debug 上，而「帧到底发出去没有」
+ * 正是「按了没反应」那类问题唯一问得出答案的地方。开着它一次通话数百条，
  * 所以不是默认值（LOGGING.md §2）。
  *
  * `--profile` 是给「同一台机器上开两个实例互打」用的。macOS 的
@@ -34,6 +35,7 @@
 
 #include "imrtc/imrtc_c.h"
 
+#include "EngineBridge.h"
 #include "Language.h"
 #include "MainWindow.h"
 
@@ -53,7 +55,8 @@ int main(int argc, char** argv) {
   // QSettings 要靠这三项定位存储路径（设备 id、上次填的服务器、语言都存在那）。
   QCoreApplication::setOrganizationName(QStringLiteral("im-rtc"));
   QCoreApplication::setOrganizationDomain(QStringLiteral("imrtc.dev"));
-  QCoreApplication::setApplicationVersion(QStringLiteral("0.1.0"));
+  // 版本从 C ABI 取，不在这里再写一遍——写两处迟早对不上。
+  QCoreApplication::setApplicationVersion(EngineBridge::versionString());
 
   QCommandLineParser parser;
   parser.setApplicationDescription(
@@ -117,6 +120,10 @@ int main(int argc, char** argv) {
 
   // 语言要在建界面**之前**装好，否则第一屏是源语言（中文）、切换后才对。
   language::apply(language::current());
+
+  // 存的「详细日志」只能在 applicationName 定下之后读（换 profile 就是另一份设置）。
+  // 这之前引擎还没建，没有日志会被按旧级别漏掉。环境变量设了就不动它。
+  if (level.isEmpty()) EngineBridge::applyLogLevel(EngineBridge::verboseLog());
 
   MainWindow window;
   window.setAutomation(parser.isSet(autoAcceptOption),

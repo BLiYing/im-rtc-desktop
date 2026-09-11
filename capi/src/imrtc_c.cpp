@@ -481,7 +481,8 @@ const char* imrtc_v1_error_name(std::int32_t code) {
   return def == nullptr ? "unknown" : def->name.c_str();
 }
 
-const char* imrtc_v1_version(void) { return "0.1.0"; }
+// 字符串字面量常量，静态存储，指针稳定——与 error_name 同一条要求。
+const char* imrtc_v1_version(void) { return imrtc::kSdkVersion; }
 
 void imrtc_v1_set_log_sink(imrtc_v1_log_sink sink, void* user_data) {
   if (sink == nullptr) {

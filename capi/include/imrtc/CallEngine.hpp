@@ -128,7 +128,7 @@ public:
 class Engine {
 public:
   Engine(const std::string& url, const std::string& deviceId,
-         const std::string& sdk = "desktop-cpp/0.1.0") {
+         const std::string& sdk = std::string("desktop-cpp/") + imrtc_v1_version()) {
     imrtc_v1_options options{};
     options.struct_size = sizeof(options);
     options.url = url.c_str();

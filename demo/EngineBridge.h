@@ -129,6 +129,17 @@ public:
   imrtc_v1_room_state roomState();
   static QString versionString();
 
+  /**
+   * 设置页的「详细日志」。存 QSettings `log/verbose`，**默认关 = info**——
+   * 与 C 头的默认级别一致，debug 一次通话数百条（LOGGING.md §2）。
+   * 日志级别是**进程级**的，所以这几个是静态的，不必先有引擎。
+   */
+  static bool verboseLog();
+  /** 存下来并立刻经 C ABI 生效：开 = debug，关 = info。 */
+  static void setVerboseLog(bool on);
+  /** 只设级别不落盘。启动时按存的值调一次。 */
+  static void applyLogLevel(bool verbose);
+
 signals:
   void tokenReady(const QString& token);
   void tokenFailed(const QString& message);

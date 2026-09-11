@@ -145,7 +145,7 @@ target_compile_options(imrtc_qtest_warnings INTERFACE -Wno-variadic-macro-argume
 find_package(Qt6 6.5 QUIET COMPONENTS Test)
 if(Qt6Test_FOUND)
   # 每个测试一个可执行文件（QTEST_MAIN 自带 main）。
-  foreach(_case OverlayActions NativeSurface Incoming IncomingAlert)
+  foreach(_case OverlayActions NativeSurface Incoming IncomingAlert Settings)
     qt_add_executable(imrtc_demo_${_case}_test tests/${_case}Test.cpp)
     # imrtc_qtest_warnings 要排在 imrtc_warnings **之后**：INTERFACE 选项按链接
     # 顺序拼在命令行上，排前面的 -Wno- 会被后面的 -Wpedantic 重新打开。

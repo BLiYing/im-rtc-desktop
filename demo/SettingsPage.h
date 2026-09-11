@@ -4,15 +4,18 @@
  * SettingsPage.h —— 设置屏（草图 §02-D）。
  *
  * iOS/Web 那边这一页放的是「Kit 的可配项」。桌面端没有 Kit，所以这里放
- * 三类东西：界面语言、这次连接的身份与端点、以及**当前构建的真实能力**
+ * 四类东西：界面语言、日志详细程度、这次连接的身份与端点、以及**当前构建的真实能力**
  * （哪些是真的、哪些还没有）。最后一块不是自谦，是防止集成方按 Demo 的
  * 外观推断「桌面端已经能通话了」。
+ *
+ * 「详细日志」勾选框的 objectName 是 `verboseLog`，界面测试按它找。
  */
 
 #include <QWidget>
 
 #include "Language.h"
 
+class QCheckBox;
 class QComboBox;
 class QGroupBox;
 class QLabel;
@@ -34,6 +37,10 @@ private:
   QGroupBox* uiGroup_ = nullptr;
   QLabel* languageLabel_ = nullptr;
   QComboBox* language_ = nullptr;
+
+  QGroupBox* logGroup_ = nullptr;
+  QCheckBox* verboseLog_ = nullptr;
+  QLabel* verboseHint_ = nullptr;
 
   QGroupBox* sessionGroup_ = nullptr;
   QLabel* uidLabel_ = nullptr;

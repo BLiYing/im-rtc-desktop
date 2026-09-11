@@ -20,6 +20,9 @@ Q_LOGGING_CATEGORY(lcBridge, "imrtc.demo.bridge")
 /** 宿主按 ~200ms~1s 的粒度 tick 即可（C 头里写的）。取下限，状态跳转跟手。 */
 constexpr int kTickIntervalMs = 200;
 
+/** 设置页「详细日志」。键名与 Language.cpp 的 "ui/language" 同一风格：分组/项。 */
+constexpr char kVerboseLogKey[] = "log/verbose";
+
 QString qs(const std::string& value) { return QString::fromStdString(value); }
 
 std::vector<std::string> stdStrings(const QStringList& values) {
@@ -74,6 +77,19 @@ QString EngineBridge::versionString() {
   return QString::fromLatin1(imrtc_v1_version());
 }
 
+bool EngineBridge::verboseLog() {
+  return QSettings().value(QLatin1String(kVerboseLogKey), false).toBool();
+}
+
+void EngineBridge::setVerboseLog(bool on) {
+  QSettings().setValue(QLatin1String(kVerboseLogKey), on);
+  applyLogLevel(on);
+}
+
+void EngineBridge::applyLogLevel(bool verbose) {
+  imrtc_v1_set_log_level(verbose ? IMRTC_V1_LOG_DEBUG : IMRTC_V1_LOG_INFO);
+}
+
 void EngineBridge::fetchDemoToken(const QString& httpBase, const QString& username) {
   QUrl url(httpBase.trimmed());
   if (url.scheme().isEmpty()) url.setScheme(QStringLiteral("http"));
@@ -106,9 +122,9 @@ void EngineBridge::connectToServer(const QString& wsUrl, const QString& token) {
   disconnectFromServer();
   token_ = token;
 
-  engine_ = std::make_unique<imrtc::capi::Engine>(wsUrl.toStdString(),
-                                                  deviceId().toStdString(),
-                                                  "desktop-qt-demo/0.1.0");
+  engine_ = std::make_unique<imrtc::capi::Engine>(
+      wsUrl.toStdString(), deviceId().toStdString(),
+      "desktop-qt-demo/" + std::string(imrtc_v1_version()));
   if (!engine_->valid()) {
     const imrtc::capi::Error error = engine_->lastError();
     engine_.reset();
