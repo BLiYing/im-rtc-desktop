@@ -1,9 +1,8 @@
 /**
- * SystemAlertAttention_stub.cpp —— 非 Apple 平台的注意请求。
+ * SystemAlertAttention_stub.cpp —— 非 Apple、非 Windows 平台（Linux 等）的注意请求。
  *
- * 暂用 `QApplication::alert(window, 0)`：Windows 上闪任务栏按钮，直到窗口被激活。
- * **撤不回来**——对方取消后还会闪到用户切回来。要撤得改成 `FlashWindowEx`（开始 `FLASHW_ALL | FLASHW_TIMERNOFG`，
- * 撤时 `FLASHW_STOP`），那要在 Windows 机器上写和验，本机做不了。
+ * 暂用 `QApplication::alert(window, 0)`：X11 / Wayland 上设紧急提示，直到窗口被激活。
+ * **撤不回来**——对方取消后还会提示到用户切回来。macOS / Windows 各有自己的实现（`_mac.mm` / `_win.cpp`），能撤。
  */
 
 #include <QApplication>

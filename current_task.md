@@ -13,8 +13,9 @@ UX_FLOWS §07 第 3 条：窗口在前台只出横幅；不在前台（最小化
 - **`demo/IncomingAlert`（新）**：判据 `needsSystemAlert`（看不见 || 最小化 || 非活动窗口）+ 状态（`ring` / `clear` / `notificationClicked`）。
   系统那一侧经 `Sink` 注入——test.sh 跑真窗口，不注入就会真弹通知。**通话结束后才点到旧通知不再展开**。
 - **`demo/SystemAlertSink`（新）**：通知走 `QSystemTrayIcon::showMessage`（点通知 / 托盘图标 → 前置），不引第三方库。
-- **`demo/SystemAlertAttention_mac.mm` / `_stub.cpp`（新）**：macOS 自己调 `requestUserAttention:NSCriticalRequest` 并留请求号以便撤；
-  非 Apple 暂用 `QApplication::alert`（撤不回来）。
+- **`demo/SystemAlertAttention_mac.mm` / `_win.cpp` / `_stub.cpp`**：macOS 调 `requestUserAttention:NSCriticalRequest` 并留请求号以便撤；
+  Windows 调 `FlashWindowEx(FLASHW_ALL | FLASHW_TIMERNOFG)`、撤时 `FLASHW_STOP`（同日补，**只在 Mac 上对着 mingw-w64 头做过语法检查**）；
+  其余平台暂用 `QApplication::alert`（撤不回来）。
 - `MainWindow`：来电 `alert_->ring(presenceOf(this), …)`；接通 / 结束 / `hideOverlay`（登出、被踢、他端已处理）都 `clear()`；
   `openRequested` → 恢复最小化、`raise` + `activateWindow`、横幅还在就展开来电浮层。
 - `.ts` 加 `SystemAlertSink` 一条（托盘 tooltip）。
@@ -40,7 +41,7 @@ UX_FLOWS §07 第 3 条：窗口在前台只出横幅；不在前台（最小化
 
 - **本批之后的两刀（2026-09-11 用户定，等本批六步做完再动）**：
   ① 通话中关摄像头也停采集——桌面没接媒体，不涉及；
-  ② ~~桌面窗口在后台时的来电提醒~~ —— 已做（见「当前焦点」）。剩：Windows 上换 `FlashWindowEx` 并验证。
+  ② ~~桌面窗口在后台时的来电提醒~~ —— 已做（见「当前焦点」）。`FlashWindowEx` 已写进 `_win.cpp`；剩：到 Windows 机器上编译，按「已知坑」里那四条手点验。
   §07 第 1 条（关窗语义）/ 第 2 条（托盘常驻 + 绿点 / 菜单）没排期。
 - **本仓的静默失败点清单**（P0×2 / P1×4 / P2×6，2026-09-09 扫描）见
   `../im-rtc-server/docs/ops/silent-failure/desktop.md`，跨端结论与修复顺序见同目录的
@@ -81,8 +82,10 @@ UX_FLOWS §07 第 3 条：窗口在前台只出横幅；不在前台（最小化
   - **macOS 的系统通知撤不掉**：Qt 没有撤通知的接口，`withdraw()` 只能藏托盘图标；已进通知中心的那条会留着。
     通话结束后再点它只会激活应用，`IncomingAlert` 不再展开（有用例钉着）。Qt cocoa 走的是已废弃的 `NSUserNotificationCenter`。
   - **托盘 / 菜单栏图标只在响铃期间出现**：发通知必须先 `show()` 托盘图标。系统没托盘（部分 Linux）就只剩注意请求。
-  - **Windows 未验证**：闪任务栏用的 `QApplication::alert` **撤不回来**（对方取消后闪到用户切回来）；
-    气泡靠藏托盘图标收起。要撤得换 `FlashWindowEx(FLASHW_STOP)`，要在 Windows 机器上写。
+  - **Windows 未编译、未运行**：闪任务栏已换成 `FlashWindowEx`（`demo/SystemAlertAttention_win.cpp`），
+    但只在 Mac 上用 mingw 目标对着 mingw-w64 头 + Qt 6.8.3 头做过 `-fsyntax-only`（`temp_verify.py`）。MSVC 没编过。
+    到 Windows 上手点四条：① 窗口最小化 / 不是活动窗口时来电，任务栏按钮持续闪；② 对方取消后立刻停闪，按钮不留橙色高亮；
+    ③ 闪着的时候切回窗口，系统自己停，之后接通 / 挂断不出错；④ 气泡靠藏托盘图标收起——也要一起看。
   - **「被挡住」只能按「不是活动窗口」判**：窗口是活动窗口但被别的 always-on-top 窗口盖住时，不会提醒。
   - **不在窗口激活时 `clear()`**：AppKit 在应用被激活时自己停跳 Dock；在激活时清会和「点通知」的回调抢先后，导致点了不展开。
   - **Demo 没有铃声**：看不见窗口时，提醒只有 Dock / 任务栏 + 通知。

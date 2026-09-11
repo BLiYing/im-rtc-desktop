@@ -89,10 +89,13 @@ qt_add_library(imrtc_demo_ui STATIC
 target_include_directories(imrtc_demo_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 # 渲染路径 A 的假渲染器是平台代码：macOS 走 CALayer（ObjC++），别的平台先占位。
-# 后台来电的注意请求同理：macOS 自己调 NSApp 以便撤回，别的平台先用 QApplication::alert。
+# 后台来电的注意请求同理：macOS 自己调 NSApp、Windows 自己调 FlashWindowEx，都是为了能撤回；
+# 其余平台先用 QApplication::alert（撤不回来）。
 if(APPLE)
   target_sources(imrtc_demo_ui PRIVATE NativeSurfacePattern_mac.mm SystemAlertAttention_mac.mm)
   target_link_libraries(imrtc_demo_ui PRIVATE "-framework AppKit" "-framework QuartzCore")
+elseif(WIN32)
+  target_sources(imrtc_demo_ui PRIVATE NativeSurfacePattern_stub.cpp SystemAlertAttention_win.cpp)
 else()
   target_sources(imrtc_demo_ui PRIVATE NativeSurfacePattern_stub.cpp SystemAlertAttention_stub.cpp)
 endif()

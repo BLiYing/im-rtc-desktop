@@ -12,10 +12,11 @@
  * **撤通知 Qt 没有接口**：`withdraw()` 只能把托盘图标藏起来。Windows 上藏图标会把气泡一起收掉；
  * macOS 上已经进了通知中心的那条**撤不掉**，通话结束后点它只会激活应用（`IncomingAlert` 不再展开）。
  *
- * **注意请求是平台代码**（`SystemAlertAttention_*.mm/.cpp`）：macOS 自己调
- * `requestUserAttention:NSCriticalRequest` 并留着返回的请求号，好在接通 / 取消时 `cancelUserAttentionRequest:`——
- * `QApplication::alert` 发出去就撤不回来，对方取消了 Dock 还会一直跳到用户切回来。
- * 非 Apple 平台暂用 `QApplication::alert`（Windows 闪任务栏到窗口被激活为止，撤不回来）。
+ * **注意请求是平台代码**（`SystemAlertAttention_*.mm/.cpp`）：`QApplication::alert` 发出去就撤不回来，
+ * 对方取消了 Dock 还会一直跳 / 任务栏一直闪，到用户切回来为止。所以两个主平台自己调系统接口：
+ *   - macOS：`requestUserAttention:NSCriticalRequest`，留着请求号，接通 / 取消时 `cancelUserAttentionRequest:`；
+ *   - Windows：`FlashWindowEx(FLASHW_ALL | FLASHW_TIMERNOFG)`，记住窗口，撤时 `FLASHW_STOP`（**未在 Windows 上验证**）。
+ * 其余平台（Linux 等）暂用 `QApplication::alert`，撤不回来。
  */
 
 #include <QObject>
@@ -46,7 +47,7 @@ private:
   QSystemTrayIcon* tray_ = nullptr;
 };
 
-/** Dock / 任务栏注意请求。平台实现在 SystemAlertAttention_mac.mm / _stub.cpp。 */
+/** Dock / 任务栏注意请求。平台实现在 SystemAlertAttention_mac.mm / _win.cpp / _stub.cpp。 */
 namespace attention {
 
 void request(QWidget* window);
