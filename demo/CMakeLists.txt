@@ -73,6 +73,8 @@ qt_add_library(imrtc_demo_ui STATIC
   CallOverlay.cpp
   CallOverlayMembers.cpp
   IncomingBanner.cpp
+  IncomingAlert.cpp
+  SystemAlertSink.cpp
   Language.cpp
   EngineBridge.cpp
   RemoteLogSink.cpp
@@ -87,11 +89,12 @@ qt_add_library(imrtc_demo_ui STATIC
 target_include_directories(imrtc_demo_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 # 渲染路径 A 的假渲染器是平台代码：macOS 走 CALayer（ObjC++），别的平台先占位。
+# 后台来电的注意请求同理：macOS 自己调 NSApp 以便撤回，别的平台先用 QApplication::alert。
 if(APPLE)
-  target_sources(imrtc_demo_ui PRIVATE NativeSurfacePattern_mac.mm)
+  target_sources(imrtc_demo_ui PRIVATE NativeSurfacePattern_mac.mm SystemAlertAttention_mac.mm)
   target_link_libraries(imrtc_demo_ui PRIVATE "-framework AppKit" "-framework QuartzCore")
 else()
-  target_sources(imrtc_demo_ui PRIVATE NativeSurfacePattern_stub.cpp)
+  target_sources(imrtc_demo_ui PRIVATE NativeSurfacePattern_stub.cpp SystemAlertAttention_stub.cpp)
 endif()
 
 qt_add_executable(imrtc_demo main.cpp)
@@ -139,7 +142,7 @@ target_compile_options(imrtc_qtest_warnings INTERFACE -Wno-variadic-macro-argume
 find_package(Qt6 6.5 QUIET COMPONENTS Test)
 if(Qt6Test_FOUND)
   # 每个测试一个可执行文件（QTEST_MAIN 自带 main）。
-  foreach(_case OverlayActions NativeSurface Incoming)
+  foreach(_case OverlayActions NativeSurface Incoming IncomingAlert)
     qt_add_executable(imrtc_demo_${_case}_test tests/${_case}Test.cpp)
     # imrtc_qtest_warnings 要排在 imrtc_warnings **之后**：INTERFACE 选项按链接
     # 顺序拼在命令行上，排前面的 -Wno- 会被后面的 -Wpedantic 重新打开。

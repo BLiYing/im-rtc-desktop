@@ -20,6 +20,7 @@
 #include "DialPage.h"
 #include "EngineBridge.h"
 #include "HistoryPage.h"
+#include "IncomingAlert.h"
 #include "IncomingBanner.h"
 #include "LoginPage.h"
 #include "SettingsPage.h"
@@ -106,6 +107,7 @@ void MainWindow::buildUi() {
   // 来电先出窗内横幅（UX_FLOWS §07 v3.7），不抢焦点；它自己跟着主窗 resize 摆位。
   banner_ = new IncomingBanner(this);
   banner_->hide();
+  alert_ = new IncomingAlert(this);
 
   toast_ = new QLabel(this);
   toast_->setWordWrap(true);
@@ -300,6 +302,8 @@ void MainWindow::wireCall() {
             // 浮层先备好来电态但不显示：点开横幅才换过去。
             overlay_->beginIncoming(caller, callees, mediaType, isGroup);
             banner_->showCall(caller, mediaType, isGroup);
+            // 窗口在前台就只有横幅；在后台再跳 Dock / 闪任务栏 + 系统通知。都不抢焦点。
+            alert_->ring(incomingalert::presenceOf(this), caller, mediaType, isGroup);
             dial_->setDialingEnabled(false);
             if (autoAccept_) bridge_->accept();
           });
@@ -310,6 +314,7 @@ void MainWindow::wireCall() {
             pending_.callId = callId;
             pending_.connected = true;
             overlay_->markConnected(role);
+            alert_->clear();
             if (banner_->isVisible()) showOverlay();  // 在横幅上接的：接通了才换成浮层
             // 只有主叫能 invite_more（协议 1407），所以这里也照着分。
             if (!autoInvite_.isEmpty() && role == QLatin1String("caller")) {
@@ -334,6 +339,7 @@ void MainWindow::wireCall() {
             overlay_->markEnded(reason, durationSec);
             // 还在横幅上就结束了（对方取消 / 自己拒绝）：收起即可，不弹结束态——与 Web 一致。
             banner_->hide();
+            alert_->clear();  // 对方取消 / 超时：别让 Dock 一直跳
             dial_->setDialingEnabled(true);
           });
 
@@ -417,6 +423,14 @@ void MainWindow::wireCall() {
   connect(banner_, &IncomingBanner::acceptRequested, this, [this] { bridge_->accept(); });
   connect(banner_, &IncomingBanner::rejectRequested, this, [this] { bridge_->reject(); });
   connect(banner_, &IncomingBanner::notice, this, &MainWindow::toast);
+
+  // 用户点了系统通知才前置（§07 第 3 条），并直接展开来电浮层——点的就是「这通来电」。
+  connect(alert_, &IncomingAlert::openRequested, this, [this] {
+    if (isMinimized()) showNormal();
+    raise();
+    activateWindow();
+    if (banner_->isVisible()) showOverlay();
+  });
 }
 
 void MainWindow::wireRoom() {
@@ -492,6 +506,7 @@ void MainWindow::showOverlay() {
 
 void MainWindow::hideOverlay() {
   banner_->hide();
+  alert_->clear();
   overlay_->hide();
   dial_->setDialingEnabled(bridge_->isEngineAlive());
 }

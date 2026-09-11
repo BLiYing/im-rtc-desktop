@@ -19,6 +19,7 @@ class DialPage;
 class EngineBridge;
 class RemoteLogSink;
 class HistoryPage;
+class IncomingAlert;
 class IncomingBanner;
 class LoginPage;
 class SettingsPage;
@@ -100,6 +101,8 @@ private:
   CallOverlay* overlay_ = nullptr;
   /** 来电先出它，点本体才换成 overlay_ 的来电态（UX_FLOWS §07 v3.7）。 */
   IncomingBanner* banner_ = nullptr;
+  /** 窗口在后台时横幅看不见：再跳 Dock / 闪任务栏 + 系统通知，点了才前置（§07 第 3 条）。 */
+  IncomingAlert* alert_ = nullptr;
   QLabel* toast_ = nullptr;
   QTimer* toastTimer_ = nullptr;
 

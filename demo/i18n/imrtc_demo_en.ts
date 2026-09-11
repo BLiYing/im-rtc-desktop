@@ -247,6 +247,13 @@ who, which direction, which media, why it ended, how long it lasted.</translatio
     </message>
 </context>
 <context>
+    <name>SystemAlertSink</name>
+    <message>
+        <source>im-rtc 来电</source>
+        <translation>im-rtc incoming call</translation>
+    </message>
+</context>
+<context>
     <name>LoginPage</name>
     <message>
         <source>正在登录…</source>

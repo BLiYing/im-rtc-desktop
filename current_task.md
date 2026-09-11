@@ -6,21 +6,20 @@
 
 ## 当前焦点
 
-**2026-09-11 晚：来电页批次第 3 步（桌面）——窗内来电横幅。未提交；`test.sh` 八步全绿（113 个引擎用例，Demo 界面测试 3 组，新增 `IncomingTest` 7 例）。**
+**2026-09-11 晚：延后项 ②（桌面）——窗口在后台时的来电提醒。已提交；`test.sh` 八步全绿（113 个引擎用例，Demo 界面测试 4 组，新增 `IncomingAlertTest` 6 例）。**
+**用户 2026-09-11 在 macOS 上两台实例手点验过（跳 Dock + 系统通知 + 点了展开）；Windows 未验证；本机 Intel 无媒体。**
 
-UX_FLOWS §07 v3.7：来电先出**窗内横幅**，点横幅本体才换成来电浮层。
-- **`demo/IncomingBanner`（新）**：贴主窗顶部居中，离顶与两侧 8、最宽 420、高 62、圆角 16、底 `#1E2330` + 阴影，规格同 Web `IncomingCall`。
-  头像 38 + 名字 + 邀请语是**画**出来的（点它们 = 点本体 → `expandRequested`）；右边三颗 38 圆：摄像头（仅视频来电，禁用态）/ 拒绝 / 接听（恒 phone）。
-  **横幅与按钮全是 `Qt::NoFocus`**，拨号页输入框的光标不会被抢。
-- `ControlButton::setCompact`：38 圆、不画说明字，说明字转成 tooltip / 无障碍名。
-- `callstrings::incomingInviteText`：横幅与浮层共用，与 Web 同一张表（群通话「邀请你加入群通话」）。
-- `CallOverlay` 来电态：视频来电也显示摄像头（禁用，点了出提示）；标题栏留空。
-- `MainWindow`：来电 → `beginIncoming` 备好浮层但不显示、只出横幅；点横幅 → 浮层；在横幅上接 → 接通时换浮层；
-  振铃中结束 → 横幅收起、不弹结束态（与 Web 一致）；横幅开着时 `roomJoined` 不再弹浮层；提示条排到横幅下面。
-- `Shots` 加 `06-call-incoming-banner`。
+UX_FLOWS §07 第 3 条：窗口在前台只出横幅；不在前台（最小化 / 非活动 / 被挡）再**跳 Dock / 闪任务栏 + 系统通知**，点了才前置。
+- **`demo/IncomingAlert`（新）**：判据 `needsSystemAlert`（看不见 || 最小化 || 非活动窗口）+ 状态（`ring` / `clear` / `notificationClicked`）。
+  系统那一侧经 `Sink` 注入——test.sh 跑真窗口，不注入就会真弹通知。**通话结束后才点到旧通知不再展开**。
+- **`demo/SystemAlertSink`（新）**：通知走 `QSystemTrayIcon::showMessage`（点通知 / 托盘图标 → 前置），不引第三方库。
+- **`demo/SystemAlertAttention_mac.mm` / `_stub.cpp`（新）**：macOS 自己调 `requestUserAttention:NSCriticalRequest` 并留请求号以便撤；
+  非 Apple 暂用 `QApplication::alert`（撤不回来）。
+- `MainWindow`：来电 `alert_->ring(presenceOf(this), …)`；接通 / 结束 / `hideOverlay`（登出、被踢、他端已处理）都 `clear()`；
+  `openRequested` → 恢复最小化、`raise` + `activateWindow`、横幅还在就展开来电浮层。
+- `.ts` 加 `SystemAlertSink` 一条（托盘 tooltip）。
 
-**本批顺序**（以 server 仓 `current_task.md` 为准）：① 设计稿 ✅ ② Web ✅ ③ 桌面 ✅（本条）④ Android ⑤ iOS ⑥ 三端进房前关摄像头停采集。桌面只有第 3 步。
-2026-09-08 ~ 09-09 的焦点（leave_failed / 2006 放弃阈值 / CallEngine 拆分 / 上行协商闸门）已移到 archive。
+**来电页批次**（以 server 仓 `current_task.md` 为准）桌面只有第 3 步（窗内横幅，已移到 archive）；本条是那批之后的延后项 ②。
 
 ---
 
@@ -41,7 +40,8 @@ UX_FLOWS §07 v3.7：来电先出**窗内横幅**，点横幅本体才换成来�
 
 - **本批之后的两刀（2026-09-11 用户定，等本批六步做完再动）**：
   ① 通话中关摄像头也停采集——桌面没接媒体，不涉及；
-  ② **桌面窗口在后台时的来电提醒**（系统通知 + 闪任务栏 / 跳 Dock，UX_FLOWS §07 第 3 条）——本轮只做了窗内横幅。
+  ② ~~桌面窗口在后台时的来电提醒~~ —— 已做（见「当前焦点」）。剩：Windows 上换 `FlashWindowEx` 并验证。
+  §07 第 1 条（关窗语义）/ 第 2 条（托盘常驻 + 绿点 / 菜单）没排期。
 - **本仓的静默失败点清单**（P0×2 / P1×4 / P2×6，2026-09-09 扫描）见
   `../im-rtc-server/docs/ops/silent-failure/desktop.md`，跨端结论与修复顺序见同目录的
   `SILENT_FAILURE_AUDIT.md`。**逐条状态只在那里维护，别抄回本文件。**
@@ -69,7 +69,7 @@ UX_FLOWS §07 v3.7：来电先出**窗内横幅**，点横幅本体才换成来�
      忙的时候重启请求只能先记成待办，待办里不带「重启」这一位，补出来的就是个普通 offer，
      那条连接**永远重连不上，而日志里一切正常**。
 4. **按需**：C# / P&#8203;Invoke 绑定（C ABI 已经定型，这一层是薄的）。
-5. **体量预警只剩两处**：`capi/src/imrtc_c.cpp` 537、`demo/MainWindow.cpp` 533
+5. **体量预警只剩两处**：`capi/src/imrtc_c.cpp` 537、`demo/MainWindow.cpp` 548
    （阈值 600，预警线 480）。`imrtc_c.cpp` 是 27 个回调各一段几乎一样的跳板，
    涨得最快，下一刀碰它之前先看行数。
 6. **日志的下一步**：环形缓冲 + `exportDiagnostics()`（LOGGING.md §7 的 P3），
@@ -77,10 +77,17 @@ UX_FLOWS §07 v3.7：来电先出**窗内横幅**，点横幅本体才换成来�
 
 ## 已知坑 / 限制
 
-- **来电横幅是主窗的子控件**：窗口最小化 / 被别的窗口挡住时用户**看不见也听不见**来电（Demo 没有铃声）。
-  后台提醒是排好的下一刀（见「下一步」），别当 bug 修进这一刀。
-- **横幅的接线没有集成测试**：`IncomingTest` 只测横幅与浮层两个控件；`MainWindow` 那几处
-  （来电出横幅 / 点开换浮层 / 振铃中结束收横幅 / 横幅上接通换浮层）要真引擎，只能两台实例手点验证。
+- **后台来电提醒的平台限制**（2026-09-11）：
+  - **macOS 的系统通知撤不掉**：Qt 没有撤通知的接口，`withdraw()` 只能藏托盘图标；已进通知中心的那条会留着。
+    通话结束后再点它只会激活应用，`IncomingAlert` 不再展开（有用例钉着）。Qt cocoa 走的是已废弃的 `NSUserNotificationCenter`。
+  - **托盘 / 菜单栏图标只在响铃期间出现**：发通知必须先 `show()` 托盘图标。系统没托盘（部分 Linux）就只剩注意请求。
+  - **Windows 未验证**：闪任务栏用的 `QApplication::alert` **撤不回来**（对方取消后闪到用户切回来）；
+    气泡靠藏托盘图标收起。要撤得换 `FlashWindowEx(FLASHW_STOP)`，要在 Windows 机器上写。
+  - **「被挡住」只能按「不是活动窗口」判**：窗口是活动窗口但被别的 always-on-top 窗口盖住时，不会提醒。
+  - **不在窗口激活时 `clear()`**：AppKit 在应用被激活时自己停跳 Dock；在激活时清会和「点通知」的回调抢先后，导致点了不展开。
+  - **Demo 没有铃声**：看不见窗口时，提醒只有 Dock / 任务栏 + 通知。
+- **横幅 / 后台提醒的接线没有集成测试**：`IncomingTest` 只测横幅与浮层两个控件，`IncomingAlertTest` 只测判据与状态（假 sink）；`MainWindow` 那几处
+  （来电出横幅 / 点开换浮层 / 振铃中结束收横幅 / 横幅上接通换浮层 / 后台来电发通知 / 点通知前置）要真引擎，只能两台实例手点验证。
 - **Demo 没有 Web 的 `bannerFirst` 开关**：桌面固定横幅先行。
 - **横幅用了 `QGraphicsDropShadowEffect`**：它会把整块横幅离屏再画一遍——**别往横幅里放原生子窗口**
   （本端预览之类），原生层绕过这个效果，会画到阴影外面去。

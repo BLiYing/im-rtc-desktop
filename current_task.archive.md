@@ -503,3 +503,23 @@ Demo 里没有切级别的界面入口，只有环境变量。
 `./scripts/test.sh` **七步全绿**（macOS）：77 个引擎用例 + 23 个 Demo 界面用例，
 约 16700 行 C++17。第七步只在 `IMRTC_BUILD_DEMO=ON` 时存在（需要 Qt）。
 落地明细见 [current_task.archive.md](current_task.archive.md)。
+
+---
+
+## 2026-09-11 晚：来电页批次第 3 步（桌面）窗内来电横幅的「当前焦点」（同日从 current_task.md 移出）
+
+**2026-09-11 晚：来电页批次第 3 步（桌面）——窗内来电横幅。未提交；`test.sh` 八步全绿（113 个引擎用例，Demo 界面测试 3 组，新增 `IncomingTest` 7 例）。**
+
+UX_FLOWS §07 v3.7：来电先出**窗内横幅**，点横幅本体才换成来电浮层。
+- **`demo/IncomingBanner`（新）**：贴主窗顶部居中，离顶与两侧 8、最宽 420、高 62、圆角 16、底 `#1E2330` + 阴影，规格同 Web `IncomingCall`。
+  头像 38 + 名字 + 邀请语是**画**出来的（点它们 = 点本体 → `expandRequested`）；右边三颗 38 圆：摄像头（仅视频来电，禁用态）/ 拒绝 / 接听（恒 phone）。
+  **横幅与按钮全是 `Qt::NoFocus`**，拨号页输入框的光标不会被抢。
+- `ControlButton::setCompact`：38 圆、不画说明字，说明字转成 tooltip / 无障碍名。
+- `callstrings::incomingInviteText`：横幅与浮层共用，与 Web 同一张表（群通话「邀请你加入群通话」）。
+- `CallOverlay` 来电态：视频来电也显示摄像头（禁用，点了出提示）；标题栏留空。
+- `MainWindow`：来电 → `beginIncoming` 备好浮层但不显示、只出横幅；点横幅 → 浮层；在横幅上接 → 接通时换浮层；
+  振铃中结束 → 横幅收起、不弹结束态（与 Web 一致）；横幅开着时 `roomJoined` 不再弹浮层；提示条排到横幅下面。
+- `Shots` 加 `06-call-incoming-banner`。
+
+**本批顺序**（以 server 仓 `current_task.md` 为准）：① 设计稿 ✅ ② Web ✅ ③ 桌面 ✅（本条）④ Android ⑤ iOS ⑥ 三端进房前关摄像头停采集。桌面只有第 3 步。
+2026-09-08 ~ 09-09 的焦点（leave_failed / 2006 放弃阈值 / CallEngine 拆分 / 上行协商闸门）已移到 archive。
