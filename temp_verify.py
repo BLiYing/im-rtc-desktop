@@ -1,18 +1,18 @@
-"""temp_verify.py —— 验证 demo/SystemAlertAttention_win.cpp（Windows 闪任务栏改用 FlashWindowEx）。
+"""temp_verify.py —— 静态检查「SDK 统一 1.0.0 + 设置页详细日志 + libwebrtc 现状」这一刀。
 
-本机是 Intel Mac，编不了真的 Windows。能做的是：
-  1. 用 brew llvm 的 clang 以 x86_64-w64-mingw32 为目标，对着真实的 mingw-w64 头和 Qt 6.8.3 头做语法检查，
-     我们自己的代码开 -Werror（与 CMake 非 MSVC 分支同一组警告）；
-  2. 反例对照：把 FLASHW_STOP 改错名的副本必须编不过——证明检查不是空转；
-  3. demo/CMakeLists.txt 在 WIN32 下选 _win.cpp、Apple 分支不变；
-  4. _win.cpp 的 cancel() 真的发 FLASHW_STOP 并清掉句柄；
-  5. macOS 上 ./scripts/test.sh 的结果（读日志，不在这里重跑；没给日志就跳过）。
+只读源码，不编译、不跑进程（编译与界面测试交给 ./scripts/test.sh）：
+  1. 版本号只有一处真相：engine/include/imrtc/Version.h 的 kSdkVersion == "1.0.0"，
+     C ABI 的 imrtc_v1_version()、引擎两个 Options 的 sdk 默认串都从它取；
+  2. 其余写死版本号的地方都是 1.0.0：Info.plist.in、两个测试；Demo 的 applicationVersion 取 C ABI；
+  3. 仓里（git 跟踪的源码与文档，current_task*.md 除外）没有残留的 0.1.0 / 0.0.1；
+  4. SettingsPage.cpp 里每一条 tr() 在 demo/i18n/imrtc_demo_en.ts 的 SettingsPage 上下文里都有非空译文，
+     .ts 里也没有 SettingsPage.cpp 已经不用的旧条目，%1 占位符个数对得上；
+  5. QSettings 键 "log/verbose" 在 EngineBridge.cpp 定义、被测试引用；设置页有日志分组与 verboseLog 勾选；
+     main.cpp 启动时按存的值设级别；libwebrtc 那一行照实写着 m150.7871.3.2 / M150；
+  6. SettingsTest 挂进了 demo/CMakeLists.txt 的测试列表；
+  7. （可选）TEST_SH_LOG 指向的 test.sh 日志以「全部通过」结尾且 exit=0；没给就 SKIP。
 
 运行：python3 temp_verify.py
-需要：Homebrew 的 llvm（Intel / Apple Silicon 两个前缀都找）、~/Qt/6.8.3/macos、首次运行能连 GitHub。
-可选环境变量：
-  VERIFY_SCRATCH  头文件缓存目录，默认「系统临时目录/imrtc-desktop-verify」，拉过一次就不再联网；
-  TEST_SH_LOG     `./scripts/test.sh > 某文件 2>&1; echo "exit=$?" >> 某文件` 产出的日志路径。
 """
 
 from __future__ import annotations
@@ -20,209 +20,219 @@ from __future__ import annotations
 import logging
 import os
 import re
-import shutil
 import subprocess
 import sys
-import tempfile
-import urllib.error
-import urllib.request
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, List
+from typing import Callable, Dict, List, Optional
 
 log = logging.getLogger("temp_verify")
 
 REPO = Path(__file__).resolve().parent
-DEMO = REPO / "demo"
-WIN_CPP = DEMO / "SystemAlertAttention_win.cpp"
-SCRATCH = Path(os.environ.get("VERIFY_SCRATCH") or Path(tempfile.gettempdir()) / "imrtc-desktop-verify")
-# 不用系统 /usr/bin/clang++：Apple 的 clang 不带 libc++ 头的独立副本，mingw 目标下找不到 <functional>。
-LLVM_PREFIXES = [Path("/usr/local/opt/llvm"), Path("/opt/homebrew/opt/llvm")]
-QT_LIB = Path.home() / "Qt/6.8.3/macos/lib"
-QT_WINDEFS_URL = "https://raw.githubusercontent.com/qt/qtbase/v6.8.3/src/gui/kernel/qwindowdefs_win.h"
-MINGW_URL = "https://github.com/mingw-w64/mingw-w64.git"
-WARNINGS = ["-Wall", "-Wextra", "-Wpedantic", "-Wconversion", "-Wshadow", "-Werror"]
+VERSION = "1.0.0"
+OLD_VERSION = re.compile(r"(?<![\d.])0\.(?:1\.0|0\.1)(?![\d.])")
+SKIP_RESIDUE = {"current_task.md", "current_task.archive.md", "temp_verify.py"}
+TEXT_SUFFIXES = {".cpp", ".h", ".hpp", ".mm", ".in", ".txt", ".md", ".sh", ".json", ".ts", ".cmake"}
 
 
 @dataclass
-class Report:
-    passed: List[str] = field(default_factory=list)
-    failed: List[str] = field(default_factory=list)
-    skipped: List[str] = field(default_factory=list)
+class Outcome:
+    name: str
+    status: str = "PASS"  # PASS / FAIL / SKIP
+    details: List[str] = field(default_factory=list)
 
-    def check(self, name: str, ok: bool, detail: str = "") -> None:
-        (self.passed if ok else self.failed).append(name)
-        if ok:
-            log.info("PASS %s", name)
-        else:
-            log.error("FAIL %s %s", name, detail)
-
-    def skip(self, name: str, why: str) -> None:
-        self.skipped.append(name)
-        log.warning("SKIP %s（%s）", name, why)
+    def fail(self, message: str) -> None:
+        self.status = "FAIL"
+        self.details.append(message)
 
 
-@dataclass(frozen=True)
-class Toolchain:
-    clang: Path
-    libcxx: Path
-
-
-def find_toolchain() -> Toolchain:
-    for prefix in LLVM_PREFIXES:
-        tc = Toolchain(prefix / "bin/clang++", prefix / "include/c++/v1")
-        if tc.clang.exists() and tc.libcxx.is_dir():
-            return tc
-    tried = "、".join(str(p) for p in LLVM_PREFIXES)
-    raise RuntimeError(f"没找到 Homebrew llvm（试过 {tried}）：brew install llvm")
-
-
-def run(cmd: List[str], cwd: Path | None = None, timeout: int = 300) -> subprocess.CompletedProcess[str]:
+def read(relative: str) -> str:
+    path = REPO / relative
     try:
-        return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout, check=False)
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        return subprocess.CompletedProcess(cmd, 127, "", f"{type(exc).__name__}: {exc}")
+        return path.read_text(encoding="utf-8")
+    except OSError as error:
+        raise RuntimeError(f"读不了 {relative}：{error}") from error
 
 
-def ensure_mingw_headers() -> Path:
-    """sparse clone 只取头文件；已经有了就不再拉。失败时删掉半截目录，下次重来。"""
-    root = SCRATCH / "mingw"
-    if (root / "mingw-w64-headers/include/winuser.h").exists():
-        return root / "mingw-w64-headers"
-    shutil.rmtree(root, ignore_errors=True)
-    steps = [
-        ["git", "clone", "--depth", "1", "--filter=blob:none", "--sparse", MINGW_URL, str(root)],
-        ["git", "-C", str(root), "sparse-checkout", "set", "mingw-w64-headers/include", "mingw-w64-headers/crt"],
-    ]
-    for cmd in steps:
-        res = run(cmd, timeout=600)
-        if res.returncode != 0:
-            shutil.rmtree(root, ignore_errors=True)
-            raise RuntimeError(f"拉 mingw-w64 头失败：{res.stderr.strip()[-400:]}")
-    return root / "mingw-w64-headers"
+def require(outcome: Outcome, text: str, needle: str, where: str) -> None:
+    if needle not in text:
+        outcome.fail(f"{where} 里找不到：{needle}")
 
 
-def fetch_qt_windefs(dest: Path, attempts: int = 3) -> None:
-    """macOS 版 Qt 不带 qwindowdefs_win.h；从 qtbase 同版本 tag 取一份。重试 3 次，写临时文件再改名。"""
-    if dest.exists():
-        return
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    last: Exception | None = None
-    for i in range(attempts):
-        try:
-            with urllib.request.urlopen(QT_WINDEFS_URL, timeout=30) as resp:
-                data = resp.read()
-            tmp = dest.with_suffix(".part")
-            tmp.write_bytes(data)
-            tmp.replace(dest)
-            return
-        except (urllib.error.URLError, TimeoutError, OSError) as exc:
-            last = exc
-            log.warning("取 qwindowdefs_win.h 第 %d 次失败：%s", i + 1, exc)
-    raise RuntimeError(f"取 qwindowdefs_win.h 失败：{last}")
+def check_single_source() -> Outcome:
+    o = Outcome("版本号单一真相源 = 1.0.0")
+    require(o, read("engine/include/imrtc/Version.h"), f'kSdkVersion[] = "{VERSION}"', "Version.h")
+    require(o, read("capi/src/imrtc_c.cpp"), "imrtc_v1_version(void) { return imrtc::kSdkVersion; }",
+            "imrtc_c.cpp")
+    for header in ("engine/include/imrtc/Connection.h", "engine/include/imrtc/CallEngine.h"):
+        text = read(header)
+        require(o, text, '#include "imrtc/Version.h"', header)
+        require(o, text, 'std::string sdk = std::string("desktop/") + kSdkVersion;', header)
+    require(o, read("capi/include/imrtc/CallEngine.hpp"),
+            'std::string("desktop-cpp/") + imrtc_v1_version()', "CallEngine.hpp")
+    return o
 
 
-def build_include_tree(headers: Path) -> Path:
-    """mingw 的 include + crt 拷成一个 sysroot；_mingw.h 由 .in 生成；Qt 三个模块用软链。"""
-    tree = SCRATCH / "wininc"
-    sysdir, qtdir = tree / "sys", tree / "qt"
-    if not (sysdir / "_mingw.h").exists():
-        shutil.rmtree(sysdir, ignore_errors=True)
-        shutil.copytree(headers / "include", sysdir)
-        shutil.copytree(headers / "crt", sysdir, dirs_exist_ok=True)
-        text = (headers / "crt/_mingw.h.in").read_text()
-        text = text.replace("@DEFAULT_WIN32_WINNT@", "0xa00").replace("@DEFAULT_MSVCRT_VERSION@", "0xE00")
-        (sysdir / "_mingw.h").write_text(re.sub(r"@[A-Z_0-9]+@", "", text))
-    if not (QT_LIB / "QtWidgets.framework/Headers").is_dir():
-        raise RuntimeError(f"没找到 Qt 头：{QT_LIB}（装法见 demo/CMakeLists.txt 顶部）")
-    qtdir.mkdir(parents=True, exist_ok=True)
-    for mod in ("QtCore", "QtGui", "QtWidgets"):
-        link = qtdir / mod
-        if not link.exists():
-            link.symlink_to(QT_LIB / f"{mod}.framework/Headers")
-    fetch_qt_windefs(tree / "qtwin/QtGui/qwindowdefs_win.h")
-    return tree
+def check_other_sites() -> Outcome:
+    o = Outcome("其余版本号位置")
+    plist = read("demo/Info.plist.in")
+    for key in ("CFBundleShortVersionString", "CFBundleVersion"):
+        if not re.search(rf"<key>{key}</key>\s*<string>{re.escape(VERSION)}</string>", plist):
+            o.fail(f"Info.plist.in 的 {key} 不是 {VERSION}")
+    require(o, read("demo/main.cpp"), "setApplicationVersion(EngineBridge::versionString())", "main.cpp")
+    require(o, read("demo/EngineBridge.cpp"), '"desktop-qt-demo/" + std::string(imrtc_v1_version())',
+            "EngineBridge.cpp")
+    require(o, read("tools/Smoke.cpp"), 'std::string("desktop-smoke/") + imrtc_v1_version()', "Smoke.cpp")
+    require(o, read("tests/ConnectionTest.cpp"), '"desktop/1.0.0"', "ConnectionTest.cpp")
+    capi_test = read("tests/CapiTest.cpp")
+    require(o, capi_test, '"desktop-test/1.0.0"', "CapiTest.cpp")
+    require(o, capi_test, 'std::string(imrtc_v1_version()), std::string("1.0.0")', "CapiTest.cpp")
+    return o
 
 
-def syntax_check(tc: Toolchain, tree: Path, source: Path) -> subprocess.CompletedProcess[str]:
-    qt = tree / "qt"
-    cmd = [str(tc.clang), "--target=x86_64-w64-mingw32", "-std=c++17", "-fsyntax-only", "-nostdinc++",
-           "-isystem", str(tc.libcxx), "-isystem", str(tree / "sys"),
-           "-isystem", str(tree / "qtwin"), "-isystem", str(qt),
-           *[f"-isystem{qt / m}" for m in ("QtCore", "QtGui", "QtWidgets")],
-           f"-I{DEMO}", *WARNINGS, str(source)]
-    return run(cmd, cwd=source.parent)
-
-
-def check_compiles(report: Report, tc: Toolchain, tree: Path) -> None:
-    res = syntax_check(tc, tree, WIN_CPP)
-    report.check("mingw 目标下 _win.cpp 语法检查（-Werror）", res.returncode == 0, res.stderr.strip()[-1500:])
-
-
-def check_negative_control(report: Report, tc: Toolchain, tree: Path) -> None:
-    """边界：同一条命令对一个改坏的副本必须报错，否则上面那条 PASS 不可信。"""
-    with tempfile.TemporaryDirectory(dir=SCRATCH) as tmp:
-        broken = Path(tmp) / WIN_CPP.name
-        broken.write_text(WIN_CPP.read_text().replace("FLASHW_STOP", "FLASHW_STOPP"))
-        res = syntax_check(tc, tree, broken)
-        hit = "FLASHW_STOPP" in res.stderr
-    report.check("反例：FLASHW_STOP 改错名必须编不过", res.returncode != 0 and hit)
-
-
-def check_cmake(report: Report) -> None:
-    text = (DEMO / "CMakeLists.txt").read_text()
-    m = re.search(r"if\(APPLE\)(.*?)elseif\(WIN32\)(.*?)else\(\)(.*?)endif\(\)", text, re.S)
-    report.check("CMake 有 APPLE / WIN32 / 其余 三个分支", m is not None)
-    if m is None:
-        return
-    apple, win, other = m.groups()
-    report.check("Apple 分支仍是 _mac.mm", "SystemAlertAttention_mac.mm" in apple)
-    report.check("WIN32 分支用 _win.cpp、不用 stub", "SystemAlertAttention_win.cpp" in win
-                 and "SystemAlertAttention_stub.cpp" not in win)
-    report.check("其余平台仍是 stub", "SystemAlertAttention_stub.cpp" in other)
-
-
-def check_cancel_semantics(report: Report) -> None:
-    src = WIN_CPP.read_text()
-    cancel = re.search(r"void attention::cancel\(\) \{(.*?)\n\}", src, re.S)
-    body = cancel.group(1) if cancel else ""
-    report.check("cancel() 发 FLASHW_STOP", "FLASHW_STOP" in body)
-    report.check("cancel() 清掉句柄（重复调无害）", "gFlashing = nullptr" in body and "== nullptr) return" in body)
-    report.check("request() 用 TIMERNOFG（切回前台系统自停）", "FLASHW_ALL | FLASHW_TIMERNOFG" in src)
-    report.check("request() 不替没句柄的窗口新建句柄", "internalWinId()" in src and "winId()" not in
-                 src.replace("internalWinId()", ""))
-
-
-def check_mac_tests(report: Report) -> None:
-    name = "macOS ./scripts/test.sh 退出码 0"
-    raw = os.environ.get("TEST_SH_LOG")
-    if not raw:
-        report.skip(name, "没设 TEST_SH_LOG")
-        return
+def tracked_files() -> List[str]:
     try:
-        text = Path(raw).read_text(errors="replace")
-    except OSError as exc:
-        report.skip(name, f"读不了日志：{exc}")
-        return
-    report.check(name, "exit=0" in text, text.strip()[-800:])
+        result = subprocess.run(["git", "ls-files", "--cached", "--others", "--exclude-standard"],
+                                cwd=REPO, capture_output=True, text=True, check=True, timeout=30)
+    except (OSError, subprocess.SubprocessError) as error:
+        raise RuntimeError(f"git ls-files 失败：{error}") from error
+    return [line for line in result.stdout.splitlines() if line and not line.startswith(".claude/")]
+
+
+def check_no_residue() -> Outcome:
+    o = Outcome("无残留 0.1.0 / 0.0.1")
+    for relative in tracked_files():
+        path = REPO / relative
+        if Path(relative).name in SKIP_RESIDUE or path.suffix not in TEXT_SUFFIXES or not path.is_file():
+            continue
+        for number, line in enumerate(read(relative).splitlines(), start=1):
+            if OLD_VERSION.search(line):
+                o.fail(f"{relative}:{number}: {line.strip()}")
+    return o
+
+
+def cpp_unescape(literal: str) -> str:
+    return literal.replace('\\"', '"').replace("\\n", "\n").replace("\\\\", "\\")
+
+
+def tr_strings(source: str) -> List[str]:
+    """抽出 tr("…" "…") 的实参：相邻字面量按 C++ 规则拼接。"""
+    out: List[str] = []
+    for match in re.finditer(r'\btr\(\s*((?:"(?:[^"\\]|\\.)*"\s*)+)', source):
+        pieces = re.findall(r'"((?:[^"\\]|\\.)*)"', match.group(1))
+        out.append(cpp_unescape("".join(pieces)))
+    return out
+
+
+def ts_context(context_name: str) -> Dict[str, Optional[ET.Element]]:
+    try:
+        root = ET.parse(REPO / "demo/i18n/imrtc_demo_en.ts").getroot()
+    except (OSError, ET.ParseError) as error:
+        raise RuntimeError(f".ts 解析失败：{error}") from error
+    for context in root.iter("context"):
+        if context.findtext("name") == context_name:
+            return {m.findtext("source") or "": m.find("translation") for m in context.iter("message")}
+    return {}
+
+
+def check_translations() -> Outcome:
+    o = Outcome("SettingsPage 的 tr() 都有英文译文")
+    sources = tr_strings(read("demo/SettingsPage.cpp"))
+    messages = ts_context("SettingsPage")
+    if not sources or not messages:
+        o.fail(f"抽到 {len(sources)} 条 tr()、.ts 里 {len(messages)} 条——至少一边是空的")
+        return o
+    for text in sources:
+        node = messages.get(text)
+        if node is None:
+            o.fail(f".ts 缺条目：{text[:40]!r}")
+        elif not (node.text or "").strip() or node.get("type") in ("unfinished", "obsolete", "vanished"):
+            o.fail(f"译文空或未完成：{text[:40]!r}")
+        elif text.count("%1") != (node.text or "").count("%1"):
+            o.fail(f"%1 个数对不上：{text[:40]!r}")
+    for stale in set(messages) - set(sources):
+        o.fail(f".ts 里有已不用的旧条目：{stale[:40]!r}")
+    for needle in ("日志", "详细日志", "libwebrtc：未接入（计划锁 m150.7871.3.2 / M150）。"):
+        if not any(needle in text for text in sources):
+            o.fail(f"SettingsPage.cpp 的 tr() 里没有：{needle}")
+    return o
+
+
+def check_setting_wiring() -> Outcome:
+    o = Outcome("log/verbose 键与启动时恢复")
+    bridge = read("demo/EngineBridge.cpp")
+    require(o, bridge, 'kVerboseLogKey[] = "log/verbose"', "EngineBridge.cpp")
+    require(o, bridge, "imrtc_v1_set_log_level(verbose ? IMRTC_V1_LOG_DEBUG : IMRTC_V1_LOG_INFO)",
+            "EngineBridge.cpp")
+    require(o, bridge, "value(QLatin1String(kVerboseLogKey), false)", "EngineBridge.cpp（默认关）")
+    page = read("demo/SettingsPage.cpp")
+    require(o, page, 'setObjectName(QStringLiteral("verboseLog"))', "SettingsPage.cpp")
+    require(o, page, "EngineBridge::setVerboseLog(on)", "SettingsPage.cpp")
+    main = read("demo/main.cpp")
+    require(o, main, "if (level.isEmpty()) EngineBridge::applyLogLevel(EngineBridge::verboseLog());", "main.cpp")
+    if main.find("applyLogLevel(EngineBridge::verboseLog())") < main.find("setApplicationName("):
+        o.fail("main.cpp 在定 applicationName 之前就读了 QSettings")
+    require(o, read("demo/tests/SettingsTest.cpp"), 'kKey[] = "log/verbose"', "SettingsTest.cpp")
+    return o
+
+
+def check_cmake() -> Outcome:
+    o = Outcome("SettingsTest 挂进 CMake")
+    if not re.search(r"foreach\(_case [^)]*\bSettings\b", read("demo/CMakeLists.txt")):
+        o.fail("demo/CMakeLists.txt 的测试列表里没有 Settings")
+    if not (REPO / "demo/tests/SettingsTest.cpp").is_file():
+        o.fail("demo/tests/SettingsTest.cpp 不存在")
+    return o
+
+
+def check_test_log() -> Outcome:
+    o = Outcome("test.sh 日志")
+    location = os.environ.get("TEST_SH_LOG")
+    if not location:
+        o.status = "SKIP"
+        o.details.append("没给 TEST_SH_LOG")
+        return o
+    try:
+        text = Path(location).read_text(encoding="utf-8", errors="replace")
+    except OSError as error:
+        o.status = "SKIP"
+        o.details.append(f"读不了 {location}：{error}")
+        return o
+    if "全部通过" not in text or "exit=0" not in text:
+        o.fail("日志里没有「全部通过」或 exit=0")
+    if "SettingsTest" not in text:
+        o.fail("日志里没看到 SettingsTest 跑过")
+    return o
+
+
+CHECKS: List[Callable[[], Outcome]] = [
+    check_single_source, check_other_sites, check_no_residue,
+    check_translations, check_setting_wiring, check_cmake, check_test_log,
+]
+
+
+def run(check: Callable[[], Outcome]) -> Outcome:
+    try:
+        return check()
+    except RuntimeError as error:
+        outcome = Outcome(check.__name__)
+        outcome.fail(str(error))
+        return outcome
 
 
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
-    report = Report()
-    steps: List[Callable[[Report], None]] = [check_cmake, check_cancel_semantics, check_mac_tests]
-    for step in steps:
-        step(report)
-    try:
-        SCRATCH.mkdir(parents=True, exist_ok=True)
-        tc = find_toolchain()
-        tree = build_include_tree(ensure_mingw_headers())
-        check_compiles(report, tc, tree)
-        check_negative_control(report, tc, tree)
-    except (RuntimeError, OSError) as exc:
-        report.check("准备编译器与 Windows 头文件", False, str(exc))
-    log.info("\n%d 通过，%d 失败，%d 跳过", len(report.passed), len(report.failed), len(report.skipped))
-    return 1 if report.failed else 0
+    outcomes = [run(check) for check in CHECKS]
+    for outcome in outcomes:
+        log.info("[%s] %s", outcome.status, outcome.name)
+        if outcome.status != "PASS":
+            for detail in outcome.details:
+                log.info("       %s", detail)
+    failed = sum(1 for outcome in outcomes if outcome.status == "FAIL")
+    skipped = sum(1 for outcome in outcomes if outcome.status == "SKIP")
+    log.info("通过 %d，失败 %d，跳过 %d", len(outcomes) - failed - skipped, failed, skipped)
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

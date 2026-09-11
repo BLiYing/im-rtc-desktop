@@ -104,7 +104,7 @@ int main(int argc, char** argv) {
   std::printf("→ SDK %s（经 C ABI，与 Qt / C# 宿主同一条路）\n", imrtc_v1_version());
 
   Printer printer;
-  imrtc::capi::Engine engine(url, deviceId, "desktop-smoke/0.1.0");
+  imrtc::capi::Engine engine(url, deviceId, std::string("desktop-smoke/") + imrtc_v1_version());
   if (!engine.valid()) {
     std::printf("✗ 造不出 Engine：%s\n", engine.lastError().name());
     return 1;

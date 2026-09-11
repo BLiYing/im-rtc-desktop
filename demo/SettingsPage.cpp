@@ -1,5 +1,6 @@
 #include "SettingsPage.h"
 
+#include <QCheckBox>
 #include <QComboBox>
 #include <QEvent>
 #include <QFormLayout>
@@ -40,6 +41,22 @@ SettingsPage::SettingsPage(QWidget* parent) : QWidget(parent) {
     language::apply(choice);  // 会给所有 widget 发 LanguageChange
   });
 
+  // ---- 日志 ----
+  logGroup_ = new QGroupBox(this);
+  verboseLog_ = new QCheckBox(logGroup_);
+  verboseLog_->setObjectName(QStringLiteral("verboseLog"));
+  verboseLog_->setChecked(EngineBridge::verboseLog());  // 先读回再连信号，免得建页就写一次
+  verboseHint_ = new QLabel(logGroup_);
+  verboseHint_->setWordWrap(true);
+  verboseHint_->setFont(theme::type::b2());
+  auto* logLayout = new QVBoxLayout(logGroup_);
+  logLayout->addWidget(verboseLog_);
+  logLayout->addWidget(verboseHint_);
+
+  connect(verboseLog_, &QCheckBox::toggled, this, [](bool on) {
+    EngineBridge::setVerboseLog(on);  // 立刻生效，不用重登：级别是进程级的
+  });
+
   // ---- 本次会话 ----
   sessionGroup_ = new QGroupBox(this);
   uidLabel_ = new QLabel(sessionGroup_);
@@ -70,6 +87,7 @@ SettingsPage::SettingsPage(QWidget* parent) : QWidget(parent) {
   layout->setContentsMargins(16, 16, 16, 16);
   layout->setSpacing(12);
   layout->addWidget(uiGroup_);
+  layout->addWidget(logGroup_);
   layout->addWidget(sessionGroup_);
   layout->addWidget(buildGroup_);
   layout->addStretch();
@@ -97,6 +115,12 @@ void SettingsPage::retranslateUi() {
         i, language::displayName(static_cast<language::Choice>(language_->itemData(i).toInt())));
   }
 
+  logGroup_->setTitle(tr("日志"));
+  verboseLog_->setText(tr("详细日志"));
+  verboseHint_->setText(
+      tr("debug 级别：含每一帧信令的收发，一次通话数百条。排查「按了没反应」时再开，"
+         "勾上立刻生效。启动时若设了环境变量 IMRTC_LOG_LEVEL，以环境变量为准。"));
+
   sessionGroup_->setTitle(tr("本次会话"));
   uidLabel_->setText(tr("用户 ID"));
   endpointLabel_->setText(tr("信令端点"));
@@ -105,7 +129,8 @@ void SettingsPage::retranslateUi() {
 
   buildGroup_->setTitle(tr("这个构建能做什么"));
   buildText_->setText(
-      tr("SDK %1，经 C ABI 调用（与集成方拿到的是同一个 .dylib / .dll + 一个 C 头）。\n\n"
+      tr("SDK %1，经 C ABI 调用（与集成方拿到的是同一个 .dylib / .dll + 一个 C 头）。\n"
+         "libwebrtc：未接入（计划锁 m150.7871.3.2 / M150）。\n\n"
          "✅ 已经是真的：登录、心跳、断线重连、拨号、来电、接听/拒接/取消/挂断、"
          "群通话成员事件、加入与离开房间、通话记录。\n\n"
          "⬜ 还没有：声音与画面。媒体面（MediaAdapter / MediaPlane）已经接好并测全，"

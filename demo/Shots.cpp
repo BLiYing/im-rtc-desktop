@@ -121,7 +121,7 @@ int main(int argc, char** argv) {
 
   // ---- 设置屏 ----
   SettingsPage settings;
-  settings.resize(520, 560);
+  settings.resize(520, 680);  // 多了「日志」一组，560 装不下
   settings.setSession(QStringLiteral("alice"), QStringLiteral("ws://127.0.0.1:8787/v1/ws"),
                       QStringLiteral("sess-4f7a91c2"));
   shoot(&settings, dir, QStringLiteral("04-settings%1").arg(suffix));
