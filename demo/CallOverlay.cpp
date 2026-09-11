@@ -139,6 +139,7 @@ CallOverlay::CallOverlay(QWidget* parent) : QWidget(parent) {
 
   danger_->setObjectName(QStringLiteral("dangerButton"));
   answer_->setObjectName(QStringLiteral("answerButton"));
+  camera_->setObjectName(QStringLiteral("cameraButton"));
 
   connect(answer_, &ControlButton::clicked, this, &CallOverlay::acceptRequested);
   connect(danger_, &ControlButton::clicked, this, [this] {
@@ -259,7 +260,10 @@ void CallOverlay::markEnded(const QString& reason, qint64 durationSec) {
 }
 
 void CallOverlay::updateTitle() {
-  if (isRoomMode()) {
+  if (phase_ == Phase::Incoming) {
+    // 来电页标题栏留空（UX_FLOWS §07 v3.7）：谁、什么通话，下面那两行已经说了。
+    title_->clear();
+  } else if (isRoomMode()) {
     title_->setText(tr("会议房间 %1").arg(roomId_));
   } else if (isGroup_) {
     title_->setText(tr("群通话 · %1 人").arg(tiles_.size()));
@@ -282,7 +286,8 @@ void CallOverlay::applyPhase() {
   answer_->setVisible(phase_ == Phase::Incoming);
   danger_->setVisible(phase_ != Phase::Ended);
   mic_->setVisible(phase_ == Phase::Connected);
-  camera_->setVisible(phase_ == Phase::Connected && isVideo_);
+  // 视频来电也有摄像头这一颗（v3.7：接听前可先关掉），今天与接通后那颗一样是禁用态。
+  camera_->setVisible((phase_ == Phase::Connected || phase_ == Phase::Incoming) && isVideo_);
   // 共享屏幕只在桌面出现，且只在 1v1/群通话接通后（草图 §06-R）。
   screen_->setVisible(phase_ == Phase::Connected && !isRoomMode());
   modeNotice_->setVisible(phase_ == Phase::Connected);
@@ -294,7 +299,7 @@ void CallOverlay::applyPhase() {
       break;
     case Phase::Incoming:
       status_->setVisible(true);
-      status_->setText(isVideo_ ? tr("邀请你视频通话") : tr("邀请你语音通话"));
+      status_->setText(callstrings::incomingInviteText(isVideo_, isGroup_));
       break;
     case Phase::Connected:
       status_->setVisible(false);

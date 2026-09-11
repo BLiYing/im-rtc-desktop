@@ -78,6 +78,11 @@ QString recordSummary(const CallRecord& record) {
   return tr("呼出 · 未接通");
 }
 
+QString incomingInviteText(bool isVideo, bool isGroup) {
+  if (isGroup) return tr("邀请你加入群通话");
+  return isVideo ? tr("邀请你视频通话") : tr("邀请你语音通话");
+}
+
 QString recordTimestamp(const CallRecord& record) {
   if (!record.endedAt.isValid()) return QString();
   const QDate today = QDate::currentDate();

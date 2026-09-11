@@ -36,14 +36,6 @@
         <translation>Calling…</translation>
     </message>
     <message>
-        <source>邀请你视频通话</source>
-        <translation>is inviting you to a video call</translation>
-    </message>
-    <message>
-        <source>邀请你语音通话</source>
-        <translation>is inviting you to a voice call</translation>
-    </message>
-    <message>
         <source>%1 · %2</source>
         <translation>%1 · %2</translation>
     </message>
@@ -229,6 +221,29 @@
 
 Every row on this page is built from a single onCallEnd callback:
 who, which direction, which media, why it ended, how long it lasted.</translation>
+    </message>
+</context>
+<context>
+    <name>IncomingBanner</name>
+    <message>
+        <source>摄像头</source>
+        <translation>Camera</translation>
+    </message>
+    <message>
+        <source>已关闭</source>
+        <translation>Camera off</translation>
+    </message>
+    <message>
+        <source>拒绝</source>
+        <translation>Decline</translation>
+    </message>
+    <message>
+        <source>接听</source>
+        <translation>Answer</translation>
+    </message>
+    <message>
+        <source>纯信令模式：媒体还没接入，这个按钮现在不会有任何效果。</source>
+        <translation>Signalling-only build: media is not wired up, so this button does nothing yet.</translation>
     </message>
 </context>
 <context>
@@ -574,6 +589,18 @@ Is the server running? (scripts/dev.sh)</translation>
     <message>
         <source>M月d日</source>
         <translation>MMM d</translation>
+    </message>
+    <message>
+        <source>邀请你加入群通话</source>
+        <translation>is inviting you to a group call</translation>
+    </message>
+    <message>
+        <source>邀请你视频通话</source>
+        <translation>is inviting you to a video call</translation>
+    </message>
+    <message>
+        <source>邀请你语音通话</source>
+        <translation>is inviting you to a voice call</translation>
     </message>
 </context>
 <context>

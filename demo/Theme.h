@@ -37,6 +37,8 @@ QColor accept();           ///< @accept          #3DDC84        接听 + 正在�
 QColor fg();               ///< @fg              #FFFFFF
 QColor fgDim();            ///< @fgDim           白 70%
 QColor warn();             ///< @warn            #F5A623        网络不佳 / 正在重连
+QColor banner();           ///< @banner          #1E2330        来电横幅卡片底
+QColor bannerShadow();     ///< 横幅阴影         黑 45%         0 14 34（与 Web `styles.toast` 同值）
 
 }  // namespace call
 
@@ -89,6 +91,11 @@ constexpr int kOverlayWidth = 520;    ///< 通话浮窗（桌面稿 R）
 constexpr int kOverlayHeight = 360;
 constexpr int kBannerHeight = 62;     ///< 来电横幅
 constexpr int kBannerRadius = 16;
+constexpr int kBannerInset = 8;       ///< 窗内横幅离窗顶与两侧
+constexpr int kBannerMaxWidth = 420;  ///< 窗内横幅最宽（桌面 / Web）
+constexpr int kBannerAvatar = 38;     ///< 横幅头像
+constexpr int kBannerButton = 38;     ///< 横幅上的圆按钮（不带说明字）
+constexpr int kBannerIcon = 20;
 constexpr int kTileLabelHeight = 18;  ///< 格子名字标签
 constexpr int kTileLabelRadius = 6;
 constexpr int kMuteBadge = 24;        ///< 格子静音角标

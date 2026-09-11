@@ -20,6 +20,7 @@
 #include "DialPage.h"
 #include "EngineBridge.h"
 #include "HistoryPage.h"
+#include "IncomingBanner.h"
 #include "LoginPage.h"
 #include "SettingsPage.h"
 #include "Theme.h"
@@ -101,6 +102,10 @@ void MainWindow::buildUi() {
   // 那一批还没做，做的时候要连同关闭语义、Dock 角标一起做，不适合零敲碎打。
   overlay_ = new CallOverlay(this);
   overlay_->hide();
+
+  // 来电先出窗内横幅（UX_FLOWS §07 v3.7），不抢焦点；它自己跟着主窗 resize 摆位。
+  banner_ = new IncomingBanner(this);
+  banner_->hide();
 
   toast_ = new QLabel(this);
   toast_->setWordWrap(true);
@@ -292,8 +297,9 @@ void MainWindow::wireCall() {
             pending_.outgoing = false;
             hasPending_ = true;
 
+            // 浮层先备好来电态但不显示：点开横幅才换过去。
             overlay_->beginIncoming(caller, callees, mediaType, isGroup);
-            showOverlay();
+            banner_->showCall(caller, mediaType, isGroup);
             dial_->setDialingEnabled(false);
             if (autoAccept_) bridge_->accept();
           });
@@ -304,6 +310,7 @@ void MainWindow::wireCall() {
             pending_.callId = callId;
             pending_.connected = true;
             overlay_->markConnected(role);
+            if (banner_->isVisible()) showOverlay();  // 在横幅上接的：接通了才换成浮层
             // 只有主叫能 invite_more（协议 1407），所以这里也照着分。
             if (!autoInvite_.isEmpty() && role == QLatin1String("caller")) {
               const QStringList more{autoInvite_};
@@ -325,6 +332,8 @@ void MainWindow::wireCall() {
             Q_UNUSED(endedBy);
             commitRecord(callId, reason, durationSec);
             overlay_->markEnded(reason, durationSec);
+            // 还在横幅上就结束了（对方取消 / 自己拒绝）：收起即可，不弹结束态——与 Web 一致。
+            banner_->hide();
             dial_->setDialingEnabled(true);
           });
 
@@ -402,6 +411,12 @@ void MainWindow::wireCall() {
   connect(overlay_, &CallOverlay::leaveRoomRequested, this, [this] { bridge_->leaveRoom(); });
   connect(overlay_, &CallOverlay::notice, this, &MainWindow::toast);
   connect(overlay_, &CallOverlay::closed, this, &MainWindow::hideOverlay);
+
+  // 横幅上的接听 / 拒绝与浮层上的是同一条路；点本体只是换成浮层，不动通话状态。
+  connect(banner_, &IncomingBanner::expandRequested, this, &MainWindow::showOverlay);
+  connect(banner_, &IncomingBanner::acceptRequested, this, [this] { bridge_->accept(); });
+  connect(banner_, &IncomingBanner::rejectRequested, this, [this] { bridge_->reject(); });
+  connect(banner_, &IncomingBanner::notice, this, &MainWindow::toast);
 }
 
 void MainWindow::wireRoom() {
@@ -436,8 +451,8 @@ void MainWindow::wireRoom() {
           });
 
   connect(bridge_, &EngineBridge::roomJoined, this, [this](const QString& roomId) {
-    // 通话那条路的进房不该再弹一次浮窗——那时候浮窗已经开着了。
-    if (overlay_->isVisible()) return;
+    // 通话那条路的进房不该再弹一次浮窗——那时候浮窗（或还没点开的横幅）已经开着了。
+    if (overlay_->isVisible() || banner_->isVisible()) return;
     overlay_->beginRoom(roomId);
     showOverlay();
     dial_->setDialingEnabled(false);
@@ -469,12 +484,14 @@ void MainWindow::commitRecord(const QString& callId, const QString& reason, qint
 }
 
 void MainWindow::showOverlay() {
+  banner_->hide();
   centerOverlay();
   overlay_->show();
   overlay_->raise();
 }
 
 void MainWindow::hideOverlay() {
+  banner_->hide();
   overlay_->hide();
   dial_->setDialingEnabled(bridge_->isEngineAlive());
 }
@@ -490,16 +507,20 @@ void MainWindow::toast(const QString& message) {
   const int maxWidth = qMin(420, width() - 40);
   toast_->setFixedWidth(qMin(toast_->width(), maxWidth));
   toast_->adjustSize();
-  toast_->move((width() - toast_->width()) / 2, 16);
+  toast_->move((width() - toast_->width()) / 2, toastTop());
   toast_->show();
   toast_->raise();
   toastTimer_->start();
 }
 
+int MainWindow::toastTop() const {
+  return banner_->isVisible() ? banner_->geometry().bottom() + 9 : 16;
+}
+
 void MainWindow::resizeEvent(QResizeEvent* event) {
   QWidget::resizeEvent(event);
   centerOverlay();
-  if (toast_->isVisible()) toast_->move((width() - toast_->width()) / 2, 16);
+  if (toast_->isVisible()) toast_->move((width() - toast_->width()) / 2, toastTop());
 }
 
 void MainWindow::changeEvent(QEvent* event) {

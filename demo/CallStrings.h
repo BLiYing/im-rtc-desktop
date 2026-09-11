@@ -30,6 +30,12 @@ QString callerEndText(const QString& reason);
 /** 通话记录里那一行摘要：呼出 · 03:21 / 未接来电 · 视频 / 群通话 · 6 人。 */
 QString recordSummary(const CallRecord& record);
 
+/**
+ * 来电邀请语：邀请你视频通话 / 邀请你语音通话 / 邀请你加入群通话。
+ * 横幅与来电浮层共用这一句，与 Web 的 `incomingInviteText` 同一张表。
+ */
+QString incomingInviteText(bool isVideo, bool isGroup);
+
 /** 记录行的时间列：今天显示 hh:mm，昨天显示「昨天」，更早显示 M月d日。 */
 QString recordTimestamp(const CallRecord& record);
 

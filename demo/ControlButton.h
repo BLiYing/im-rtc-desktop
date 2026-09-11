@@ -47,6 +47,12 @@ public:
    */
   void setBlocked(const QString& reason);
 
+  /**
+   * 紧凑版：38 圆、不画说明字（来电横幅，UI_SPEC §06）。
+   * 说明字照样要设——看不见了，它就是悬停提示与无障碍标签的唯一来源。
+   */
+  void setCompact(bool compact);
+
   QSize sizeHint() const override;
 
 signals:
@@ -60,8 +66,10 @@ protected:
 private:
   int diameter() const;
   int iconSize() const;
+  void syncCompactLabels();
 
   Kind kind_;
+  bool compact_ = false;
   icons::Name idleSymbol_ = icons::Name::Mic;
   icons::Name onSymbol_ = icons::Name::MicSlash;
   QString idleCaption_;

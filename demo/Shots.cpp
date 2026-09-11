@@ -27,6 +27,7 @@
 #include "CallOverlay.h"
 #include "DialPage.h"
 #include "HistoryPage.h"
+#include "IncomingBanner.h"
 #include "Language.h"
 #include "LoginPage.h"
 #include "SettingsPage.h"
@@ -150,6 +151,15 @@ int main(int argc, char** argv) {
   incoming.beginIncoming(QStringLiteral("carol"), {QStringLiteral("alice")},
                          QStringLiteral("video"), false);
   shoot(&incoming, dir, QStringLiteral("06-call-incoming%1").arg(suffix));
+
+  // 窗内来电横幅（UX_FLOWS §07 v3.7）：放在跟随系统的主界面底色上截，才看得出卡片与阴影。
+  {
+    QWidget host;
+    host.resize(520, 110);
+    auto* banner = new IncomingBanner(&host);
+    banner->showCall(QStringLiteral("carol"), QStringLiteral("video"), false);
+    shoot(&host, dir, QStringLiteral("06-call-incoming-banner%1").arg(suffix));
+  }
 
   CallOverlay connected;
   connected.setSelfUid(QStringLiteral("alice"));

@@ -39,8 +39,22 @@ void ControlButton::setSymbols(icons::Name idle, icons::Name on) {
 void ControlButton::setCaptions(const QString& idle, const QString& on) {
   idleCaption_ = idle;
   onCaption_ = on;
+  syncCompactLabels();
   updateGeometry();
   update();
+}
+
+void ControlButton::setCompact(bool compact) {
+  compact_ = compact;
+  syncCompactLabels();
+  updateGeometry();
+  update();
+}
+
+void ControlButton::syncCompactLabels() {
+  if (!compact_) return;
+  setToolTip(idleCaption_);
+  setAccessibleName(idleCaption_);
 }
 
 void ControlButton::setOn(bool on) {
@@ -58,15 +72,18 @@ void ControlButton::setBlocked(const QString& reason) {
 }
 
 int ControlButton::diameter() const {
+  if (compact_) return theme::metric::kBannerButton;
   // 只有终止类动作放大到 64（§04）。
   return kind_ == Kind::Toggle ? theme::metric::kControl : theme::metric::kControlLarge;
 }
 
 int ControlButton::iconSize() const {
+  if (compact_) return theme::metric::kBannerIcon;
   return kind_ == Kind::Toggle ? theme::metric::kIcon : theme::metric::kIconLarge;
 }
 
 QSize ControlButton::sizeHint() const {
+  if (compact_) return QSize(diameter(), diameter());
   const bool hasCaption = !idleCaption_.isEmpty();
   // **两份文案都要量**：只量开启态的话，「共享屏幕」这种常态更长的按钮会被切掉
   // （英文更明显：Share screen vs Sharing）。
@@ -140,7 +157,9 @@ void ControlButton::paintEvent(QPaintEvent* event) {
   const int size = diameter();
   // 圆在「大按钮高度」这条带里垂直居中，说明字统一画在带下方——
   // 这样 56 的静音与 64 的挂断，说明字在同一条基线上。
-  const QRect circle((width() - size) / 2, (theme::metric::kControlLarge - size) / 2, size, size);
+  // 紧凑版没有说明字，圆直接在整个控件里居中。
+  const int band = compact_ ? height() : theme::metric::kControlLarge;
+  const QRect circle((width() - size) / 2, (band - size) / 2, size, size);
 
   QPainter painter(this);
   painter.setRenderHint(QPainter::Antialiasing, true);
@@ -162,7 +181,7 @@ void ControlButton::paintEvent(QPaintEvent* event) {
   painter.restore();
 
   const QString caption = on_ ? onCaption_ : idleCaption_;
-  if (!caption.isEmpty()) {
+  if (!caption.isEmpty() && !compact_) {
     painter.setFont(theme::type::c2());
     painter.setPen(theme::call::fgDim());
     const int top = theme::metric::kControlLarge + theme::metric::kControlCaptionGap;

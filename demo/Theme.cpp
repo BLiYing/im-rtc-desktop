@@ -33,6 +33,8 @@ QColor accept() { return QColor(0x3D, 0xDC, 0x84); }
 QColor fg() { return QColor(0xFF, 0xFF, 0xFF); }
 QColor fgDim() { return QColor(255, 255, 255, 179); }    // 70% → 179/255
 QColor warn() { return QColor(0xF5, 0xA6, 0x23); }
+QColor banner() { return QColor(0x1E, 0x23, 0x30); }
+QColor bannerShadow() { return QColor(0, 0, 0, 115); }  // 45% → 115/255
 
 }  // namespace call
 
