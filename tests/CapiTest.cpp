@@ -1,3 +1,4 @@
+#include <cstddef>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -196,6 +197,46 @@ IMRTC_TEST(capiObserverStructSize, "C ABI —— 回调表的 struct_size 也是
   stale.struct_size = 8;
   CHECK_EQ(imrtc_v1_engine_set_observer(engine, &stale), std::int32_t{IMRTC_V1_ERR_BAD_PARAMS},
            "回调表太旧要拒");
+
+  imrtc_v1_engine_destroy(engine);
+}
+
+IMRTC_TEST(capiObserverBackwardCompatWithoutDisconnectedEx,
+           "C ABI —— on_disconnected_ex 是追加字段，旧宿主更小的 struct_size 不该被拒") {
+  imrtc_v1_options options = makeOptions();
+  imrtc_v1_engine* engine = nullptr;
+  CHECK_EQ(imrtc_v1_engine_create(&options, &engine), std::int32_t{IMRTC_V1_OK}, "create");
+
+  /*
+    模拟一个 2026-09-15 之前编译的旧宿主：它的头里根本没有 on_disconnected_ex
+    这个字段，struct_size 天然只到 on_room_closed 那里为止。这里没法真的声明
+    一份更小的旧结构体类型（那需要另一份旧头），就用现在这份头造一个 observer，
+    再把 struct_size 改小去模拟「宿主那份内存只有这么大」——
+    引擎必须只信 struct_size 以内的字节，不能因为新增了字段就把旧宿主拒之门外，
+    否则「只追加不删除」的 ABI 承诺就是一句空话。
+  */
+  Counters counters;
+  imrtc_v1_observer legacy{};
+  legacy.struct_size = static_cast<std::uint32_t>(offsetof(imrtc_v1_observer, on_disconnected_ex));
+  legacy.user_data = &counters;
+  legacy.on_disconnected = &onDisconnectedCb;
+  CHECK_EQ(imrtc_v1_engine_set_observer(engine, &legacy), std::int32_t{IMRTC_V1_OK},
+           "旧宿主的 struct_size（不含新字段）应当被接受");
+
+  imrtc_v1_engine_destroy(engine);
+}
+
+IMRTC_TEST(capiMicrophoneAliases,
+           "C ABI —— imrtc_v1_open/close_microphone 与旧的 open/close_mic 语义一致") {
+  imrtc_v1_options options = makeOptions();
+  imrtc_v1_engine* engine = nullptr;
+  CHECK_EQ(imrtc_v1_engine_create(&options, &engine), std::int32_t{IMRTC_V1_OK}, "create");
+
+  CHECK_EQ(imrtc_v1_open_microphone(engine), std::int32_t{IMRTC_V1_OK}, "open_microphone");
+  CHECK_EQ(imrtc_v1_close_microphone(engine), std::int32_t{IMRTC_V1_OK}, "close_microphone");
+  // 旧名字保留做已弃用别名，行为必须与新名字完全一样。
+  CHECK_EQ(imrtc_v1_open_mic(engine), std::int32_t{IMRTC_V1_OK}, "open_mic 别名照旧能用");
+  CHECK_EQ(imrtc_v1_close_mic(engine), std::int32_t{IMRTC_V1_OK}, "close_mic 别名照旧能用");
 
   imrtc_v1_engine_destroy(engine);
 }

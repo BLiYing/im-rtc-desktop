@@ -161,7 +161,7 @@ signals:
   void callEnded(const QString& callId, const QString& reason, qint64 durationSec,
                  const QString& endedBy);
   void callMissed(const QString& callId, const QString& caller, const QString& reason);
-  void callCancelled(const QString& by);
+  void callCancelled(const QString& uid);
   void callRejected(const QString& uid);
   void callBusy(const QString& uid);
   void callNoAnswer(const QString& uid);
@@ -185,7 +185,7 @@ signals:
 private:
   /* ---- imrtc::capi::Observer。全部只做「翻译成信号」这一件事。 ---- */
   void onConnected(const std::string& sessionId, bool resumed) override;
-  void onDisconnected() override;
+  void onDisconnected(std::int32_t code, bool willReconnect) override;
   void onKickedOut(imrtc_v1_kicked_reason reason) override;
   void onError(std::int32_t code, const std::string& name, const std::string& forType) override;
   void onCallReceived(const std::string& callId, const std::string& caller,
@@ -196,10 +196,10 @@ private:
                    const std::string& caller, const std::string& chatGroupId,
                    const std::string& userData) override;
   void onCallEnd(const std::string& callId, const std::string& reason, std::int64_t durationSec,
-                 const std::string& endedBy) override;
+                 const std::string& endedBy, imrtc_v1_end_reason reasonCode) override;
   void onCallMissed(const std::string& callId, const std::string& caller,
                     const std::string& reason) override;
-  void onCallCancelled(const std::string& by) override;
+  void onCallCancelled(const std::string& uid) override;
   void onCallRejected(const std::string& uid) override;
   void onCallBusy(const std::string& uid) override;
   void onCallNoAnswer(const std::string& uid) override;

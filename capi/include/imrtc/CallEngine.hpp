@@ -88,7 +88,15 @@ public:
   virtual ~Observer() = default;
 
   virtual void onConnected(const std::string& sessionId, bool resumed) { (void)sessionId; (void)resumed; }
-  virtual void onDisconnected() {}
+  /**
+   * 断线。`code` 是 WebSocket 关闭码，`willReconnect` 是引擎判断的这次断开
+   * 会不会自动重连（2026-09-15 追加）。链到旧引擎（不认识 `on_disconnected_ex`）
+   * 时两者拿不到，收到的是 `(0, false)`。
+   */
+  virtual void onDisconnected(std::int32_t code, bool willReconnect) {
+    (void)code;
+    (void)willReconnect;
+  }
   /** 被踢 / 鉴权用尽 / 握手被拒。`reason` 决定宿主该做什么，见 imrtc_v1_kicked_reason。 */
   virtual void onKickedOut(imrtc_v1_kicked_reason reason) { (void)reason; }
   virtual void onError(std::int32_t code, const std::string& name, const std::string& forType) {
@@ -110,20 +118,22 @@ public:
                            const std::string& chatGroupId, const std::string& userData) {
     (void)callId; (void)roomId; (void)role; (void)caller; (void)chatGroupId; (void)userData;
   }
+  /** `reasonCode` 是 `reason` 的类型化版本，同一份数据，二选一即可（2026-09-15 追加）。 */
   virtual void onCallEnd(const std::string& callId, const std::string& reason,
-                         std::int64_t durationSec, const std::string& endedBy) {
-    (void)callId; (void)reason; (void)durationSec; (void)endedBy;
+                         std::int64_t durationSec, const std::string& endedBy,
+                         imrtc_v1_end_reason reasonCode) {
+    (void)callId; (void)reason; (void)durationSec; (void)endedBy; (void)reasonCode;
   }
   /** 通话中被第三个人呼叫、服务端已替你回了忙线。**不是**一次需要你处理的来电。 */
   virtual void onCallMissed(const std::string& callId, const std::string& caller,
                             const std::string& reason) {
     (void)callId; (void)caller; (void)reason;
   }
-  virtual void onCallCancelled(const std::string& by) { (void)by; }
+  virtual void onCallCancelled(const std::string& uid) { (void)uid; }
   virtual void onCallRejected(const std::string& uid) { (void)uid; }
   virtual void onCallBusy(const std::string& uid) { (void)uid; }
   virtual void onCallNoAnswer(const std::string& uid) { (void)uid; }
-  /** 同一账号的另一台设备接了或拒了。action 是 "accepted" / "rejected"。 */
+  /** 同一账号的另一台设备接了或拒了。action 是 "accept" / "reject"。 */
   virtual void onHandledOnOtherDevice(const std::string& callId, const std::string& action) {
     (void)callId; (void)action;
   }
@@ -182,7 +192,8 @@ public:
     table.struct_size = sizeof(table);
     table.user_data = this;
     table.on_connected = &Engine::cbConnected;
-    table.on_disconnected = &Engine::cbDisconnected;
+    table.on_disconnected = &Engine::cbDisconnected;  // 兜底：链到不认识 _ex 的旧引擎时用
+    table.on_disconnected_ex = &Engine::cbDisconnectedEx;
     table.on_kicked_out = &Engine::cbKickedOut;
     table.on_error = &Engine::cbError;
     table.on_call_received = &Engine::cbCallReceived;
@@ -261,8 +272,10 @@ public:
     return call(imrtc_v1_set_remote_layer(handle_, uid.c_str(), layer.c_str()));
   }
 
-  Error openMic() { return call(imrtc_v1_open_mic(handle_)); }
-  Error closeMic() { return call(imrtc_v1_close_mic(handle_)); }
+  /** 开麦克风。**不是 unpublish**，轨道与协商都保留。 */
+  Error openMicrophone() { return call(imrtc_v1_open_microphone(handle_)); }
+  /** 关麦克风。 */
+  Error closeMicrophone() { return call(imrtc_v1_close_microphone(handle_)); }
   Error openCamera() { return call(imrtc_v1_open_camera(handle_)); }
   Error closeCamera() { return call(imrtc_v1_close_camera(handle_)); }
   /** attachView：Windows 传 `HWND`、macOS 传 `NSView*`；传 nullptr 卸载。 */
@@ -316,7 +329,12 @@ private:
     if (Observer* o = self(u)) o->onConnected(text(sessionId), resumed != 0);
   }
   static void cbDisconnected(void* u) {
-    if (Observer* o = self(u)) o->onDisconnected();
+    // 只在链到旧引擎（没有 on_disconnected_ex）时才会被调到，拿不到关闭码与
+    // willReconnect，如实报成 (0, false)。
+    if (Observer* o = self(u)) o->onDisconnected(0, false);
+  }
+  static void cbDisconnectedEx(void* u, std::int32_t code, imrtc_v1_bool willReconnect) {
+    if (Observer* o = self(u)) o->onDisconnected(code, willReconnect != 0);
   }
   static void cbKickedOut(void* u, imrtc_v1_kicked_reason reason) {
     if (Observer* o = self(u)) o->onKickedOut(reason);
@@ -341,15 +359,16 @@ private:
   static void cbCallEnd(void* u, const imrtc_v1_call_end* end) {
     Observer* o = self(u);
     if (o == nullptr || end == nullptr) return;
-    o->onCallEnd(text(end->call_id), text(end->reason), end->duration_sec, text(end->ended_by));
+    o->onCallEnd(text(end->call_id), text(end->reason), end->duration_sec, text(end->ended_by),
+                end->reason_code);
   }
   static void cbCallMissed(void* u, const imrtc_v1_call_missed* missed) {
     Observer* o = self(u);
     if (o == nullptr || missed == nullptr) return;
     o->onCallMissed(text(missed->call_id), text(missed->caller), text(missed->reason));
   }
-  static void cbCallCancelled(void* u, const char* by) {
-    if (Observer* o = self(u)) o->onCallCancelled(text(by));
+  static void cbCallCancelled(void* u, const char* uid) {
+    if (Observer* o = self(u)) o->onCallCancelled(text(uid));
   }
   static void cbCallRejected(void* u, const char* uid) {
     if (Observer* o = self(u)) o->onCallRejected(text(uid));

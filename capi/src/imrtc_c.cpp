@@ -1,15 +1,19 @@
 #include "imrtc/imrtc_c.h"
 
 #include <algorithm>
+#include <cstddef>
+#include <cstring>
 #include <memory>
 #include <string>
 #include <vector>
 
 #include "imrtc/CallEngine.h"
-#include "imrtc/Enums.h"
 #include "imrtc/Errors.h"
 #include "imrtc/Log.h"
 #include "imrtc/IxTransport.h"
+
+#include "CApiConvert.h"
+#include "CObserver.h"
 
 /**
  * C++ → C 的转换层。**异常在这里被吃掉转成错误码**（CONVENTIONS §2 红线 5）。
@@ -17,241 +21,23 @@
  * 这一层刻意很薄：它不做任何决策，只做三件事——查参数、转类型、接异常。
  * 一旦这里出现「如果…就…」的业务判断，那条判断就只对 C 宿主生效，
  * 而 Qt Demo 也走这条路，两边行为就会漂。
+ *
+ * `CObserver`（回调表转发）与两套枚举之间的转换函数拆到了 CObserver.{h,cpp} /
+ * CApiConvert.{h,cpp}（CONVENTIONS §3 体量红线），这里只留 `imrtc_v1_engine_*`
+ * 这一族入口点自己的控制流。
  */
 namespace {
 
 using imrtc::CallEngine;
 using imrtc::CallEngineObserver;
 using imrtc::CallEngineOptions;
-
-/** cstr 把可能为空的 C 字符串收成 std::string。**NULL 当空串**，不是错误。 */
-std::string cstr(const char* text) { return text == nullptr ? std::string() : std::string(text); }
-
-/** toBool / fromBool 在 C 的 int32 布尔与 C++ bool 之间转（见头文件里为什么不用 _Bool）。 */
-bool toBool(imrtc_v1_bool value) { return value != 0; }
-imrtc_v1_bool fromBool(bool value) { return value ? 1 : 0; }
-
-/**
- * isValidLayer 认协议 §3.5 的那四个值。
- *
- * **名单从 `imrtc::layers()` 读，不在这里再抄一份**——协议加一个层的时候，
- * 抄本会静默地把新值挡在门外，而症状是「宿主报了 h，画面还是 m」这种没人查得动的事。
- */
-bool isValidLayer(const std::string& layer) {
-  const imrtc::EnumValues& allowed = imrtc::layers();
-  return std::find(allowed.begin(), allowed.end(), layer) != allowed.end();
-}
-
-std::vector<std::string> toStrings(const char* const* items, std::uint32_t count) {
-  std::vector<std::string> out;
-  if (items == nullptr) return out;
-  out.reserve(count);
-  for (std::uint32_t i = 0; i < count; ++i) out.push_back(cstr(items[i]));
-  return out;
-}
-
-/** toLogLevel / fromLogLevel 在两套枚举之间互转。数值同序，但不许靠这个偷懒。 */
-imrtc_v1_log_level toLogLevel(imrtc::LogLevel level) {
-  switch (level) {
-    case imrtc::LogLevel::Debug: return IMRTC_V1_LOG_DEBUG;
-    case imrtc::LogLevel::Warn: return IMRTC_V1_LOG_WARN;
-    case imrtc::LogLevel::Error: return IMRTC_V1_LOG_ERROR;
-    case imrtc::LogLevel::Info: break;
-  }
-  return IMRTC_V1_LOG_INFO;
-}
-
-imrtc::LogLevel fromLogLevel(imrtc_v1_log_level level) {
-  switch (level) {
-    case IMRTC_V1_LOG_DEBUG: return imrtc::LogLevel::Debug;
-    case IMRTC_V1_LOG_WARN: return imrtc::LogLevel::Warn;
-    case IMRTC_V1_LOG_ERROR: return imrtc::LogLevel::Error;
-    case IMRTC_V1_LOG_INFO: break;
-  }
-  return imrtc::LogLevel::Info;
-}
-
-/** toKickedReason 把引擎枚举摊成 C 枚举。**显式列全**，加了新值编译器会提醒。 */
-imrtc_v1_kicked_reason toKickedReason(imrtc::KickedReason reason) {
-  switch (reason) {
-    case imrtc::KickedReason::AuthExpired: return IMRTC_V1_KICKED_AUTH_EXPIRED;
-    case imrtc::KickedReason::ConfigRejected: return IMRTC_V1_KICKED_CONFIG_REJECTED;
-    case imrtc::KickedReason::TakenOver: break;
-  }
-  return IMRTC_V1_KICKED_TAKEN_OVER;
-}
-
-/**
- * CObserver 把 §7.5 的回调表转发到 C 的函数指针。
- *
- * **每个回调都先判空**：宿主只关心几个事件是常态，留 NULL 不该崩。
- * 字符串直接用 std::string::c_str()——它们活到回调返回为止，正是头文件承诺的
- * 「指针只在该次回调期间有效」。
- */
-class CObserver : public CallEngineObserver {
-public:
-  explicit CObserver(const imrtc_v1_observer& table) : table_(table) {}
-
-  void onConnected(const std::string& sessionId, bool resumed) override {
-    if (table_.on_connected) table_.on_connected(table_.user_data, sessionId.c_str(), fromBool(resumed));
-  }
-  void onDisconnected() override {
-    if (table_.on_disconnected) table_.on_disconnected(table_.user_data);
-  }
-  void onKickedOut(imrtc::KickedReason reason) override {
-    if (table_.on_kicked_out) table_.on_kicked_out(table_.user_data, toKickedReason(reason));
-  }
-  void onError(std::int32_t code, const std::string& name, const std::string& forType) override {
-    if (table_.on_error) table_.on_error(table_.user_data, code, name.c_str(), forType.c_str());
-  }
-
-  void onCallReceived(const imrtc::CallInvite& invite) override {
-    if (!table_.on_call_received) return;
-    // 字符串数组要摊成 const char* 的连续数组：C 那边收的是指针 + 长度。
-    std::vector<const char*> ids;
-    ids.reserve(invite.calleeIds.size());
-    for (const std::string& id : invite.calleeIds) ids.push_back(id.c_str());
-
-    imrtc_v1_call_invite out{};
-    out.struct_size = sizeof(out);
-    out.call_id = invite.callId.c_str();
-    out.caller = invite.caller.c_str();
-    out.callee_ids = ids.empty() ? nullptr : ids.data();
-    out.callee_count = static_cast<std::uint32_t>(ids.size());
-    out.media_type = invite.mediaType.c_str();
-    out.is_group = fromBool(invite.isGroup);
-    out.chat_group_id = invite.chatGroupId.c_str();
-    out.user_data = invite.userData.c_str();
-    table_.on_call_received(table_.user_data, &out);
-  }
-
-  void onCallBegin(const imrtc::CallBegin& begin) override {
-    if (!table_.on_call_begin) return;
-    imrtc_v1_call_begin out{};
-    out.struct_size = sizeof(out);
-    out.call_id = begin.callId.c_str();
-    out.room_id = begin.roomId.c_str();
-    out.media_type = begin.mediaType.c_str();
-    out.is_group = fromBool(begin.isGroup);
-    out.role = begin.role.c_str();
-    out.caller = begin.caller.c_str();
-    out.chat_group_id = begin.chatGroupId.c_str();
-    out.user_data = begin.userData.c_str();
-    table_.on_call_begin(table_.user_data, &out);
-  }
-
-  void onCallEnd(const imrtc::CallEnd& end) override {
-    if (!table_.on_call_end) return;
-    imrtc_v1_call_end out{};
-    out.struct_size = sizeof(out);
-    out.call_id = end.callId.c_str();
-    out.reason = end.reason.c_str();
-    out.duration_sec = end.durationSec;
-    out.ended_by = end.endedBy.c_str();
-    table_.on_call_end(table_.user_data, &out);
-  }
-
-  void onCallMissed(const imrtc::CallMissed& missed) override {
-    if (!table_.on_call_missed) return;
-    imrtc_v1_call_missed out{};
-    out.struct_size = sizeof(out);
-    out.call_id = missed.callId.c_str();
-    out.caller = missed.caller.c_str();
-    out.reason = missed.reason.c_str();
-    table_.on_call_missed(table_.user_data, &out);
-  }
-
-  void onCallCancelled(const std::string& by) override { one(table_.on_call_cancelled, by); }
-  void onCallRejected(const std::string& uid) override { one(table_.on_call_rejected, uid); }
-  void onCallBusy(const std::string& uid) override { one(table_.on_call_busy, uid); }
-  void onCallNoAnswer(const std::string& uid) override { one(table_.on_call_no_answer, uid); }
-  void onUserEnter(const std::string& uid) override { one(table_.on_user_enter, uid); }
-  void onUserLeave(const std::string& uid) override { one(table_.on_user_leave, uid); }
-  void onUserAccept(const std::string& uid) override { one(table_.on_user_accept, uid); }
-  void onUserReject(const std::string& uid) override { one(table_.on_user_reject, uid); }
-  void onUserNoResponse(const std::string& uid) override { one(table_.on_user_no_response, uid); }
-  void onRoomJoined(const std::string& roomId) override { one(table_.on_room_joined, roomId); }
-  void onRoomLeft(const std::string& roomId) override { one(table_.on_room_left, roomId); }
-
-  void onHandledOnOtherDevice(const std::string& callId, const std::string& action) override {
-    if (table_.on_handled_on_other_device) {
-      table_.on_handled_on_other_device(table_.user_data, callId.c_str(), action.c_str());
-    }
-  }
-  void onRoomClosed(const std::string& roomId, const std::string& reason) override {
-    if (table_.on_room_closed) {
-      table_.on_room_closed(table_.user_data, roomId.c_str(), reason.c_str());
-    }
-  }
-  void onUserAudioAvailable(const std::string& uid, bool available) override {
-    if (table_.on_user_audio_available) {
-      table_.on_user_audio_available(table_.user_data, uid.c_str(), fromBool(available));
-    }
-  }
-  void onUserVideoAvailable(const std::string& uid, bool available) override {
-    if (table_.on_user_video_available) {
-      table_.on_user_video_available(table_.user_data, uid.c_str(), fromBool(available));
-    }
-  }
-
-  void onActiveSpeakers(const std::vector<imrtc::Speaker>& speakers) override {
-    if (!table_.on_active_speakers) return;
-    std::vector<imrtc_v1_speaker> out;
-    out.reserve(speakers.size());
-    for (const imrtc::Speaker& speaker : speakers) {
-      imrtc_v1_speaker item{};
-      item.struct_size = sizeof(item);
-      item.uid = speaker.uid.c_str();
-      item.participant_id = speaker.participantId.c_str();
-      item.volume = speaker.volume;
-      out.push_back(item);
-    }
-    table_.on_active_speakers(table_.user_data, out.empty() ? nullptr : out.data(),
-                              static_cast<std::uint32_t>(out.size()));
-  }
-
-  void onNetworkQuality(const std::vector<imrtc::QualityEntry>& entries) override {
-    if (!table_.on_network_quality) return;
-    std::vector<imrtc_v1_quality> out;
-    out.reserve(entries.size());
-    for (const imrtc::QualityEntry& entry : entries) {
-      imrtc_v1_quality item{};
-      item.struct_size = sizeof(item);
-      item.uid = entry.uid.c_str();
-      item.participant_id = entry.participantId.c_str();
-      item.level = entry.level;
-      out.push_back(item);
-    }
-    table_.on_network_quality(table_.user_data, out.empty() ? nullptr : out.data(),
-                              static_cast<std::uint32_t>(out.size()));
-  }
-
-private:
-  using OneArg = void (*)(void*, const char*);
-  void one(OneArg fn, const std::string& value) const {
-    if (fn) fn(table_.user_data, value.c_str());
-  }
-
-  imrtc_v1_observer table_;
-};
-
-/*
-  **枚举值必须与 C 头一一对应**。这里直接把 C++ 的枚举强转成 int32 交出去，
-  所以一旦有人重排了 CallState / RoomState 的声明顺序，C 宿主收到的就是**错的状态**
-  ——而且不报错、不崩，只是界面开始胡说八道。下面这组断言让那种改动在编译期就挂掉。
-*/
-static_assert(static_cast<int>(imrtc::CallState::Idle) == IMRTC_V1_CALL_IDLE, "枚举漂了");
-static_assert(static_cast<int>(imrtc::CallState::Inviting) == IMRTC_V1_CALL_INVITING, "枚举漂了");
-static_assert(static_cast<int>(imrtc::CallState::Ringing) == IMRTC_V1_CALL_RINGING, "枚举漂了");
-static_assert(static_cast<int>(imrtc::CallState::Accepting) == IMRTC_V1_CALL_ACCEPTING, "枚举漂了");
-static_assert(static_cast<int>(imrtc::CallState::Connecting) == IMRTC_V1_CALL_CONNECTING, "枚举漂了");
-static_assert(static_cast<int>(imrtc::CallState::Connected) == IMRTC_V1_CALL_CONNECTED, "枚举漂了");
-static_assert(static_cast<int>(imrtc::RoomState::Idle) == IMRTC_V1_ROOM_IDLE, "枚举漂了");
-static_assert(static_cast<int>(imrtc::RoomState::Joining) == IMRTC_V1_ROOM_JOINING, "枚举漂了");
-static_assert(static_cast<int>(imrtc::RoomState::Joined) == IMRTC_V1_ROOM_JOINED, "枚举漂了");
-static_assert(static_cast<int>(imrtc::RoomState::Leaving) == IMRTC_V1_ROOM_LEAVING, "枚举漂了");
-static_assert(static_cast<int>(imrtc::RoomState::Reconnecting) == IMRTC_V1_ROOM_RECONNECTING,
-              "枚举漂了");
+using imrtc::capi_detail::CObserver;
+using imrtc::capi_detail::cstr;
+using imrtc::capi_detail::fromLogLevel;
+using imrtc::capi_detail::isValidLayer;
+using imrtc::capi_detail::toBool;
+using imrtc::capi_detail::toLogLevel;
+using imrtc::capi_detail::toStrings;
 
 }  // namespace
 
@@ -349,9 +135,24 @@ std::int32_t imrtc_v1_engine_set_observer(imrtc_v1_engine* engine,
     engine->engine->setObserver(std::weak_ptr<CallEngineObserver>());
     return IMRTC_V1_OK;
   }
-  if (observer->struct_size < sizeof(imrtc_v1_observer)) return IMRTC_V1_ERR_BAD_PARAMS;
+  /*
+    `on_disconnected_ex` 是 2026-09-15 追加的尾部字段。旧宿主的头里没有它，
+    它的 `struct_size` 天然只到 `on_room_closed` 那里——**最低线要用 offsetof 记，
+    不能用 sizeof(imrtc_v1_observer)**（那是含新字段的现在值）。用现在值的话，
+    旧宿主会被这条新字段直接拒之门外，「只追加不删除」就白追加了。
+  */
+  constexpr std::size_t kMinObserverSize = offsetof(imrtc_v1_observer, on_disconnected_ex);
+  if (observer->struct_size < kMinObserverSize) return IMRTC_V1_ERR_BAD_PARAMS;
   try {
-    engine->observer = std::make_shared<CObserver>(*observer);
+    /*
+      **只拷宿主实际给出的那么多字节，其余（含新字段）保持零初始化的 nullptr**。
+      `CObserver(*observer)` 那种整份结构体拷贝会把 `on_disconnected_ex` 那几个字节
+      读到宿主根本没分配的内存上——旧宿主的 struct 更小，这是未定义行为。
+    */
+    imrtc_v1_observer table{};
+    const std::size_t copyBytes = std::min<std::size_t>(observer->struct_size, sizeof(table));
+    std::memcpy(&table, observer, copyBytes);
+    engine->observer = std::make_shared<CObserver>(table);
     engine->engine->setObserver(engine->observer);
     return IMRTC_V1_OK;
   } catch (...) {
@@ -463,11 +264,17 @@ std::int32_t imrtc_v1_set_remote_layer(imrtc_v1_engine* engine, const char* uid,
   return guard(engine, [=](CallEngine& target) { target.setRemoteLayer(cstr(uid), cstr(layer)); });
 }
 
-std::int32_t imrtc_v1_open_mic(imrtc_v1_engine* engine) {
+std::int32_t imrtc_v1_open_microphone(imrtc_v1_engine* engine) {
   return guard(engine, [](CallEngine& target) { target.openMic(); });
 }
-std::int32_t imrtc_v1_close_mic(imrtc_v1_engine* engine) {
+std::int32_t imrtc_v1_close_microphone(imrtc_v1_engine* engine) {
   return guard(engine, [](CallEngine& target) { target.closeMic(); });
+}
+
+// 已弃用别名：语义与上面两个一字不差，直接转发，不许各写一份判断走漂。
+std::int32_t imrtc_v1_open_mic(imrtc_v1_engine* engine) { return imrtc_v1_open_microphone(engine); }
+std::int32_t imrtc_v1_close_mic(imrtc_v1_engine* engine) {
+  return imrtc_v1_close_microphone(engine);
 }
 std::int32_t imrtc_v1_open_camera(imrtc_v1_engine* engine) {
   return guard(engine, [](CallEngine& target) { target.openCamera(); });

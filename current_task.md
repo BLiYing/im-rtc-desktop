@@ -6,7 +6,39 @@
 
 ## 当前焦点
 
-**宿主对接 M1 + M8（本仓部分）已实现，macOS `test.sh` 八步全绿，Windows 未编译未运行。**
+**2026-09-15 四端 API 命名核对（本仓部分）已落地，macOS `test.sh` 八步全绿（含 Demo），Windows 未编译未运行。**
+
+- `imrtc_v1_call_end` 追加 `imrtc_v1_end_reason reason_code`（与 iOS `IMCallEndReason` 同值，12 个封闭值，陌生值折 ERROR）；
+  引擎侧新增 `imrtc::EndReason` + `endReasonOf()`（`engine/include/imrtc/Reasons.h`），`CallEnd` 结构体追加
+  `reasonCode` 字段；capi 新增 `toEndReason()` 转换 + 12 条 `static_assert`。`CallEngine.hpp::Observer::onCallEnd`
+  末尾追加 `imrtc_v1_end_reason reasonCode` 参数（封装层不受 ABI 约束，直接改签名），Demo/`tools/Smoke.cpp` 同步。
+- `on_call_cancelled` 的参数名 `by` 改成 `uid`（只改名，ABI 不变）：C 头、`CallEngineObserver::onCallCancelled`、
+  capi 的 `CObserver`、`CallEngine.hpp`、Demo 的 `EngineBridge`/`MainWindow` 变量名一起改。
+- 新增 `imrtc_v1_open_microphone` / `imrtc_v1_close_microphone`，旧的 `imrtc_v1_open_mic` / `close_mic` 保留做
+  已弃用别名（直接转发）。`CallEngine.hpp` 的 `openMic()/closeMic()` 直接改名成 `openMicrophone()/closeMicrophone()`
+  （封装层头文件内联，不受 ABI 约束）；`demo/EngineBridge.cpp` 跟着改调用。
+- **评估后落地**：`on_disconnected` 补充关闭码与 willReconnect——engine 的 `Connection` 层本来就有这两样
+  （`ConnectionEvents::onDisconnected(code, reason, willReconnect)`），只是门面此前没往上传。做法：
+  `imrtc_v1_observer` 尾部追加 `on_disconnected_ex(user_data, code, will_reconnect)`；`imrtc_v1_engine_set_observer`
+  的 struct_size 版本闸从「必须等于当前 sizeof」改成「按 `offsetof(observer, on_disconnected_ex)` 判最低线 +
+  `memcpy` 精确拷贝宿主给的字节数」，否则旧宿主（没有这个字段）会被新字段直接拒之门外，UB 风险也没了。
+  内部 `CallEngineObserver::onDisconnected()` 直接改签名加 `(code, willReconnect)` 两个参数（不受 ABI 约束）。
+- **评估后放弃**：`tokenWillExpire` 回调——C++ engine 里没有任何票据到期计时逻辑（`Connection`/`CallEngine` 都不
+  持有过期时刻，只有服务端错误码 1102 `token_expired`），按规矩不为此新写计时器，没加 `on_token_will_expire`。
+  这与 `imrtc_v1_force_end`（也没做）一起，仍是 current_task 里 0.5 那条记着的差距，等专门排期再补。
+- `capi/src/imrtc_c.cpp` 超过 600 行体量红线后拆成三个文件：`imrtc_c.cpp`（入口点控制流，369 行）+
+  `CObserver.{h,cpp}`（回调表转发类）+ `CApiConvert.{h,cpp}`（C/C++ 两套类型与枚举的转换 + 枚举漂移的
+  `static_assert` 哨兵），`capi/CMakeLists.txt` 同步加两个源文件。
+- `demo/MainWindow.cpp` 修了一个真 bug：`handledOnOtherDevice` 的 action 比较值原来写的是 `"accepted"` /
+  `"rejected"`，但 `engine/src/Enums.cpp` 的 `handledActions()` 实际吐的是 `"accept"` / `"reject"`——
+  比较永远不成立，界面永远走「已在其他设备拒绝」那个分支。`imrtc_c.h`/`CallEngine.hpp` 里同名的文档注释一并改正。
+- 新增/改动测试：`tests/CallEngineTest.cpp` 的 `Recorder::onDisconnected` 换新签名，3 处既有断言（含关闭码/
+  willReconnect）与 1 处前缀判断跟着改；新增 `onCallEnd` 的 `reasonCode` 断言。`tests/CapiTest.cpp` 新增
+  「旧宿主 struct_size 不该被新字段拒」与「新旧麦克风函数名等价」两条。跑 `./scripts/test.sh`：**124 个用例全绿**
+  （原 122 + 本轮 2 条新增）、导出面 **33**（原 31 + 2 个新麦克风函数）、C++ 包装头回调覆盖 **26/26**
+  （原 25 + `on_disconnected_ex`），Demo 5 组界面测试全绿。
+
+**宿主对接 M1 + M8（本仓部分，2026-09-14 及之前）**——已实现，仍然有效：
 
 - `chat_group_id` / `user_data` 随 `call()` 一路进 `call.invite`（`inviteFields()`），被叫 `onCallReceived`
   带 `chat_group_id`/`user_data`（`incomingFields()`），接通 `onCallBegin` 带 `caller`/`chat_group_id`/`user_data`
@@ -33,8 +65,8 @@
 **上一轮（2026-09-11，macOS 已手点验，Windows 未编译未运行）**：窗口在后台时的来电提醒（`demo/IncomingAlert`
 等）、设置页「详细日志」+ SDK 1.0.0。
 
-**整体状态**：P5 C ABI + Qt Demo 已交付（macOS `test.sh` 八步全绿）。导出面 31 个 `imrtc_v1_*`（`scripts/check-abi.sh` 守，
-本轮新增 `imrtc_v1_call_ex` 后从 30 涨到 31）；`scripts/smoke.sh` 经 C ABI 对真服务端跑通（本轮未重跑，未改动
+**整体状态**：P5 C ABI + Qt Demo 已交付（macOS `test.sh` 八步全绿）。导出面 33 个 `imrtc_v1_*`（`scripts/check-abi.sh` 守，
+2026-09-15 加了 `imrtc_v1_open_microphone`/`imrtc_v1_close_microphone` 后从 31 涨到 33）；`scripts/smoke.sh` 经 C ABI 对真服务端跑通（本轮未重跑，未改动
 握手/振铃主流程）。**媒体推迟、按纯信令模式交付**：能拨号、进房、收到全部状态回调，就是没有声音和画面。
 还没有：真实媒体（SDP / ICE / 声画）、设备枚举、渲染路径 B（原始帧回调）、共享屏幕、C# 绑定、群通话
 Kit 选人页（M2，桌面没有 Kit，本产品设计已注明不适用）。**Windows 一次都没编译过。**
@@ -43,27 +75,40 @@ Kit 选人页（M2，桌面没有 Kit，本产品设计已注明不适用）。*
 
 0. **宿主对接 M1/M8 收尾**：① Demo 没有做「按 call_id 加入」入口与群号/user_data 的界面展示——
    `EngineBridge`/`Smoke.cpp` 已经把新字段打到日志/信号里，UI 消费留给有余力时再做（`demo/MainWindow.cpp`
-   已经 557/600，`capi/src/imrtc_c.cpp` 562/600，加 UI 前先看体量）。② 提醒维护 `CLIENT_PARITY.md` 的人：
+   560/600，加 UI 前先看体量；`capi/src/imrtc_c.cpp` 2026-09-15 已拆成三个文件，暂时不紧张，见下一步 7）。
+   ② 提醒维护 `CLIENT_PARITY.md` 的人：
    `call.invite_more`/`call.join` 桌面这边其实早就实现了，若那张表桌面列还写 ⬜ 是文档漂了。
    ③ Windows 侧还没编译过，新加的 `imrtc_v1_call_ex`/结构体尾部追加字段也要在 Windows 上过一遍
    `dumpbin /exports` 与联调（见下一条一起排）。
-0.5 **C ABI 与其余三端的两处不对等（2026-09-15 写 `/guide` 时发现，未做）**：
+0.5 **C ABI 与其余三端的两处不对等（2026-09-15 写 `/guide` 时发现，仍未做——命名核对那一轮评估过，见「当前焦点」）**：
    ① **没有 `forceEnd`**：Web / iOS / Android 都有「红键等不到 `callEnd` 时，结束帧立刻上线路、本地立刻收场」的同步兜底，
    C ABI 只能靠 `hangup` / `reject` / `cancel` 等服务端应答；② **observer 没有「票快到期」回调**（其余三端都有，默认提前 60 秒），
    宿主只能自己按 `/v1/tokens` 回的 `expires_at_ms` 定时调 `imrtc_v1_update_token`，且 `update_token` 也没有到期时刻参数。
-   补的时候走追加式：新函数 `imrtc_v1_force_end` + observer 尾部追加 `on_token_will_expire`（`struct_size` 闸兜旧宿主），
-   导出面 31 → 32 要同步 `capi/exported_symbols.txt` 与 `check-abi.sh`；`capi/src/imrtc_c.cpp` 已近 600 行，先拆再加。指南 `/guide/desktop` 的续票与 `/guide/api#force-end` 届时一起改。
+   **②比预想更麻烦**：查过 `Connection`/`CallEngine` 全部状态，本仓压根没有任何票据到期计时逻辑（只有服务端错误码
+   1102 `token_expired` 这个事后信号），所以补 `on_token_will_expire` 不是「加个字段就行」的追加式活，得先在 engine
+   里造一个到期计时器（多半挂在 `tick()` 那条时间线上），形状还没定，不要临时糊一个。
+   ①③ 都还成立：新函数 `imrtc_v1_force_end` + engine 里的到期计时器 + observer 尾部追加 `on_token_will_expire`
+   （`struct_size` 闸兜旧宿主，做法参照 2026-09-15 `on_disconnected_ex` 那次——`offsetof` 判最低线 + `memcpy` 精确拷贝，
+   别用「struct_size 必须等于当前 sizeof」那种会把旧宿主拒之门外的旧写法）。导出面现在是 33，加 `force_end` 会到 34，
+   同步 `capi/exported_symbols.txt`（通配符，不用真的改）与 `scripts/check-abi.sh` 的期待。指南 `/guide/desktop` 的续票与
+   `/guide/api#force-end` 届时一起改。
 1. **到 Windows 上编译并手点**（等机器 / 集成方）。后台来电提醒四条：① 最小化 / 非活动时来电，任务栏按钮持续闪；② 对方取消后立刻停闪、不留橙色高亮；
    ③ 闪着时切回窗口系统自己停，之后接通 / 挂断不出错；④ 气泡靠藏托盘图标收起。设置页详细日志也点一次。
 2. `Shots` 的设置页截图（高度改到 680）没重新生成、没人看过。
 3. 静默失败点清单（P0×2 / P1×4 / P2×6）：`../im-rtc-server/docs/ops/silent-failure/desktop.md`，逐条状态只在那里。
-   未修头两条：`onDisconnected()` 无参把关闭码 / 原因 / willReconnect 全抹平（Demo 永远显示「正在重连…」）、`deps.send` 对非请求帧无条件返回 true。
+   两条里的第一条**数据层已经不缺了**（2026-09-15 加了 `on_disconnected_ex(code, will_reconnect)`，`EngineBridge::onDisconnected`
+   已经能拿到这两个值，目前只落日志），**界面层还没接**——`MainWindow` 收到的还是老的 `disconnected()` 信号（无参），
+   仍然统一显示「正在重连…」；把 `EngineBridge::disconnected` 信号也带上这两个参数、`MainWindow` 按 `will_reconnect`
+   分情况展示，是这条真正意义上的收尾，还没做。第二条没动：`deps.send` 对非请求帧无条件返回 true。
 4. **异步口子的形状**（一次定完，别定出两套风格）：渲染路径 B 原始帧回调 + `probeMicrophone` / `startLocalPreview` 出 C ABI——帧格式（I420/NV12）、内存谁 free、
    30fps 跨 ABI 的回调频率、completion `user_data` 生命周期。实现等媒体，形状现在就能定。
 5. **`WebRTCAdapter`**（推迟，等 Apple Silicon 或 Windows 机器；做完与 Web / iOS 各互打一次）。ICE 重启的信令半边已做完，只剩把 `restartPubICE()` 交给 `createOffer({iceRestart:true})` 并在 offer 生成后清掉。
    规则：各自重启自己 offer 的那条（pub 客户端救、sub 服务端救）；触发用 `failed` 不用 `disconnected`；「要重启」和「要补一次协商」必须分开记。
 6. UX_FLOWS §07 第 1 条（关窗语义）/ 第 2 条（托盘常驻 + 绿点 / 菜单）没排期；说话指示器等媒体面。
-7. 体量预警：`capi/src/imrtc_c.cpp` 538、`demo/MainWindow.cpp` 548（阈值 600，预警线 480），碰之前先看行数。
+7. 体量预警（阈值 600，预警线 480，碰之前先看行数）：`demo/MainWindow.cpp` 560、`capi/include/imrtc/imrtc_c.h` 525、
+   `capi/include/imrtc/CallEngine.hpp` 496。`capi/src/imrtc_c.cpp` 2026-09-15 拆成 `imrtc_c.cpp`（369）+
+   `CObserver.{h,cpp}` + `CApiConvert.{h,cpp}` 之后暂时不紧张，但两个 C++ 头（纯 C 头不好拆、封装头是 header-only）
+   涨得快，真到 600 再想怎么拆。
 8. 日志下一步：环形缓冲 + `exportDiagnostics()`（LOGGING.md §7 的 P3），四端一起定形状。按需：C# / P/Invoke 绑定。
 
 ## 已知坑 / 限制

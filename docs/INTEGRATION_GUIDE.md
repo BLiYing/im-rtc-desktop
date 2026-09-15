@@ -21,7 +21,7 @@ MSVC 与 MinGW 不通、`/MD` 与 `/MT` 不通、Debug 与 Release 的 CRT 不�
 libstdc++ 与 libc++ 不通。导出 C++ 类等于「只服务与我们同工具链的宿主」；
 导出 C 等于 Qt / MFC / WPF+C# / Delphi / Java / Python / Flutter / Swift 都能接。
 
-动态库的导出面只有 **27 个 `imrtc_v1_*` 符号**，有脚本守着（`scripts/check-abi.sh`）。
+动态库的导出面只有 **33 个 `imrtc_v1_*` 符号**，有脚本守着（`scripts/check-abi.sh`）。
 你可以自己核一遍：macOS 用 `dyld_info -exports`，Windows 用 `dumpbin /exports`。
 
 ---
@@ -44,8 +44,9 @@ public:
     // 弹来电页
   }
   void onCallEnd(const std::string& callId, const std::string& reason,
-                 std::int64_t durationSec, const std::string& endedBy) override {
-    // 收界面 + 落一条通话记录
+                 std::int64_t durationSec, const std::string& endedBy,
+                 imrtc_v1_end_reason reasonCode) override {
+    // 收界面 + 落一条通话记录。reasonCode 是 reason 的类型化版本，二选一即可。
   }
 };
 
@@ -151,7 +152,7 @@ create ──► set_observer ──► login ──► [tick tick tick …] ─
 | 回调 | 你该做的 |
 |---|---|
 | `on_connected(session_id, resumed)` | 切到「已连接」。`resumed=true` 表示是断线恢复，不必重建界面 |
-| `on_disconnected` | 显示「正在重连…」。**不要**清空通话——引擎在重连 |
+| `on_disconnected` / `on_disconnected_ex(code, will_reconnect)` | 显示「正在重连…」。**不要**清空通话——引擎在重连。装了 `_ex` 就只会收到它（带关闭码与是否会自动重连），不会再收到旧的 `on_disconnected` |
 | `on_kicked_out` | 回登录页换票。别原地重试，那是拿同一把坏钥匙敲同一扇门 |
 | `on_error(code, name, for_type)` | 见 §5 |
 | `on_call_received(invite)` | 弹来电页 / 来电横幅 |

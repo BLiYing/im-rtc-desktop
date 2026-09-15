@@ -6,7 +6,11 @@
 #
 # 符号可见性在顶层设成 hidden，头文件里的 IMRTC_API 把 imrtc_v1_* 这一族放出来——
 # 别的什么都不导出（CONVENTIONS §2 红线 1）。
-set(IMRTC_CAPI_SOURCES src/imrtc_c.cpp)
+set(IMRTC_CAPI_SOURCES
+  src/imrtc_c.cpp
+  src/CApiConvert.cpp
+  src/CObserver.cpp
+)
 
 add_library(im_rtc_engine_capi SHARED ${IMRTC_CAPI_SOURCES})
 add_library(im_rtc_engine_capi_static STATIC ${IMRTC_CAPI_SOURCES})

@@ -80,10 +80,13 @@ void CallEngine::login(const std::string& token) {
     // 与「重连上了但 resumed=false」同一件事，只是不必等重连成功。
     apply(MachineInput::internal("session_unrecoverable"), "");
   };
-  events.onDisconnected = [this](int code, const std::string&, bool) {
+  events.onDisconnected = [this](int code, const std::string&, bool willReconnect) {
     if (tearingDown_) return;
     const bool kicked = kickedOutPending_ || code == closecode::kKickedOut;
     kickedOutPending_ = false;
+    // 供 emitEvent 在派发 onDisconnected 前补进 args（状态机那条 emit 不知道这两样）。
+    lastDisconnectCode_ = code;
+    lastDisconnectWillReconnect_ = willReconnect;
     // ws_closed_4403 会抛 onKickedOut + onDisconnected 并把一切清空；
     // 普通断开只进 reconnecting，通话要保持在 connected 并展示「正在重连…」（§1.4）。
     apply(MachineInput::internal(kicked ? "ws_closed_4403" : "disconnected"), "");

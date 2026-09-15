@@ -64,6 +64,35 @@ const std::vector<std::string>& groupDominantPriority();
 std::string dominantReason(const std::vector<std::string>& outcomes);
 
 /**
+ * EndReason 是上面那套 reason 字符串的类型化版本，供 C ABI 用（`imrtc_v1_end_reason`），
+ * 与 iOS `IMCallEndReason` 同值，四端对齐。**只是同一份数据的另一种形状**——
+ * 判等 / 拼日志仍然一律用 `reason::k*` 那批字符串常量，它们才是与协议、
+ * 与另外三端比对的单一真相源。
+ */
+enum class EndReason : std::int32_t {
+  Hangup = 0,
+  Cancel = 1,
+  Reject = 2,
+  NoAnswer = 3,
+  Busy = 4,
+  Offline = 5,
+  AnsweredElsewhere = 6,
+  RejectedElsewhere = 7,
+  Kicked = 8,
+  RoomClosed = 9,
+  Network = 10,
+  Error = 11,
+};
+
+/**
+ * endReasonOf 把 §6 的 reason 字符串折成类型化枚举。
+ *
+ * **陌生值折成 Error**——与 `normalizeReason` 同一条兜底逻辑。两者理应总是同步，
+ * 这里再兜一层是防御性的：不能假设调用方一定已经过了 `normalizeReason` 那一步。
+ */
+EndReason endReasonOf(const std::string& reason);
+
+/**
  * callDurationSec 按协议算通话时长：未接通恒为 0，接通则向下取整到秒。
  *
  * **正常路径下客户端不该自己算**——一律用 `call.ended` 帧里的 `duration_sec`

@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "imrtc/Handshake.h"
+#include "imrtc/Reasons.h"
 
 namespace imrtc {
 
@@ -83,6 +84,11 @@ struct CallEnd {
   std::int64_t durationSec = 0;
   /** 动作发起人 uid；服务端自行判定时为空串。 */
   std::string endedBy;
+  /**
+   * `reason` 的类型化版本（2026-09-15 追加），与 C ABI 的 `imrtc_v1_end_reason`
+   * 一一对应。**同一份数据的另一种形状**，不是新信息——陌生值同样折成 `Error`。
+   */
+  EndReason reasonCode = EndReason::Error;
 };
 
 /** CallMissed 对应 `onCallMissed`：通话中被第三个人呼叫，服务端已自动回了忙线。 */
@@ -102,8 +108,16 @@ public:
     (void)sessionId;
     (void)resumed;
   }
-  /** 信令通道断开。Engine 会按退避档自动重连，除非关闭码明说不该重连。 */
-  virtual void onDisconnected() {}
+  /**
+   * 信令通道断开。Engine 会按退避档自动重连，除非关闭码明说不该重连。
+   *
+   * `code` 是 WebSocket 关闭码，`willReconnect` 是引擎判断的这次断开会不会自动
+   * 重连（2026-09-15 追加，desktop 的 `Connection` 层本来就知道这两样）。
+   */
+  virtual void onDisconnected(std::int32_t code, bool willReconnect) {
+    (void)code;
+    (void)willReconnect;
+  }
   /**
    * 被踢、鉴权连续失败到上限、或握手被拒。**不会自动重连，只能重新 login。**
    *
@@ -129,7 +143,7 @@ public:
   /** 通话中有人打进来、已被自动回忙线。界面据此提示一句谁来过电话。 */
   virtual void onCallMissed(const CallMissed& missed) { (void)missed; }
   /** 便利事件：主叫取消。**随后必有一条 onCallEnd**（不变量 I2）。 */
-  virtual void onCallCancelled(const std::string& by) { (void)by; }
+  virtual void onCallCancelled(const std::string& uid) { (void)uid; }
   /** 便利事件：被叫拒接。**只在 1v1 抛**（不变量 I7）。 */
   virtual void onCallRejected(const std::string& uid) { (void)uid; }
   /** 便利事件：被叫忙线。**只在 1v1 抛**。 */

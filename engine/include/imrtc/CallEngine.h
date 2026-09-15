@@ -273,6 +273,15 @@ private:
    */
   KickedReason kickedReason_ = KickedReason::TakenOver;
   /**
+   * 上一次断开的 WebSocket 关闭码与「会不会自动重连」，由 Connection 给出。
+   *
+   * **同样绕开状态机**：道理与 kickedReason_ 一样——`onDisconnected` 那条 emit
+   * 的 args 在一致性向量里是 `{}`，状态机不知道关闭码是多少，门面在派发前补进 args
+   * （见 CallEngineEvents.cpp 的 emitEvent）。
+   */
+  std::int32_t lastDisconnectCode_ = 0;
+  bool lastDisconnectWillReconnect_ = false;
+  /**
    * sendDepth_ 是「正在几层发帧循环里」。>0 意味着**这一层还没轮到抛事件**，
    * 此刻产生的任何事件都要攒进 deferredEmits_，等最外层 unwind 之后再放。
    * 见 dispatchOutput 的长注释。

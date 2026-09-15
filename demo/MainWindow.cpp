@@ -369,7 +369,7 @@ void MainWindow::wireCall() {
   connect(bridge_, &EngineBridge::callRejected, this,
           [logConvenience](const QString& uid) { logConvenience("onCallRejected", uid); });
   connect(bridge_, &EngineBridge::callCancelled, this,
-          [logConvenience](const QString& by) { logConvenience("onCallCancelled", by); });
+          [logConvenience](const QString& uid) { logConvenience("onCallCancelled", uid); });
   connect(bridge_, &EngineBridge::callMissed, this,
           [this](const QString& callId, const QString& caller, const QString& reason) {
             // 通话中被第三个人呼叫，服务端已经替我们回了忙线——**不要弹来电页**。
@@ -387,8 +387,11 @@ void MainWindow::wireCall() {
   connect(bridge_, &EngineBridge::handledOnOtherDevice, this,
           [this](const QString& callId, const QString& action) {
             Q_UNUSED(callId);
-            toast(action == QLatin1String("accepted") ? tr("已在其他设备接听")
-                                                      : tr("已在其他设备拒绝"));
+            // handled action 的真实取值是 "accept" / "reject"（engine/src/Enums.cpp 的
+            // handledActions()），不是 "accepted" / "rejected"——这里原先按后者比较，
+            // 永远走不进「已接听」分支，2026-09-15 四端命名核对时改正。
+            toast(action == QLatin1String("accept") ? tr("已在其他设备接听")
+                                                    : tr("已在其他设备拒绝"));
             hideOverlay();
           });
 

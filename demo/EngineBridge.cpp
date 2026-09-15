@@ -230,8 +230,12 @@ void EngineBridge::onConnected(const std::string& sessionId, bool resumed) {
   emit connected(qs(sessionId), resumed);
 }
 
-void EngineBridge::onDisconnected() {
+void EngineBridge::onDisconnected(std::int32_t code, bool willReconnect) {
   assertOnGuiThread("onDisconnected");
+  // 关闭码与 willReconnect 先落日志：demo/docs/ops/silent-failure/desktop.md 记的
+  // P1「onDisconnected 无参把关闭码/willReconnect 全抹平」还没排到界面这一半，
+  // 这里先把数据留住，MainWindow 仍然按老样子统一显示「正在重连…」。
+  qCInfo(lcBridge, "onDisconnected code=%d willReconnect=%d", code, willReconnect ? 1 : 0);
   emit disconnected();
 }
 
@@ -273,10 +277,11 @@ void EngineBridge::onCallBegin(const std::string& callId, const std::string& roo
 }
 
 void EngineBridge::onCallEnd(const std::string& callId, const std::string& reason,
-                             std::int64_t durationSec, const std::string& endedBy) {
+                             std::int64_t durationSec, const std::string& endedBy,
+                             imrtc_v1_end_reason reasonCode) {
   assertOnGuiThread("onCallEnd");
-  qCInfo(lcBridge, "onCallEnd call=%s reason=%s duration=%lld", callId.c_str(), reason.c_str(),
-         static_cast<long long>(durationSec));
+  qCInfo(lcBridge, "onCallEnd call=%s reason=%s reason_code=%d duration=%lld", callId.c_str(),
+         reason.c_str(), static_cast<int>(reasonCode), static_cast<long long>(durationSec));
   emit callEnded(qs(callId), qs(reason), durationSec, qs(endedBy));
 }
 
@@ -286,9 +291,9 @@ void EngineBridge::onCallMissed(const std::string& callId, const std::string& ca
   emit callMissed(qs(callId), qs(caller), qs(reason));
 }
 
-void EngineBridge::onCallCancelled(const std::string& by) {
+void EngineBridge::onCallCancelled(const std::string& uid) {
   assertOnGuiThread("onCallCancelled");
-  emit callCancelled(qs(by));
+  emit callCancelled(qs(uid));
 }
 
 void EngineBridge::onCallRejected(const std::string& uid) {
@@ -437,10 +442,10 @@ qint32 EngineBridge::setRemoteLayer(const QString& uid, const QString& layer) {
 }
 
 qint32 EngineBridge::openMic() {
-  return engine_ ? engine_->openMic().code() : IMRTC_V1_ERR_INVALID_STATE;
+  return engine_ ? engine_->openMicrophone().code() : IMRTC_V1_ERR_INVALID_STATE;
 }
 qint32 EngineBridge::closeMic() {
-  return engine_ ? engine_->closeMic().code() : IMRTC_V1_ERR_INVALID_STATE;
+  return engine_ ? engine_->closeMicrophone().code() : IMRTC_V1_ERR_INVALID_STATE;
 }
 qint32 EngineBridge::openCamera() {
   return engine_ ? engine_->openCamera().code() : IMRTC_V1_ERR_INVALID_STATE;

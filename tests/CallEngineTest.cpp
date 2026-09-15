@@ -31,7 +31,10 @@ public:
   void onConnected(const std::string& sessionId, bool resumed) override {
     log.push_back("connected:" + sessionId + (resumed ? "/resumed" : "/fresh"));
   }
-  void onDisconnected() override { log.push_back("disconnected"); }
+  void onDisconnected(std::int32_t code, bool willReconnect) override {
+    log.push_back("disconnected:" + std::to_string(code) + "/" +
+                  (willReconnect ? "retry" : "stop"));
+  }
   void onKickedOut(imrtc::KickedReason reason) override {
     // 原因一起记：合并成一句「被踢」正是这一条要防的事。
     log.push_back(std::string("kickedOut:") + imrtc::kickedReasonName(reason));
@@ -47,7 +50,9 @@ public:
   }
   void onCallEnd(const imrtc::CallEnd& end) override {
     log.push_back("callEnd:" + end.reason + "/" + std::to_string(end.durationSec));
+    lastCallEndReasonCode = end.reasonCode;
   }
+  imrtc::EndReason lastCallEndReasonCode = imrtc::EndReason::Error;
   void onCallMissed(const imrtc::CallMissed& missed) override {
     log.push_back("callMissed:" + missed.caller);
   }
@@ -148,6 +153,9 @@ IMRTC_TEST(engineHappyPath, "CallEngine —— 主叫全程：login → call →
                                      "callBegin:call-1/caller", "roomJoined:r-1",
                                      "callEnd:hangup/201"}),
            "完整回调序列");
+  CHECK_EQ(static_cast<int>(harness.recorder->lastCallEndReasonCode),
+           static_cast<int>(imrtc::EndReason::Hangup),
+           "onCallEnd 附带的类型化 reasonCode 要和 reason 字符串对应上");
 }
 
 IMRTC_TEST(engineEmitOrderOnSendFailure,
@@ -202,6 +210,8 @@ IMRTC_TEST(engineInviteFailure, "CallEngine —— invite 被拒要回 idle 并�
            std::vector<std::string>({"connected:s-1/fresh", "error:1004/bad_params",
                                      "callEnd:error/0"}),
            "报错之后要给界面一个收场信号");
+  CHECK_EQ(static_cast<int>(harness.recorder->lastCallEndReasonCode),
+           static_cast<int>(imrtc::EndReason::Error), "reason=error 对应 EndReason::Error");
 }
 
 IMRTC_TEST(engineJoinFailure, "CallEngine —— room.join 被拒要回 idle 并抛 onRoomLeft") {
@@ -232,7 +242,8 @@ IMRTC_TEST(engineResumeFailure, "CallEngine —— 恢复失败要本地合成 o
 
   // 断线：通话要**保持在 connected**，界面展示「正在重连…」（§1.4）。
   harness.net.remoteClose(imrtc::closecode::kGoingAway, "network");
-  CHECK_EQ(harness.recorder->log, std::vector<std::string>{"disconnected"}, "只报断开");
+  CHECK_EQ(harness.recorder->log, std::vector<std::string>{"disconnected:1001/retry"},
+           "只报断开，且带上关闭码与 willReconnect");
   CHECK_EQ(harness.engine->callState(), CallState::Connecting, "通话不许因为断线就没了");
 
   harness.now = kT0 + 1000;
@@ -243,7 +254,8 @@ IMRTC_TEST(engineResumeFailure, "CallEngine —— 恢复失败要本地合成 o
   harness.reply(imrtc::okType(imrtc::frame::kHello), imtest::helloOkData("s-2", false));
 
   CHECK_EQ(harness.recorder->log,
-           std::vector<std::string>({"disconnected", "connected:s-2/fresh", "callEnd:network/5"}),
+           std::vector<std::string>(
+               {"disconnected:1001/retry", "connected:s-2/fresh", "callEnd:network/5"}),
            "恢复失败要合成 onCallEnd(network)，时长用本地计时");
   CHECK_EQ(harness.engine->callState(), CallState::Idle, "合成之后回 idle");
 }
@@ -258,8 +270,8 @@ IMRTC_TEST(engineKickedOut, "CallEngine —— 4403 被踢：抛 onKickedOut + o
   // 原因是 taken_over 而不是别的两个：4403 的含义就是「别处登录 / 被吊销」，
   // 宿主该回登录页。**它要穿过状态机到达宿主**——状态机那条 emit 的 args 是空的。
   CHECK_EQ(harness.recorder->log,
-           std::vector<std::string>({"kickedOut:taken_over", "disconnected"}),
-           "被踢的回调顺序，且带上原因");
+           std::vector<std::string>({"kickedOut:taken_over", "disconnected:4403/stop"}),
+           "被踢的回调顺序，且带上原因；4403 不会自动重连");
   CHECK_EQ(harness.engine->callState(), CallState::Idle, "通话清空");
   CHECK_EQ(harness.engine->roomState(), RoomState::Idle, "房间清空");
 }
@@ -341,7 +353,9 @@ IMRTC_TEST(engineLogoutIsQuietWithAnAsyncTransport,
     现在 logout() 连同连接一起放掉，队列里攒着的事件随之丢弃。
   */
   for (const std::string& entry : harness.recorder->log) {
-    CHECK_TRUE(entry != "disconnected", "主动 logout 不许冒出 onDisconnected");
+    // 前缀比对而不是整串相等："disconnected" 现在带着关闭码/willReconnect
+    // 后缀（如 "disconnected:1001/retry"），整串比对会让这条断言形同虚设。
+    CHECK_TRUE(entry.rfind("disconnected", 0) != 0, "主动 logout 不许冒出 onDisconnected");
   }
   CHECK_EQ(harness.engine->connectionState(), imrtc::ConnectionState::Idle, "连接已经放掉了");
 }

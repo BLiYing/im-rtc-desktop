@@ -47,6 +47,21 @@ std::string dominantReason(const std::vector<std::string>& outcomes) {
   return reason::kNoAnswer;
 }
 
+EndReason endReasonOf(const std::string& reason) {
+  if (reason == reason::kHangup) return EndReason::Hangup;
+  if (reason == reason::kCancel) return EndReason::Cancel;
+  if (reason == reason::kReject) return EndReason::Reject;
+  if (reason == reason::kNoAnswer) return EndReason::NoAnswer;
+  if (reason == reason::kBusy) return EndReason::Busy;
+  if (reason == reason::kOffline) return EndReason::Offline;
+  if (reason == reason::kAnsweredElsewhere) return EndReason::AnsweredElsewhere;
+  if (reason == reason::kRejectedElsewhere) return EndReason::RejectedElsewhere;
+  if (reason == reason::kKicked) return EndReason::Kicked;
+  if (reason == reason::kRoomClosed) return EndReason::RoomClosed;
+  if (reason == reason::kNetwork) return EndReason::Network;
+  return EndReason::Error;
+}
+
 std::int64_t callDurationSec(std::int64_t connectedAtMs, std::int64_t endedAtMs) {
   if (connectedAtMs <= 0) return 0;
   const std::int64_t elapsedMs = endedAtMs - connectedAtMs;

@@ -4,6 +4,7 @@
 #include "imrtc/CallEngine.h"
 #include "imrtc/Log.h"
 #include "imrtc/MachineTypes.h"
+#include "imrtc/Reasons.h"
 
 namespace imrtc {
 namespace {
@@ -54,7 +55,14 @@ bool dispatchObserverEvent(CallEngineObserver& out, const EmittedEvent& event) {
   if (cb == "onConnected") {
     target->onConnected(str(args, "session_id"), boolean(args, "resumed"));
   } else if (cb == "onDisconnected") {
-    target->onDisconnected();
+    /*
+      code / will_reconnect **不是状态机给的**，是门面在派发前塞进 args 的
+      （见 CallEngine::emitEvent），道理和 onKickedOut 的 reason 一样：状态机这条
+      emit 的 args 在一致性向量里是 `{}`（room_fsm.json），它只关心状态怎么走，
+      「关闭码是多少」它压根不知道——那是 Connection 层的事。
+    */
+    target->onDisconnected(static_cast<std::int32_t>(num(args, "code")),
+                           boolean(args, "will_reconnect"));
   } else if (cb == "onKickedOut") {
     /*
       原因**不是状态机给的**，是门面在派发前塞进 args 的（见 CallEngine::emitEvent）。
@@ -81,8 +89,9 @@ bool dispatchObserverEvent(CallEngineObserver& out, const EmittedEvent& event) {
                                   str(args, "role"), str(args, "caller"),
                                   str(args, "chat_group_id"), str(args, "user_data")});
   } else if (cb == "onCallEnd") {
-    target->onCallEnd(CallEnd{str(args, "call_id"), str(args, "reason"),
-                              num(args, "duration_sec"), str(args, "ended_by")});
+    const std::string reason = str(args, "reason");
+    target->onCallEnd(CallEnd{str(args, "call_id"), reason, num(args, "duration_sec"),
+                              str(args, "ended_by"), endReasonOf(reason)});
   } else if (cb == "onCallMissed") {
     target->onCallMissed(
         CallMissed{str(args, "call_id"), str(args, "caller"), str(args, "reason")});
@@ -169,6 +178,14 @@ void CallEngine::emitEvent(const EmittedEvent& event) {
   EmittedEvent enriched = event;
   if (event.cb == "onKickedOut") {
     enriched.args.set("reason", Json::make(kickedReasonName(kickedReason_)));
+  } else if (event.cb == "onDisconnected") {
+    /*
+      同样是门面塞的：Connection::onDisconnected 给的 code / willReconnect 在
+      CallEngineSession.cpp 里先存进 lastDisconnectCode_/lastDisconnectWillReconnect_，
+      这里再补进 args，走的是和 onKickedOut 一样的「状态机不知道、门面来补」的路。
+    */
+    enriched.args.set("code", Json::make(static_cast<std::int64_t>(lastDisconnectCode_)));
+    enriched.args.set("will_reconnect", Json::make(lastDisconnectWillReconnect_));
   }
 
   /*

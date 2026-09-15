@@ -208,6 +208,27 @@ typedef struct imrtc_v1_call_begin {
   const char* user_data;
 } imrtc_v1_call_begin;
 
+/**
+ * 通话结束原因的类型化版本，与 `imrtc_v1_call_end.reason`（§6 的 reason 字符串）
+ * 一一对应，和 iOS `IMCallEndReason` 同值，四端对齐。**同一份数据的另一种形状**：
+ * 喜欢 switch 就用这个，喜欢直接落日志/记录就用 `reason` 字符串，二选一即可。
+ * 陌生值同样折成 `IMRTC_V1_END_ERROR`。
+ */
+typedef enum imrtc_v1_end_reason {
+  IMRTC_V1_END_HANGUP = 0,
+  IMRTC_V1_END_CANCEL = 1,
+  IMRTC_V1_END_REJECT = 2,
+  IMRTC_V1_END_NO_ANSWER = 3,
+  IMRTC_V1_END_BUSY = 4,
+  IMRTC_V1_END_OFFLINE = 5,
+  IMRTC_V1_END_ANSWERED_ELSEWHERE = 6,
+  IMRTC_V1_END_REJECTED_ELSEWHERE = 7,
+  IMRTC_V1_END_KICKED = 8,
+  IMRTC_V1_END_ROOM_CLOSED = 9,
+  IMRTC_V1_END_NETWORK = 10,
+  IMRTC_V1_END_ERROR = 11
+} imrtc_v1_end_reason;
+
 /** 通话结束，对应 on_call_end。**所有结束分支的唯一出口**。 */
 typedef struct imrtc_v1_call_end {
   uint32_t struct_size;
@@ -217,6 +238,13 @@ typedef struct imrtc_v1_call_end {
   /** 未接通恒为 0。**别自己算时长**，用这个值。 */
   int64_t duration_sec;
   const char* ended_by;
+  /*
+    以下字段是 2026-09-15 追加的：**只追加、不改旧字段**（CONVENTIONS §2 红线 2）。
+    宿主用旧头编译时结构体更小，`struct_size` 天然报不到这里——引擎只是多填了
+    旧宿主不看的尾部字节，不影响它读前面那几个字段。
+  */
+  /** `reason` 的类型化版本，见 imrtc_v1_end_reason。 */
+  imrtc_v1_end_reason reason_code;
 } imrtc_v1_call_end;
 
 /** 通话中被第三个人呼叫、已被自动回忙线，对应 on_call_missed。 */
@@ -228,8 +256,13 @@ typedef struct imrtc_v1_call_missed {
 } imrtc_v1_call_missed;
 
 /**
- * 回调表。**宿主必须把 struct_size 填成 sizeof(imrtc_v1_observer)**，
+ * 回调表。**宿主把 struct_size 填成自己那份头里 sizeof(imrtc_v1_observer)**，
  * 不关心的回调留 NULL。`user_data` 原样回传，不被解释、不被持有。
+ *
+ * **struct_size 也是这张表的版本闸**：宿主用更旧的头编译时结构体更小（缺尾部的新
+ * 回调字段），引擎按 struct_size 识别，缺的字段视为 NULL、按各自的兜底处理
+ * （比如 `on_disconnected_ex` 没提供就退回调旧的 `on_disconnected`）——不会因为
+ * 追加了新字段就把旧宿主拒之门外。
  */
 typedef struct imrtc_v1_observer {
   uint32_t struct_size;
@@ -251,10 +284,11 @@ typedef struct imrtc_v1_observer {
   void (*on_call_begin)(void* user_data, const imrtc_v1_call_begin* begin);
   void (*on_call_end)(void* user_data, const imrtc_v1_call_end* end);
   void (*on_call_missed)(void* user_data, const imrtc_v1_call_missed* missed);
-  void (*on_call_cancelled)(void* user_data, const char* by);
+  void (*on_call_cancelled)(void* user_data, const char* uid);
   void (*on_call_rejected)(void* user_data, const char* uid);
   void (*on_call_busy)(void* user_data, const char* uid);
   void (*on_call_no_answer)(void* user_data, const char* uid);
+  /** 同一账号另一台设备接了或拒了。`action` 取 "accept" / "reject"（Enums.cpp 的封闭集合）。 */
   void (*on_handled_on_other_device)(void* user_data, const char* call_id, const char* action);
 
   /* 成员 */
@@ -274,6 +308,17 @@ typedef struct imrtc_v1_observer {
   void (*on_room_joined)(void* user_data, const char* room_id);
   void (*on_room_left)(void* user_data, const char* room_id);
   void (*on_room_closed)(void* user_data, const char* room_id, const char* reason);
+
+  /*
+    以下字段是 2026-09-15 追加的：**只追加、不改旧字段**（CONVENTIONS §2 红线 2）。
+    旧宿主的头里没有这个字段，`struct_size` 天然只到 on_room_closed 那里——引擎按
+    `struct_size` 识别，没提供就退回调旧的 on_disconnected(user_data)。
+  */
+  /**
+   * 断线，带 WebSocket 关闭码与「会不会自动重连」。**装了它就不会再收到旧的
+   * on_disconnected**（同一次断开只报一次）；引擎拿不到这两样信息时不会调用它。
+   */
+  void (*on_disconnected_ex)(void* user_data, int32_t code, imrtc_v1_bool will_reconnect);
 } imrtc_v1_observer;
 
 /** 构造参数。**填 struct_size**。 */
@@ -429,7 +474,17 @@ IMRTC_API int32_t imrtc_v1_set_remote_layer(imrtc_v1_engine* engine, const char*
 
 /* ---- 媒体 ---- */
 
+/** 开麦克风。**不是 unpublish**，轨道与协商都保留。命名对齐其余三端。 */
+IMRTC_API int32_t imrtc_v1_open_microphone(imrtc_v1_engine* engine);
+/** 关麦克风。同上。 */
+IMRTC_API int32_t imrtc_v1_close_microphone(imrtc_v1_engine* engine);
+
+/**
+ * @deprecated 用 `imrtc_v1_open_microphone`，语义完全相同。**只是命名旧**，
+ * 不删——2026-09-15 四端命名核对之前接入的宿主还在用它。
+ */
 IMRTC_API int32_t imrtc_v1_open_mic(imrtc_v1_engine* engine);
+/** @deprecated 用 `imrtc_v1_close_microphone`，语义完全相同。 */
 IMRTC_API int32_t imrtc_v1_close_mic(imrtc_v1_engine* engine);
 IMRTC_API int32_t imrtc_v1_open_camera(imrtc_v1_engine* engine);
 IMRTC_API int32_t imrtc_v1_close_camera(imrtc_v1_engine* engine);

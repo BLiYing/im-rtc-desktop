@@ -48,7 +48,10 @@ public:
                 resumed ? "true" : "false");
     connected = true;
   }
-  void onDisconnected() override { std::printf("  · onDisconnected\n"); }
+  void onDisconnected(std::int32_t code, bool willReconnect) override {
+    std::printf("  · onDisconnected   code=%d willReconnect=%s\n", code,
+                willReconnect ? "true" : "false");
+  }
   void onKickedOut(imrtc_v1_kicked_reason reason) override {
     // 这个工具走 C ABI，拿到的是 C 枚举——引擎侧那个 imrtc::KickedReason 到不了这里。
     std::printf("  ✗ onKickedOut（%s）\n", kickedReasonText(reason));
@@ -67,10 +70,10 @@ public:
     (void)userData;
   }
   void onCallEnd(const std::string& callId, const std::string& reason, std::int64_t durationSec,
-                 const std::string& endedBy) override {
-    std::printf("  ✓ onCallEnd        reason=%s duration=%lld endedBy=%s（call=%s）\n",
-                reason.c_str(), static_cast<long long>(durationSec), endedBy.c_str(),
-                callId.c_str());
+                 const std::string& endedBy, imrtc_v1_end_reason reasonCode) override {
+    std::printf("  ✓ onCallEnd        reason=%s(%d) duration=%lld endedBy=%s（call=%s）\n",
+                reason.c_str(), static_cast<int>(reasonCode),
+                static_cast<long long>(durationSec), endedBy.c_str(), callId.c_str());
     finished = true;
   }
   void onCallReceived(const std::string& callId, const std::string& caller,
