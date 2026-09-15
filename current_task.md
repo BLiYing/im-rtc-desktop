@@ -47,6 +47,12 @@ Kit 选人页（M2，桌面没有 Kit，本产品设计已注明不适用）。*
    `call.invite_more`/`call.join` 桌面这边其实早就实现了，若那张表桌面列还写 ⬜ 是文档漂了。
    ③ Windows 侧还没编译过，新加的 `imrtc_v1_call_ex`/结构体尾部追加字段也要在 Windows 上过一遍
    `dumpbin /exports` 与联调（见下一条一起排）。
+0.5 **C ABI 与其余三端的两处不对等（2026-09-15 写 `/guide` 时发现，未做）**：
+   ① **没有 `forceEnd`**：Web / iOS / Android 都有「红键等不到 `callEnd` 时，结束帧立刻上线路、本地立刻收场」的同步兜底，
+   C ABI 只能靠 `hangup` / `reject` / `cancel` 等服务端应答；② **observer 没有「票快到期」回调**（其余三端都有，默认提前 60 秒），
+   宿主只能自己按 `/v1/tokens` 回的 `expires_at_ms` 定时调 `imrtc_v1_update_token`，且 `update_token` 也没有到期时刻参数。
+   补的时候走追加式：新函数 `imrtc_v1_force_end` + observer 尾部追加 `on_token_will_expire`（`struct_size` 闸兜旧宿主），
+   导出面 31 → 32 要同步 `capi/exported_symbols.txt` 与 `check-abi.sh`；`capi/src/imrtc_c.cpp` 已近 600 行，先拆再加。指南 `/guide/desktop` 的续票与 `/guide/api#force-end` 届时一起改。
 1. **到 Windows 上编译并手点**（等机器 / 集成方）。后台来电提醒四条：① 最小化 / 非活动时来电，任务栏按钮持续闪；② 对方取消后立刻停闪、不留橙色高亮；
    ③ 闪着时切回窗口系统自己停，之后接通 / 挂断不出错；④ 气泡靠藏托盘图标收起。设置页详细日志也点一次。
 2. `Shots` 的设置页截图（高度改到 680）没重新生成、没人看过。
