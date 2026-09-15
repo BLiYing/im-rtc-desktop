@@ -63,6 +63,7 @@ const std::vector<ErrorDefinition>& errorDefinitions() {
       {1406, "too_many_callees", "too many callees", false, false},
       {1407, "not_call_owner", "not call owner", false, false},
       {1408, "already_in_call", "already in call", false, false},
+      {1409, "invite_denied", "invite denied by host", false, false},
       {1501, "internal", "internal error", true, false},
       {1502, "sfu_unavailable", "sfu unavailable", true, false},
       {1503, "shutting_down", "server shutting down", true, false},

@@ -153,8 +153,11 @@ signals:
   void engineError(qint32 code, const QString& name, const QString& forType);
 
   void callReceived(const QString& callId, const QString& caller, const QStringList& calleeIds,
-                    const QString& mediaType, bool isGroup);
-  void callBegan(const QString& callId, const QString& roomId, const QString& role);
+                    const QString& mediaType, bool isGroup, const QString& chatGroupId,
+                    const QString& userData);
+  /** caller / chatGroupId / userData 见 imrtc::capi::Observer::onCallBegin 的取值/回落规则。 */
+  void callBegan(const QString& callId, const QString& roomId, const QString& role,
+                const QString& caller, const QString& chatGroupId, const QString& userData);
   void callEnded(const QString& callId, const QString& reason, qint64 durationSec,
                  const QString& endedBy);
   void callMissed(const QString& callId, const QString& caller, const QString& reason);
@@ -187,9 +190,11 @@ private:
   void onError(std::int32_t code, const std::string& name, const std::string& forType) override;
   void onCallReceived(const std::string& callId, const std::string& caller,
                       const std::vector<std::string>& calleeIds, const std::string& mediaType,
-                      bool isGroup) override;
-  void onCallBegin(const std::string& callId, const std::string& roomId,
-                   const std::string& role) override;
+                      bool isGroup, const std::string& chatGroupId,
+                      const std::string& userData) override;
+  void onCallBegin(const std::string& callId, const std::string& roomId, const std::string& role,
+                   const std::string& caller, const std::string& chatGroupId,
+                   const std::string& userData) override;
   void onCallEnd(const std::string& callId, const std::string& reason, std::int64_t durationSec,
                  const std::string& endedBy) override;
   void onCallMissed(const std::string& callId, const std::string& caller,

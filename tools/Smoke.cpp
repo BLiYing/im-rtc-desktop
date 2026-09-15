@@ -58,10 +58,13 @@ public:
   void onError(std::int32_t code, const std::string& name, const std::string& forType) override {
     std::printf("  ! onError          %d/%s for=%s\n", code, name.c_str(), forType.c_str());
   }
-  void onCallBegin(const std::string& callId, const std::string& roomId,
-                   const std::string& role) override {
-    std::printf("  ✓ onCallBegin      call=%s role=%s room=%s\n", callId.c_str(), role.c_str(),
-                roomId.c_str());
+  void onCallBegin(const std::string& callId, const std::string& roomId, const std::string& role,
+                   const std::string& caller, const std::string& chatGroupId,
+                   const std::string& userData) override {
+    std::printf("  ✓ onCallBegin      call=%s role=%s room=%s caller=%s group=%s\n",
+                callId.c_str(), role.c_str(), roomId.c_str(), caller.c_str(),
+                chatGroupId.c_str());
+    (void)userData;
   }
   void onCallEnd(const std::string& callId, const std::string& reason, std::int64_t durationSec,
                  const std::string& endedBy) override {
@@ -71,10 +74,10 @@ public:
     finished = true;
   }
   void onCallReceived(const std::string& callId, const std::string& caller,
-                      const std::vector<std::string>&, const std::string& mediaType,
-                      bool) override {
-    std::printf("  ✓ onCallReceived   call=%s caller=%s media=%s\n", callId.c_str(),
-                caller.c_str(), mediaType.c_str());
+                      const std::vector<std::string>&, const std::string& mediaType, bool,
+                      const std::string& chatGroupId, const std::string&) override {
+    std::printf("  ✓ onCallReceived   call=%s caller=%s media=%s group=%s\n", callId.c_str(),
+                caller.c_str(), mediaType.c_str(), chatGroupId.c_str());
   }
   void onUserAccept(const std::string& uid) override {
     std::printf("  ✓ onUserAccept     uid=%s\n", uid.c_str());

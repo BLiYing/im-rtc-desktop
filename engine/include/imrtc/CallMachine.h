@@ -47,6 +47,19 @@ struct CallContext {
   std::string role;
   /** 通话时长的起点，来自服务端。**客户端不自己算时长**（I8）。 */
   std::int64_t connectedAtMs = 0;
+
+  /*
+    以下三个是 HOST_INTEGRATION_DESIGN §3.2/§3.3 的「本通记下的值」：
+    call() 的选项、或 call.incoming 里带来的值，供 call.connected 缺席时回落
+    （兼容旧服务端）。callerUid 只在 callee 收到 call.incoming 时才有值——
+    caller 自己不知道「call() 选项里记下的 caller」这种东西，那正是它自己。
+  */
+  /** 本通电话的发起人。callee 从 call.incoming 学到；caller 不需要它。 */
+  std::string callerUid;
+  /** 宿主自己的群号：caller 从 call() 选项记下，callee 从 call.incoming 学到。 */
+  std::string chatGroupId;
+  /** 同上，user_data。 */
+  std::string userData;
 };
 
 using CallOutput = MachineOutput<CallContext>;

@@ -50,6 +50,8 @@ enum {
   IMRTC_V1_ERR_INVALID_STATE = 2005,
   /** 传进来的参数不合法（空指针、struct_size 对不上）。 */
   IMRTC_V1_ERR_BAD_PARAMS = 1004,
+  /** 宿主的邀请鉴权回调拒绝了 call.invite / call.invite_more / call.join。 */
+  IMRTC_V1_ERR_INVITE_DENIED = 1409,
   /** 内部错误兜底。**异常绝不跨越 C ABI**，都在边界上被转成它。 */
   IMRTC_V1_ERR_INTERNAL = 1501
 };
@@ -172,6 +174,15 @@ typedef struct imrtc_v1_call_invite {
   uint32_t callee_count;
   const char* media_type;
   imrtc_v1_bool is_group;
+  /*
+    以下两个字段是 2026-09-15 追加的：**只追加、不改旧字段**（CONVENTIONS §2 红线 2）。
+    宿主用旧头编译时结构体更小，读不到这两个字段也不会崩——它压根不知道它们存在，
+    引擎这边只是多填了两个旧宿主不看的尾部字节。
+  */
+  /** 宿主自己的群号，可空（HOST_INTEGRATION_DESIGN §3.2）。 */
+  const char* chat_group_id;
+  /** 宿主私有字节，原样透传，引擎不解析。 */
+  const char* user_data;
 } imrtc_v1_call_invite;
 
 /** 通话接通，对应 on_call_begin。 */
@@ -183,6 +194,18 @@ typedef struct imrtc_v1_call_begin {
   imrtc_v1_bool is_group;
   /** "caller" / "callee"。 */
   const char* role;
+  /*
+    以下三个字段是 2026-09-15 追加的，理由同 imrtc_v1_call_invite。
+    取 call.connected 里的值，为空时回落到本通 call.incoming / call_ex 选项记下的值
+    （HOST_INTEGRATION_DESIGN §3.3）；经 call.join 加入的人没收过 call.incoming，
+    回落不到，只能靠 call.connected 自带。
+  */
+  /** 发起人。 */
+  const char* caller;
+  /** 宿主自己的群号，可空。 */
+  const char* chat_group_id;
+  /** 宿主私有字节。 */
+  const char* user_data;
 } imrtc_v1_call_begin;
 
 /** 通话结束，对应 on_call_end。**所有结束分支的唯一出口**。 */
@@ -266,6 +289,25 @@ typedef struct imrtc_v1_options {
   int64_t request_timeout_ms;
 } imrtc_v1_options;
 
+/**
+ * `imrtc_v1_call_ex` 的可选参数。**填 struct_size**（版本闸，规矩同 imrtc_v1_options）。
+ *
+ * 三个字段原样进 call.invite；`chat_group_id` 超 64 字节/含空白换行、`user_data`
+ * 超 4096 字节时**不上线路**，但 `imrtc_v1_call_ex` 本身仍返回成功——错误从回调出
+ * （`on_error` 报 1004 + 随后一条 `on_call_end`），与「未登录就拨号」同一条约定
+ * （HOST_INTEGRATION_DESIGN §3.3）。
+ */
+typedef struct imrtc_v1_call_options {
+  uint32_t struct_size;
+  imrtc_v1_bool is_group;
+  /** 宿主自己的群号，opaque，≤64 字节 UTF-8，禁止空白与换行；可为 NULL（= 空）。 */
+  const char* chat_group_id;
+  /** opaque 字节，≤4096；可为 NULL（= 空）。 */
+  const char* user_data;
+  /** 振铃超时秒数；≤0 = 使用协议默认值（30），范围 5~120，越界钳到边界。 */
+  int64_t timeout_sec;
+} imrtc_v1_call_options;
+
 /* ---- 日志（进程级，不属于某一个 Engine）---- */
 
 /**
@@ -329,6 +371,14 @@ IMRTC_API int32_t imrtc_v1_update_token(imrtc_v1_engine* engine, const char* tok
 IMRTC_API int32_t imrtc_v1_call(imrtc_v1_engine* engine, const char* const* callee_ids,
                                 uint32_t callee_count, const char* media_type,
                                 imrtc_v1_bool is_group);
+/**
+ * 带选项发起通话（HOST_INTEGRATION_DESIGN §3.3）：群号 / user_data / 振铃超时。
+ * `options` 传 NULL 等价于 `imrtc_v1_call`（`is_group` 按 false 处理）。
+ * 旧 `imrtc_v1_call` 不动。
+ */
+IMRTC_API int32_t imrtc_v1_call_ex(imrtc_v1_engine* engine, const char* const* callee_ids,
+                                   uint32_t callee_count, const char* media_type,
+                                   const imrtc_v1_call_options* options);
 IMRTC_API int32_t imrtc_v1_accept(imrtc_v1_engine* engine);
 IMRTC_API int32_t imrtc_v1_reject(imrtc_v1_engine* engine);
 IMRTC_API int32_t imrtc_v1_cancel(imrtc_v1_engine* engine);

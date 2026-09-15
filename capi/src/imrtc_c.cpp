@@ -120,6 +120,8 @@ public:
     out.callee_count = static_cast<std::uint32_t>(ids.size());
     out.media_type = invite.mediaType.c_str();
     out.is_group = fromBool(invite.isGroup);
+    out.chat_group_id = invite.chatGroupId.c_str();
+    out.user_data = invite.userData.c_str();
     table_.on_call_received(table_.user_data, &out);
   }
 
@@ -132,6 +134,9 @@ public:
     out.media_type = begin.mediaType.c_str();
     out.is_group = fromBool(begin.isGroup);
     out.role = begin.role.c_str();
+    out.caller = begin.caller.c_str();
+    out.chat_group_id = begin.chatGroupId.c_str();
+    out.user_data = begin.userData.c_str();
     table_.on_call_begin(table_.user_data, &out);
   }
 
@@ -378,6 +383,25 @@ std::int32_t imrtc_v1_call(imrtc_v1_engine* engine, const char* const* callee_id
   if (callee_ids == nullptr || callee_count == 0) return IMRTC_V1_ERR_BAD_PARAMS;
   return guard(engine, [=](CallEngine& target) {
     target.call(toStrings(callee_ids, callee_count), cstr(media_type), toBool(is_group));
+  });
+}
+
+std::int32_t imrtc_v1_call_ex(imrtc_v1_engine* engine, const char* const* callee_ids,
+                              std::uint32_t callee_count, const char* media_type,
+                              const imrtc_v1_call_options* options) {
+  if (callee_ids == nullptr || callee_count == 0) return IMRTC_V1_ERR_BAD_PARAMS;
+  imrtc::CallOptions callOptions;
+  if (options != nullptr) {
+    // struct_size 是版本闸：宿主的头比我们新也没关系，我们只读认识的那些；
+    // 比我们旧则连必填字段都不全，拒掉（规矩同 imrtc_v1_engine_create）。
+    if (options->struct_size < sizeof(imrtc_v1_call_options)) return IMRTC_V1_ERR_BAD_PARAMS;
+    callOptions.chatGroupId = cstr(options->chat_group_id);
+    callOptions.userData = cstr(options->user_data);
+    callOptions.timeoutSec = options->timeout_sec;
+  }
+  const bool isGroup = options != nullptr && toBool(options->is_group);
+  return guard(engine, [=](CallEngine& target) {
+    target.call(toStrings(callee_ids, callee_count), cstr(media_type), isGroup, callOptions);
   });
 }
 

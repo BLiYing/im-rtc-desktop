@@ -254,6 +254,100 @@ IMRTC_TEST(capiCppWrapper, "C ABI —— header-only 的 C++ 包装（它自己�
   CHECK_TRUE(true, "RAII 析构没崩");
 }
 
+IMRTC_TEST(capiCallExStructSizeIsVersionGate,
+           "C ABI —— imrtc_v1_call_ex 的 options.struct_size 也是版本闸") {
+  imrtc_v1_options options = makeOptions();
+  imrtc_v1_engine* engine = nullptr;
+  CHECK_EQ(imrtc_v1_engine_create(&options, &engine), std::int32_t{IMRTC_V1_OK}, "create");
+
+  const char* callees[] = {"bob"};
+  imrtc_v1_call_options stale{};
+  stale.struct_size = 4;
+  CHECK_EQ(imrtc_v1_call_ex(engine, callees, 1, "audio", &stale),
+           std::int32_t{IMRTC_V1_ERR_BAD_PARAMS}, "options 太旧要拒");
+  CHECK_EQ(imrtc_v1_call_ex(engine, nullptr, 0, "audio", nullptr),
+           std::int32_t{IMRTC_V1_ERR_BAD_PARAMS}, "callee_ids 为空");
+
+  imrtc_v1_engine_destroy(engine);
+}
+
+IMRTC_TEST(capiCallExOptionsNullEquivalentToPlainCall,
+           "C ABI —— imrtc_v1_call_ex 的 options 传 NULL 等价于 imrtc_v1_call") {
+  imrtc_v1_options options = makeOptions();
+  imrtc_v1_engine* engine = nullptr;
+  CHECK_EQ(imrtc_v1_engine_create(&options, &engine), std::int32_t{IMRTC_V1_OK}, "create");
+
+  Counters counters;
+  imrtc_v1_observer observer{};
+  observer.struct_size = sizeof(observer);
+  observer.user_data = &counters;
+  observer.on_error = &onErrorCb;
+  CHECK_EQ(imrtc_v1_engine_set_observer(engine, &observer), std::int32_t{IMRTC_V1_OK},
+           "set_observer");
+
+  // 没登录就拨号：走的是与 imrtc_v1_call 同一条状态机路径，该报 not_logged_in（2007）。
+  const char* callees[] = {"bob"};
+  CHECK_EQ(imrtc_v1_call_ex(engine, callees, 1, "audio", nullptr), std::int32_t{IMRTC_V1_OK},
+           "调用本身是成功的（错误从回调出）");
+  CHECK_EQ(counters.lastCode, std::int32_t{2007}, "该报 not_logged_in");
+
+  imrtc_v1_engine_destroy(engine);
+}
+
+IMRTC_TEST(capiCallExRejectsOversizedChatGroupIdLocally,
+           "C ABI —— imrtc_v1_call_ex 的 chat_group_id 超限本地先拦，不上线路"
+           "（HOST_INTEGRATION_DESIGN §3.3）") {
+  imrtc_v1_options options = makeOptions();
+  imrtc_v1_engine* engine = nullptr;
+  CHECK_EQ(imrtc_v1_engine_create(&options, &engine), std::int32_t{IMRTC_V1_OK}, "create");
+
+  Counters counters;
+  imrtc_v1_observer observer{};
+  observer.struct_size = sizeof(observer);
+  observer.user_data = &counters;
+  observer.on_error = &onErrorCb;
+  CHECK_EQ(imrtc_v1_engine_set_observer(engine, &observer), std::int32_t{IMRTC_V1_OK},
+           "set_observer");
+
+  const std::string tooLong(65, 'g');
+  imrtc_v1_call_options callOptions{};
+  callOptions.struct_size = sizeof(callOptions);
+  callOptions.chat_group_id = tooLong.c_str();
+  const char* callees[] = {"bob"};
+  // 返回值仍是「调用本身合法」——错误从回调出，跟「未登录就拨号」同一条约定。
+  CHECK_EQ(imrtc_v1_call_ex(engine, callees, 1, "audio", &callOptions), std::int32_t{IMRTC_V1_OK},
+           "调用本身是成功的（1004 从回调出）");
+  CHECK_EQ(counters.lastCode, std::int32_t{1004}, "该报 bad_params，不是 not_logged_in");
+
+  std::int32_t state = -1;
+  CHECK_EQ(imrtc_v1_get_call_state(engine, &state), std::int32_t{IMRTC_V1_OK}, "查状态");
+  CHECK_EQ(state, std::int32_t{IMRTC_V1_CALL_IDLE}, "本地拒绝不改变状态");
+
+  imrtc_v1_engine_destroy(engine);
+}
+
+IMRTC_TEST(capiInviteDeniedErrorNameIsRegistered,
+           "C ABI —— 1409 invite_denied 的机读名可查（HOST_INTEGRATION_DESIGN §3.2）") {
+  CHECK_EQ(std::string(imrtc_v1_error_name(1409)), std::string("invite_denied"), "1409");
+  CHECK_EQ(std::int32_t{IMRTC_V1_ERR_INVITE_DENIED}, std::int32_t{1409}, "常量值");
+}
+
+IMRTC_TEST(capiCppWrapperCallEx,
+           "C ABI —— header-only 包装的 callEx 也走 C ABI，本地校验与 C 层一致") {
+  WrapperObserver observer;
+  imrtc::capi::Engine engine("ws://127.0.0.1:1/v1/ws", "mac-abi-3");
+  CHECK_TRUE(engine.valid(), "构造成功");
+  CHECK_TRUE(engine.setObserver(&observer).ok(), "注册回调");
+
+  imrtc::capi::CallOptions options;
+  options.chatGroupId = std::string(65, 'g');
+  engine.callEx({"bob"}, "audio", true, options);
+  CHECK_EQ(observer.lastCode, std::int32_t{1004}, "超限 chat_group_id 该报 bad_params");
+  CHECK_EQ(static_cast<int>(engine.callState()), int{IMRTC_V1_CALL_IDLE}, "本地拒绝不改状态");
+
+  engine.setObserver(nullptr);
+}
+
 IMRTC_TEST(capiErrorIsUsable, "C ABI —— 包装层的 Error 能问出机读名") {
   const imrtc::capi::Error ok;
   CHECK_TRUE(ok.ok(), "默认是成功");

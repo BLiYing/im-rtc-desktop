@@ -72,6 +72,11 @@ CallOutput handleIncoming(const CallContext& ctx, const Json& data) {
   next.roomId = str(data, "room_id");
   next.mediaType = mediaType;
   next.isGroup = boolean(data, "is_group");
+  // 记下来供 handleConnected 回落：这一通电话的发起人与群号、user_data 都从这里学到，
+  // call.connected 缺席时（兼容旧服务端）就用这几个（HOST_INTEGRATION_DESIGN §3.3）。
+  next.callerUid = str(data, "caller");
+  next.chatGroupId = str(data, "chat_group_id");
+  next.userData = str(data, "user_data");
 
   Json calleeIds = Json::makeArray();
   for (const std::string& uid : strArray(data, "callee_ids")) {
@@ -81,11 +86,14 @@ CallOutput handleIncoming(const CallContext& ctx, const Json& data) {
   return callOut(next, {},
                  {eventOf("onCallReceived",
                           obj({{"call_id", Json::make(next.callId)},
-                               {"caller", Json::make(str(data, "caller"))},
+                               {"caller", Json::make(next.callerUid)},
                                // **原样带上**：群通话里被叫要靠它摆占位格。
                                {"callee_ids", std::move(calleeIds)},
                                {"media_type", Json::make(mediaType)},
-                               {"is_group", Json::make(next.isGroup)}}))});
+                               {"is_group", Json::make(next.isGroup)},
+                               // 群号与 user_data：被叫靠它决定「添加成员」列谁（§3.2）。
+                               {"chat_group_id", Json::make(next.chatGroupId)},
+                               {"user_data", Json::make(next.userData)}}))});
 }
 
 /**
@@ -104,6 +112,20 @@ CallOutput handleConnected(const CallContext& ctx, const Json& data) {
   const std::string mediaType = str(data, "media_type") == "video" ? "video" : ctx.mediaType;
   const std::string callId = str(data, "call_id").empty() ? ctx.callId : str(data, "call_id");
 
+  /*
+    **取 call.connected 里的值，为空时回落到本通 call.incoming / call() 选项里记下的值**
+    （HOST_INTEGRATION_DESIGN §3.3，兼容旧服务端）。`call.join` 进来的人没收过
+    call.incoming，`ctx.callerUid`/`chatGroupId`/`userData` 那时都是空串，
+    只能指望 call.connected 本身带着——这正是它现在总会带的原因（§4.2）。
+  */
+  const std::string connectedCaller = str(data, "caller");
+  const std::string caller = connectedCaller.empty() ? ctx.callerUid : connectedCaller;
+  const std::string connectedChatGroupId = str(data, "chat_group_id");
+  const std::string chatGroupId =
+      connectedChatGroupId.empty() ? ctx.chatGroupId : connectedChatGroupId;
+  const std::string connectedUserData = str(data, "user_data");
+  const std::string userData = connectedUserData.empty() ? ctx.userData : connectedUserData;
+
   CallContext next = ctx;
   next.state = CallState::Connecting;
   next.callId = callId;
@@ -112,6 +134,9 @@ CallOutput handleConnected(const CallContext& ctx, const Json& data) {
   next.mediaType = mediaType;
   next.isGroup = boolean(data, "is_group") || ctx.isGroup;
   next.connectedAtMs = num(data, "connected_at_ms");
+  next.callerUid = caller;
+  next.chatGroupId = chatGroupId;
+  next.userData = userData;
 
   return callOut(
       next,
@@ -121,7 +146,10 @@ CallOutput handleConnected(const CallContext& ctx, const Json& data) {
                                    {"room_id", Json::make(roomId)},
                                    {"media_type", Json::make(mediaType)},
                                    {"is_group", Json::make(next.isGroup)},
-                                   {"role", Json::make(next.role)}}))});
+                                   {"role", Json::make(next.role)},
+                                   {"caller", Json::make(caller)},
+                                   {"chat_group_id", Json::make(chatGroupId)},
+                                   {"user_data", Json::make(userData)}}))});
 }
 
 /**

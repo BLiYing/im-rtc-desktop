@@ -58,6 +58,8 @@ enum class ErrorCode : std::int32_t {
   TooManyCallees = 1406,
   NotCallOwner = 1407,
   AlreadyInCall = 1408,
+  /** 宿主的邀请鉴权回调拒绝了 call.invite / call.invite_more / call.join。 */
+  InviteDenied = 1409,
 
   Internal = 1501,
   SfuUnavailable = 1502,

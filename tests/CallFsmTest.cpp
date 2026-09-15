@@ -142,3 +142,65 @@ IMRTC_TEST(callFsmStates, "call_fsm.json —— 用例里出现的状态都在�
     CHECK_TRUE(imrtc::parseCallState(state, parsed), "C++ 侧不认识状态 " + state);
   }
 }
+
+namespace {
+
+/**
+ * HOST_INTEGRATION_DESIGN §3.3 的本地校验：不是五仓共用的向量（只有桌面/客户端要
+ * 在上线路之前自己挡），所以在这里单独钉，不进 call_fsm.json。
+ */
+Json callArgs(const std::string& chatGroupId, const std::string& userData) {
+  Json args = Json::makeObject();
+  Json calleeIds = Json::makeArray();
+  calleeIds.push(Json::make(std::string("bob")));
+  args.set("callee_ids", calleeIds);
+  args.set("media_type", Json::make(std::string("audio")));
+  args.set("is_group", Json::make(false));
+  if (!chatGroupId.empty()) args.set("chat_group_id", Json::make(chatGroupId));
+  if (!userData.empty()) args.set("user_data", Json::make(userData));
+  return args;
+}
+
+void expectLocallyRejected(const Json& args, const std::string& label) {
+  const CallContext ctx;
+  const CallOutput result = imrtc::reduceCall(ctx, MachineInput::act("call", args));
+
+  CHECK_TRUE(result.send.empty(), label + "：不许上线路");
+  CHECK_EQ(result.emit.size(), std::size_t{2}, label + "：onError + onCallEnd 两条");
+  if (result.emit.size() == 2) {
+    CHECK_EQ(result.emit[0].cb, std::string("onError"), label + " 第一条回调名");
+    CHECK_EQ(imrtc::num(result.emit[0].args, "code"), std::int64_t{1004}, label + " 错误码");
+    CHECK_EQ(result.emit[1].cb, std::string("onCallEnd"), label + " 第二条回调名");
+    CHECK_EQ(text(result.emit[1].args, "reason"), std::string("error"), label + " reason");
+    CHECK_EQ(imrtc::num(result.emit[1].args, "duration_sec"), std::int64_t{0}, label + " 时长");
+  }
+  CHECK_TRUE(result.state.state == CallState::Idle, label + "：不该转移状态");
+}
+
+}  // namespace
+
+IMRTC_TEST(callLocalRejectsOversizedChatGroupId,
+           "call() —— chat_group_id 超 64 字节本地先拦：onError(1004)+onCallEnd(error)，"
+           "不上线路（HOST_INTEGRATION_DESIGN §3.3）") {
+  expectLocallyRejected(callArgs(std::string(65, 'g'), ""), "超长 chat_group_id");
+}
+
+IMRTC_TEST(callLocalRejectsWhitespaceChatGroupId,
+           "call() —— chat_group_id 含空白/换行本地先拦") {
+  expectLocallyRejected(callArgs("g 42", ""), "含空格");
+  expectLocallyRejected(callArgs("g\n42", ""), "含换行");
+}
+
+IMRTC_TEST(callLocalRejectsOversizedUserData,
+           "call() —— user_data 超 4096 字节本地先拦") {
+  expectLocallyRejected(callArgs("", std::string(4097, 'x')), "超长 user_data");
+}
+
+IMRTC_TEST(callLocalAcceptsBoundaryValues,
+           "call() —— 恰好卡在边界（64 字节 / 4096 字节）不该被拦") {
+  const CallContext ctx;
+  const Json args = callArgs(std::string(64, 'g'), std::string(4096, 'x'));
+  const CallOutput result = imrtc::reduceCall(ctx, MachineInput::act("call", args));
+  CHECK_EQ(result.send.size(), std::size_t{1}, "边界值应当正常发出 call.invite");
+  CHECK_TRUE(result.state.state == CallState::Inviting, "边界值应当正常进入 inviting");
+}

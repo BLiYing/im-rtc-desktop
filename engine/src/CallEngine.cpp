@@ -106,10 +106,19 @@ void CallEngine::setObserver(std::weak_ptr<CallEngineObserver> observer) {
 
 void CallEngine::call(const std::vector<std::string>& calleeIds, const std::string& mediaType,
                       bool isGroup) {
+  call(calleeIds, mediaType, isGroup, CallOptions{});
+}
+
+void CallEngine::call(const std::vector<std::string>& calleeIds, const std::string& mediaType,
+                      bool isGroup, const CallOptions& options) {
   Json args = Json::makeObject();
   args.set("callee_ids", stringArray(calleeIds));
   args.set("media_type", Json::make(mediaType));
   args.set("is_group", Json::make(isGroup));
+  // 三个都是可选项：**真的省略**才对——状态机据此决定要不要把它们塞进 call.invite。
+  if (!options.chatGroupId.empty()) args.set("chat_group_id", Json::make(options.chatGroupId));
+  if (!options.userData.empty()) args.set("user_data", Json::make(options.userData));
+  if (options.timeoutSec > 0) args.set("timeout_sec", Json::make(options.timeoutSec));
   apply(MachineInput::act("call", args), "");
 }
 

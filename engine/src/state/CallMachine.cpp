@@ -1,7 +1,9 @@
 #include "imrtc/CallMachine.h"
 
+#include <cctype>
 #include <utility>
 
+#include "imrtc/Enums.h"
 #include "imrtc/Errors.h"
 #include "imrtc/Reasons.h"
 #include "imrtc/Registry.h"
@@ -9,11 +11,57 @@
 namespace imrtc {
 namespace {
 
+/** hasWhitespace 认协议里「禁止空白与换行」的判据（`uid` / `chat_group_id` 共用的规矩）。 */
+bool hasWhitespace(const std::string& text) {
+  for (const char ch : text) {
+    if (std::isspace(static_cast<unsigned char>(ch))) return true;
+  }
+  return false;
+}
+
+/** chatGroupIdValid 按协议 §2.6：≤64 字节、禁止空白与换行；空串合法（表示没有群号）。 */
+bool chatGroupIdValid(const std::string& value) {
+  return value.size() <= kChatGroupIdMaxBytes && !hasWhitespace(value);
+}
+
+/** userDataValid 按协议 §2.6：≤4096 字节。 */
+bool userDataValid(const std::string& value) { return value.size() <= kUserDataMaxBytes; }
+
+/**
+ * localCallRejected 是 `call()` 参数本地不合规时的统一出口。
+ *
+ * **与「callee_ids 里有自己」将来落地时该走的同一个出口**（HOST_INTEGRATION_DESIGN
+ * §3.3）：onError(1004) + onCallEnd(error)，不转移状态、不发生任何帧——这通电话
+ * 从未上过线路，state 原地不动（本仓目前没有「有自己」那条本地校验，这条新加的
+ * chat_group_id / user_data 校验先按这个约定的出口做）。
+ */
+CallOutput localCallRejected(const CallContext& ctx) {
+  const std::int32_t code = codeValue(ErrorCode::BadParams);
+  return callOut(ctx, {},
+                 {eventOf("onError", obj({{"code", Json::make(static_cast<std::int64_t>(code))},
+                                          {"name", Json::make(errorName(code))}})),
+                  eventOf("onCallEnd", obj({{"call_id", Json::make(ctx.callId)},
+                                            {"reason", Json::make(reason::kError)},
+                                            {"duration_sec", Json::make(std::int64_t{0})},
+                                            {"ended_by", Json::make(std::string())}}))});
+}
+
 CallOutput startCall(const CallContext& ctx, const Json& args) {
   if (ctx.state != CallState::Idle) return invalidCallState(ctx);
 
   const std::string mediaType = str(args, "media_type") == "video" ? "video" : "audio";
   const bool isGroup = boolean(args, "is_group");
+  const std::string chatGroupId = str(args, "chat_group_id");
+  const std::string userData = str(args, "user_data");
+  const std::int64_t timeoutSec = num(args, "timeout_sec");
+
+  /*
+    本地先拦（HOST_INTEGRATION_DESIGN §3.3）：chat_group_id 超 64 字节或含空白/换行、
+    user_data 超 4096 字节，不上线路。
+  */
+  if (!chatGroupIdValid(chatGroupId) || !userDataValid(userData)) {
+    return localCallRejected(ctx);
+  }
 
   Json calleeIds = Json::makeArray();
   for (const std::string& uid : strArray(args, "callee_ids")) {
@@ -25,10 +73,20 @@ CallOutput startCall(const CallContext& ctx, const Json& args) {
   next.role = "caller";
   next.mediaType = mediaType;
   next.isGroup = isGroup;
+  // 记下来供 handleConnected 回落——call.connected 缺席这两个字段时用得上（兼容旧服务端）。
+  next.chatGroupId = chatGroupId;
+  next.userData = userData;
 
-  return callOut(next, {frameOf(frame::kCallInvite, obj({{"callee_ids", std::move(calleeIds)},
-                                                         {"media_type", Json::make(mediaType)},
-                                                         {"is_group", Json::make(isGroup)}}))});
+  Json frameData = obj({{"callee_ids", std::move(calleeIds)},
+                        {"media_type", Json::make(mediaType)},
+                        {"is_group", Json::make(isGroup)}});
+  // 三个都是可选项：**真的省略**才能让 Connection 那层按协议默认值填
+  // （room_id="" / timeout_sec=30 / user_data=""，decodeFields 在发送前兜底）。
+  if (!chatGroupId.empty()) frameData.set("chat_group_id", Json::make(chatGroupId));
+  if (!userData.empty()) frameData.set("user_data", Json::make(userData));
+  if (timeoutSec > 0) frameData.set("timeout_sec", Json::make(timeoutSec));
+
+  return callOut(next, {frameOf(frame::kCallInvite, std::move(frameData))});
 }
 
 CallOutput acceptCall(const CallContext& ctx) {

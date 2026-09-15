@@ -63,6 +63,22 @@ struct CallEngineOptions {
 };
 
 /**
+ * CallOptions 是 `call()` 的可选参数（HOST_INTEGRATION_DESIGN §3.2/§3.3）。
+ *
+ * 三个字段原样进 `call.invite`；本地先拦 `chatGroupId` 超 64 字节/含空白/换行、
+ * `userData` 超 4096 字节——与「callee_ids 里有自己」同一个出口：
+ * `onError(1004)` + `onCallEnd(error)`，不上线路。
+ */
+struct CallOptions {
+  /** 宿主自己的群号，opaque，≤64 字节，禁止空白与换行，可空。通话期间不可改。 */
+  std::string chatGroupId;
+  /** opaque 字节，≤4096，原样透传给被叫与接通者，Engine 不解析。 */
+  std::string userData;
+  /** 振铃超时秒数；0 = 使用协议默认值（30），范围 5~120，越界钳到边界。 */
+  std::int64_t timeoutSec = 0;
+};
+
+/**
  * dispatchObserverEvent 把状态机的一条 `EmittedEvent` 翻译成观察者的方法调用。
  *
  * **返回 false = 这个回调名没人接**。它之所以是公开自由函数而不是私有成员，
@@ -120,6 +136,9 @@ public:
 
   /** call 发起通话。1v1 恰好 1 个被叫；群 ≤8。 */
   void call(const std::vector<std::string>& calleeIds, const std::string& mediaType, bool isGroup);
+  /** call 的带选项重载：群号 / user_data / 振铃超时（HOST_INTEGRATION_DESIGN §3.3）。 */
+  void call(const std::vector<std::string>& calleeIds, const std::string& mediaType, bool isGroup,
+           const CallOptions& options);
   /** accept 接听。第二次调用会被**本地**拒绝（2005），不发上去。 */
   void accept();
   /** reject 拒接。状态由随后的 `call.ended` 推进——服务端才是裁决方。 */

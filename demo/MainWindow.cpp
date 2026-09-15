@@ -289,7 +289,12 @@ void MainWindow::wireCall() {
 
   connect(bridge_, &EngineBridge::callReceived, this,
           [this](const QString& callId, const QString& caller, const QStringList& callees,
-                 const QString& mediaType, bool isGroup) {
+                 const QString& mediaType, bool isGroup, const QString& chatGroupId,
+                 const QString& userData) {
+            // Demo 暂不展示群号/user_data（HOST_INTEGRATION_DESIGN §3.4 的选人页留给
+            // 宿主自己的 provider）；EngineBridge 已经把它们打进日志，联调够用。
+            Q_UNUSED(chatGroupId);
+            Q_UNUSED(userData);
             pending_ = CallRecord{};
             pending_.callId = callId;
             pending_.peer = caller;
@@ -309,8 +314,12 @@ void MainWindow::wireCall() {
           });
 
   connect(bridge_, &EngineBridge::callBegan, this,
-          [this](const QString& callId, const QString& roomId, const QString& role) {
+          [this](const QString& callId, const QString& roomId, const QString& role,
+                 const QString& caller, const QString& chatGroupId, const QString& userData) {
             Q_UNUSED(roomId);
+            Q_UNUSED(caller);
+            Q_UNUSED(chatGroupId);
+            Q_UNUSED(userData);
             pending_.callId = callId;
             pending_.connected = true;
             overlay_->markConnected(role);

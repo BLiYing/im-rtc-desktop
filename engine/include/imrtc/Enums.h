@@ -54,6 +54,15 @@ constexpr std::int64_t kMaxTimeoutSec = 120;
 /** kMaxFrameBytes 是单帧上限（§2.6）。超限对应 WS 关闭码 4400。 */
 constexpr std::size_t kMaxFrameBytes = 64 * 1024;
 
+/**
+ * kChatGroupIdMaxBytes 是 `chat_group_id` 的长度上界（§2.6）。**公开出去**，
+ * 否则宿主会把 64 抄进自己代码里。禁止空白与换行由 `CallMachine.cpp` 的
+ * `chatGroupIdValid` 另外判。
+ */
+constexpr std::size_t kChatGroupIdMaxBytes = 64;
+/** kUserDataMaxBytes 是 `user_data` 的长度上界（§2.6）。 */
+constexpr std::size_t kUserDataMaxBytes = 4096;
+
 /** kMaxSafeProtocolInt = 2^53-1（§2.4 规则 7）。超出会在 JS 端静默丢精度。 */
 constexpr std::int64_t kMaxSafeProtocolInt = 9007199254740991LL;
 

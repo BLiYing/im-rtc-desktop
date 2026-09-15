@@ -48,6 +48,10 @@ struct CallInvite {
   std::vector<std::string> calleeIds;
   std::string mediaType;
   bool isGroup = false;
+  /** 宿主自己的群号，可空（HOST_INTEGRATION_DESIGN §3.2，2026-09-15）。 */
+  std::string chatGroupId;
+  /** 宿主私有字节，原样透传，Engine 不解析。 */
+  std::string userData;
 };
 
 /** CallBegin 对应 `onCallBegin`：双方在这一刻同时开始计时。 */
@@ -58,6 +62,16 @@ struct CallBegin {
   bool isGroup = false;
   /** "caller" / "callee"。 */
   std::string role;
+  /**
+   * 发起人。取 `call.connected` 里的值，为空时回落到本通 `call.incoming` /
+   * `call()` 选项记下的值（§3.3）；`call.join` 加入的人没收过 `call.incoming`，
+   * 只能靠 `call.connected` 自带。
+   */
+  std::string caller;
+  /** 同上的回落规则，宿主自己的群号（§3.2）。 */
+  std::string chatGroupId;
+  /** 同上的回落规则，宿主私有字节。 */
+  std::string userData;
 };
 
 /** CallEnd 对应 `onCallEnd`——**所有结束分支的唯一出口**。 */

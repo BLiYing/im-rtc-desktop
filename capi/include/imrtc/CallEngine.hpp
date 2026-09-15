@@ -62,6 +62,22 @@ struct Quality {
 };
 
 /**
+ * `call()` 的可选参数，对应 `imrtc_v1_call_options`（HOST_INTEGRATION_DESIGN §3.3）。
+ *
+ * 群号 / user_data 本地校验不过时（chatGroupId 超 64 字节/含空白换行、userData 超
+ * 4096 字节），`callEx` 的返回值仍是成功——**错误从回调出**（`onError(1004)` +
+ * `onCallEnd(error)`），不上线路。跟 `imrtc_v1_call` 的「登录状态错误也从回调出」
+ * 是同一条约定：C ABI 的返回值只报「这次调用本身合不合法」（空指针、struct_size），
+ * 不报「这条业务规则通不通过」。
+ */
+struct CallOptions {
+  std::string chatGroupId;
+  std::string userData;
+  /** 0 = 使用协议默认值（30）。 */
+  std::int64_t timeoutSec = 0;
+};
+
+/**
  * Observer 是回调基类。方法都有空实现，只覆盖关心的那几个。
  *
  * 与 C 那张函数指针表一一对应；参数用 `std::string` 是**拷贝**——
@@ -80,12 +96,19 @@ public:
   }
   virtual void onCallReceived(const std::string& callId, const std::string& caller,
                               const std::vector<std::string>& calleeIds,
-                              const std::string& mediaType, bool isGroup) {
+                              const std::string& mediaType, bool isGroup,
+                              const std::string& chatGroupId, const std::string& userData) {
     (void)callId; (void)caller; (void)calleeIds; (void)mediaType; (void)isGroup;
+    (void)chatGroupId; (void)userData;
   }
+  /**
+   * `caller` / `chatGroupId` / `userData` 取 `call.connected` 里的值，为空时回落到
+   * 本通 `call.incoming` / `callEx` 选项记下的值（HOST_INTEGRATION_DESIGN §3.3）。
+   */
   virtual void onCallBegin(const std::string& callId, const std::string& roomId,
-                           const std::string& role) {
-    (void)callId; (void)roomId; (void)role;
+                           const std::string& role, const std::string& caller,
+                           const std::string& chatGroupId, const std::string& userData) {
+    (void)callId; (void)roomId; (void)role; (void)caller; (void)chatGroupId; (void)userData;
   }
   virtual void onCallEnd(const std::string& callId, const std::string& reason,
                          std::int64_t durationSec, const std::string& endedBy) {
@@ -198,6 +221,22 @@ public:
     return call(imrtc_v1_call(handle_, ids.data(), static_cast<std::uint32_t>(ids.size()),
                               mediaType.c_str(), isGroup ? 1 : 0));
   }
+  /**
+   * callEx 带选项发起通话：群号 / user_data / 振铃超时（HOST_INTEGRATION_DESIGN §3.3）。
+   * 返回值只报「这次调用本身合不合法」，`options` 里的业务校验错误从 `onError` 回调出。
+   */
+  Error callEx(const std::vector<std::string>& calleeIds, const std::string& mediaType,
+              bool isGroup, const CallOptions& options) {
+    std::vector<const char*> ids = raw(calleeIds);
+    imrtc_v1_call_options table{};
+    table.struct_size = sizeof(table);
+    table.is_group = isGroup ? 1 : 0;
+    table.chat_group_id = options.chatGroupId.c_str();
+    table.user_data = options.userData.c_str();
+    table.timeout_sec = options.timeoutSec;
+    return call(imrtc_v1_call_ex(handle_, ids.data(), static_cast<std::uint32_t>(ids.size()),
+                                 mediaType.c_str(), &table));
+  }
   Error accept() { return call(imrtc_v1_accept(handle_)); }
   Error reject() { return call(imrtc_v1_reject(handle_)); }
   Error cancel() { return call(imrtc_v1_cancel(handle_)); }
@@ -291,12 +330,13 @@ private:
     std::vector<std::string> ids;
     for (std::uint32_t i = 0; i < invite->callee_count; ++i) ids.push_back(text(invite->callee_ids[i]));
     o->onCallReceived(text(invite->call_id), text(invite->caller), ids, text(invite->media_type),
-                      invite->is_group != 0);
+                      invite->is_group != 0, text(invite->chat_group_id), text(invite->user_data));
   }
   static void cbCallBegin(void* u, const imrtc_v1_call_begin* begin) {
     Observer* o = self(u);
     if (o == nullptr || begin == nullptr) return;
-    o->onCallBegin(text(begin->call_id), text(begin->room_id), text(begin->role));
+    o->onCallBegin(text(begin->call_id), text(begin->room_id), text(begin->role),
+                  text(begin->caller), text(begin->chat_group_id), text(begin->user_data));
   }
   static void cbCallEnd(void* u, const imrtc_v1_call_end* end) {
     Observer* o = self(u);

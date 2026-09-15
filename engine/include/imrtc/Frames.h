@@ -75,7 +75,10 @@ const FrameFields& roomClosedFields();
 
 // ---- call 域：振铃流程（§4）。Call 层**不碰媒体**，所以这里没有一个 SDP 字段。----
 
-/** inviteFields：发起通话。user_data 是 opaque **字符串**不是对象（§2.4 规则 5）。 */
+/**
+ * inviteFields：发起通话。user_data 是 opaque **字符串**不是对象（§2.4 规则 5）。
+ * chat_group_id 是宿主自己的群号（§3.2，2026-09-15），可空、通话期间不可改。
+ */
 const FrameFields& inviteFields();
 /** inviteOkFields：**主叫此时禁止 room.join**——接听前不进 SFU（§4.1）。 */
 const FrameFields& inviteOkFields();

@@ -13,6 +13,9 @@ const FrameFields& inviteFields() {
       stringField("room_id"),
       intRangeField("timeout_sec", kDefaultTimeoutSec, kMinTimeoutSec, kMaxTimeoutSec),
       stringField("user_data"),
+      // 宿主自己的群号，opaque、≤64 字节，可空（HOST_INTEGRATION_DESIGN §3.2，2026-09-15）。
+      // 服务端不解析、不校验群成员关系，只原样带出去；通话期间不可改。
+      stringField("chat_group_id"),
   };
   return kFields;
 }
@@ -49,6 +52,8 @@ const FrameFields& incomingFields() {
       intRangeField("timeout_sec", kDefaultTimeoutSec, kMinTimeoutSec, kMaxTimeoutSec),
       intField("invited_at_ms"),
       stringField("user_data"),
+      // 原样带上：被叫与中途加入者靠它决定「添加成员」列哪个群的人（§4.2）。
+      stringField("chat_group_id"),
   };
   return kFields;
 }
@@ -85,6 +90,12 @@ const FrameFields& connectedFields() {
       // 通话时长的起点，服务端时钟。
       intField("connected_at_ms"),
       stringField("accepted_by"),
+      // 发起人。call.join 进来的人没收过 call.incoming，只能从这里知道（§4.2）。
+      stringField("caller"),
+      // 同 call.invite，中途加入与断线恢复后也拿得到群号（§3.2）。
+      stringField("chat_group_id"),
+      // 同 call.invite，原样回显。
+      stringField("user_data"),
   };
   return kFields;
 }

@@ -6,17 +6,47 @@
 
 ## 当前焦点
 
-**没有进行中的改动。** 最近两刀（2026-09-11，macOS 已手点验，**Windows 未编译未运行**）：
-- 窗口在后台时的来电提醒（UX_FLOWS §07 第 3 条）：`demo/IncomingAlert`（判据 + 状态，系统侧经 `Sink` 注入）· `demo/SystemAlertSink`（`QSystemTrayIcon::showMessage`）·
-  `demo/SystemAlertAttention_mac.mm` / `_win.cpp`（`FlashWindowEx`）/ `_stub.cpp`。
-- 设置页「详细日志」+ SDK 1.0.0（`acede6a`）。
+**宿主对接 M1 + M8（本仓部分）已实现，macOS `test.sh` 八步全绿，Windows 未编译未运行。**
 
-**整体状态**：P5 C ABI + Qt Demo 已交付（macOS `test.sh` 八步全绿）。导出面只有 27 个 `imrtc_v1_*`（`scripts/check-abi.sh` 守）；`scripts/smoke.sh` 经 C ABI 对真服务端跑通。
-**媒体推迟、按纯信令模式交付**：能拨号、进房、收到全部状态回调，就是没有声音和画面。
-还没有：真实媒体（SDP / ICE / 声画）、设备枚举、渲染路径 B（原始帧回调）、共享屏幕、C# 绑定。**Windows 一次都没编译过。**
+- `chat_group_id` / `user_data` 随 `call()` 一路进 `call.invite`（`inviteFields()`），被叫 `onCallReceived`
+  带 `chat_group_id`/`user_data`（`incomingFields()`），接通 `onCallBegin` 带 `caller`/`chat_group_id`/`user_data`
+  （`connectedFields()`）——取 `call.connected` 里的值，为空回落到本通 `call.incoming`/`call()` 选项记下的值
+  （`CallContext::callerUid/chatGroupId/userData`，`engine/src/state/CallRecv.cpp`）。
+- 本地先拦：`chat_group_id` 超 64 字节/含空白换行、`user_data` 超 4096 字节 → `onError(1004)` + `onCallEnd(error)`，
+  不上线路（`engine/src/state/CallMachine.cpp` 的 `localCallRejected`/`chatGroupIdValid`/`userDataValid`）。
+  本仓原先没有「callee_ids 里有自己」的本地校验（那条只由服务端 1004 兜底），这条新加的按同一出口做。
+- 错误码 1409 `invite_denied` 已加（`engine/include/imrtc/Errors.h` + `Errors.cpp` + `capi/include/imrtc/imrtc_c.h`
+  的 `IMRTC_V1_ERR_INVITE_DENIED`），`error_codes.json` 逐条相等的断言（`tests/ConformanceTest.cpp`）过。
+- C++ 门面新增 `CallEngine::call(..., const CallOptions&)` 重载（旧 3 参 `call()` 不动）；`joinCall(callId)`
+  与 `inviteMore(uids)` **发现本仓早就实现了**（`call.join`/`call.invite_more` 状态机分支、`imrtc_v1_join_call`/
+  `imrtc_v1_invite_more` 都已存在）——`CLIENT_PARITY.md` 桌面列若还写 ⬜，是文档漂了，不是代码缺。
+- capi 追加式新增：`imrtc_v1_call_options` 结构体 + `imrtc_v1_call_ex()`；`imrtc_v1_call_invite`/
+  `imrtc_v1_call_begin` 尾部追加字段（`chat_group_id`/`user_data`/`caller`，走「只加字段不加回调」的扩展方式，
+  因为这两个结构体本来就是按单指针传的，追加字段对旧宿主零风险）。旧 `imrtc_v1_call`、旧回调表布局不动。
+  `capi/include/imrtc/CallEngine.hpp` 同步加 `CallOptions`/`callEx`，`Observer::onCallReceived/onCallBegin`
+  签名直接改（桌面还没有宿主接入，改签名比留兼容分支更便宜，参照 iOS 的同期决定）。
+  `demo/EngineBridge.*`、`tools/Smoke.cpp` 跟着改签名，Demo 仍能编译。
+- 三条新一致性向量（`caller_group_call_carries_chat_group_id` / `callee_group_call_learns_chat_group_id` /
+  `member_joins_ongoing_group_call` 的新增字段）全绿；`envelope.json` 的 `call_invite_defaults` 补字段、
+  新增 `call_incoming_defaults`/`call_connected_defaults` 全绿。
+
+**上一轮（2026-09-11，macOS 已手点验，Windows 未编译未运行）**：窗口在后台时的来电提醒（`demo/IncomingAlert`
+等）、设置页「详细日志」+ SDK 1.0.0。
+
+**整体状态**：P5 C ABI + Qt Demo 已交付（macOS `test.sh` 八步全绿）。导出面 31 个 `imrtc_v1_*`（`scripts/check-abi.sh` 守，
+本轮新增 `imrtc_v1_call_ex` 后从 30 涨到 31）；`scripts/smoke.sh` 经 C ABI 对真服务端跑通（本轮未重跑，未改动
+握手/振铃主流程）。**媒体推迟、按纯信令模式交付**：能拨号、进房、收到全部状态回调，就是没有声音和画面。
+还没有：真实媒体（SDP / ICE / 声画）、设备枚举、渲染路径 B（原始帧回调）、共享屏幕、C# 绑定、群通话
+Kit 选人页（M2，桌面没有 Kit，本产品设计已注明不适用）。**Windows 一次都没编译过。**
 
 ## 下一步
 
+0. **宿主对接 M1/M8 收尾**：① Demo 没有做「按 call_id 加入」入口与群号/user_data 的界面展示——
+   `EngineBridge`/`Smoke.cpp` 已经把新字段打到日志/信号里，UI 消费留给有余力时再做（`demo/MainWindow.cpp`
+   已经 557/600，`capi/src/imrtc_c.cpp` 562/600，加 UI 前先看体量）。② 提醒维护 `CLIENT_PARITY.md` 的人：
+   `call.invite_more`/`call.join` 桌面这边其实早就实现了，若那张表桌面列还写 ⬜ 是文档漂了。
+   ③ Windows 侧还没编译过，新加的 `imrtc_v1_call_ex`/结构体尾部追加字段也要在 Windows 上过一遍
+   `dumpbin /exports` 与联调（见下一条一起排）。
 1. **到 Windows 上编译并手点**（等机器 / 集成方）。后台来电提醒四条：① 最小化 / 非活动时来电，任务栏按钮持续闪；② 对方取消后立刻停闪、不留橙色高亮；
    ③ 闪着时切回窗口系统自己停，之后接通 / 挂断不出错；④ 气泡靠藏托盘图标收起。设置页详细日志也点一次。
 2. `Shots` 的设置页截图（高度改到 680）没重新生成、没人看过。
@@ -47,6 +77,14 @@
 - 横幅用了 `QGraphicsDropShadowEffect`：别往横幅里放原生子窗口（会画到阴影外）。
 
 **C ABI**
+- **群通话宿主对接（2026-09-15）**：`onCallBegin` 的 `caller` 回落只在 callee 一侧成立
+  （靠 `call.incoming` 记下的 `callerUid`）；caller 自己那侧如果 `call.connected.caller`
+  缺席（真正的老服务端），`onCallBegin.caller` 会是空串——caller 本来就知道自己是谁，
+  这个空洞目前判断为可接受，等真遇到老服务端联调再看要不要补。
+- 本仓至今**没有**「`callee_ids` 里有自己」的本地预校验（协议 §2.2 由服务端 1004 兜底）；
+  新加的 `chat_group_id`/`user_data` 本地校验（`localCallRejected`）是按设计文档「与它同一个
+  出口」的说法做的，出口形状（onError 1004 + onCallEnd(error)、不转移状态）是本仓自己定的，
+  不是抄的既有代码——五端联调时确认一下其它端「有自己」那条走的是不是同一个形状。
 - 三处不向后兼容改动（趁 0.1.0 没宿主时改）：`on_kicked_out` 多了 `reason` 参数（导出面没变，`check-abi.sh` 拦不住，第一个宿主接入后补原因就得走版本协商）；
   `imrtc_v1_speaker` / `imrtc_v1_quality` 加首字段 `uint32_t struct_size`（唯二按数组交出去的结构体）；C++ 内部 `CallEngineOptions.wallClock`（`clock` 改为单调时钟，`wallClock` 只填信封 `ts`）。
 - **《接入指南》第一页三条**：回调在 Engine 线程上抛、切 UI 线程是宿主的事；回调给出的指针只在该次回调期间有效；`imrtc_v1_engine_destroy` 阻塞到回调静默（GC 语言宿主尤其要紧）。
