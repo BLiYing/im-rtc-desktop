@@ -316,8 +316,8 @@ void MainWindow::wireCall() {
             overlay_->markConnected(role);
             alert_->clear();
             if (banner_->isVisible()) showOverlay();  // 在横幅上接的：接通了才换成浮层
-            // 只有主叫能 invite_more（协议 1407），所以这里也照着分。
-            if (!autoInvite_.isEmpty() && role == QLatin1String("caller")) {
+            // 通话里的任何人都能 invite_more（2026-09-15 起，原先仅主叫）；还在响铃 / 已离场才回 1407。
+            if (!autoInvite_.isEmpty()) {
               const QStringList more{autoInvite_};
               autoInvite_.clear();
               const qint32 code = bridge_->inviteMore(more);

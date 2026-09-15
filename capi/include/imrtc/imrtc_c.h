@@ -333,7 +333,7 @@ IMRTC_API int32_t imrtc_v1_accept(imrtc_v1_engine* engine);
 IMRTC_API int32_t imrtc_v1_reject(imrtc_v1_engine* engine);
 IMRTC_API int32_t imrtc_v1_cancel(imrtc_v1_engine* engine);
 IMRTC_API int32_t imrtc_v1_hangup(imrtc_v1_engine* engine);
-/** 群通话中途加人，仅主叫可发。 */
+/** 群通话中途加人，通话里的任何人都能发（不在通话里回 1407）。 */
 IMRTC_API int32_t imrtc_v1_invite_more(imrtc_v1_engine* engine, const char* const* callee_ids,
                                        uint32_t callee_count);
 /** 主动加入一通进行中的群通话。 */

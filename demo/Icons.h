@@ -31,7 +31,7 @@ enum class Name {
   Speaker,
   SpeakerSlash,
   CameraFlip,
-  PersonAdd,    ///< 添加成员，只有主叫可见（协议 1407）
+  PersonAdd,    ///< 添加成员，接通后通话里的人都可见（不在通话里发会回 1407）
   ChevronDown,
   More,
   ScreenShare,

@@ -128,7 +128,7 @@ public:
   void cancel();
   /** hangup 挂断（接通中或接通后）。 */
   void hangup();
-  /** inviteMore 群通话中途加人，仅主叫可发。 */
+  /** inviteMore 群通话中途加人，通话里的任何人都能发（不在通话里回 1407）。 */
   void inviteMore(const std::vector<std::string>& calleeIds);
   /** joinCall 主动加入一通进行中的群通话。「怎么知道它在进行」是宿主的事。 */
   void joinCall(const std::string& callId);

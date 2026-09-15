@@ -189,7 +189,7 @@ create ──► set_observer ──► login ──► [tick tick tick …] ─
 | 1402 | `call_ended` | —— | **静默吞掉**，不弹任何东西 |
 | 1405 | `invalid_call_state` | —— | 一般是界面按钮该禁没禁，查自己的状态 |
 | 1406 | `too_many_callees` | 最多只能邀请 8 人 | 提示 |
-| 1407 | `not_call_owner` | 只有发起人可以邀请他人 | 把加人按钮藏起来 |
+| 1407 | `not_call_owner` | 你已不在通话中，无法添加成员 | 把加人按钮藏起来（通话里的人都能加人；只有刚挂断又点加人的竞态会碰到） |
 | 1408 | `already_in_call` | 您正在另一通电话中 | 提示 |
 | 2001 | `device_permission_denied` | 需要麦克风 / 摄像头权限 | 引导去系统设置 |
 | 2002 | `device_not_found` | 没有找到可用的设备 | 降级为语音 |

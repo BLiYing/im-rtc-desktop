@@ -81,7 +81,7 @@ const FrameFields& inviteFields();
 const FrameFields& inviteOkFields();
 /** callIdFields：只带 call_id 的上行帧共用（accept / reject / cancel / hangup / join）。 */
 const FrameFields& callIdFields();
-/** inviteMoreFields：群通话中途加邀（P4）。仅主叫可发。 */
+/** inviteMoreFields：群通话中途加邀（P4）。通话里的任何人都能发。 */
 const FrameFields& inviteMoreFields();
 /** incomingFields：被叫收到的邀请，对应 onCallReceived。 */
 const FrameFields& incomingFields();

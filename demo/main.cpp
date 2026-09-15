@@ -13,7 +13,7 @@
  *   --profile bob                    独立的设置与通话记录
  *   --auto-accept                    收到来电就接（联调用）
  *   --hangup-after 5                 接通 / 进房 5 秒后自动退出（联调用）
- *   --invite dave                    接通后立刻 invite_more 一个人（只有主叫能发）
+ *   --invite dave                    接通后立刻 invite_more 一个人（通话里的任何人都能发）
  *   --room   new | 8827-1190         走会议房那条路：new 表示先建一个
  *   --fake-video                     每个格子都当成有画面并贴测试图案。
  *                                    用来在没有媒体的情况下验渲染路径 A 的宿主侧。
