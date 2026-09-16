@@ -80,8 +80,7 @@
   `1.0.0` / create 成功 / destroy 完成。
 
 **没做的 / 已知限制**：
-- `IMRTC_SDK=public` 只验证了「还没发布时报错清楚」，**没验证过真下载**——得等用户确认建 tag `1.0.0` 的
-  Release、上传这次打的 zip 才能验。
+- `IMRTC_SDK=public` 已真下载验过（2026-09-17）：Release `1.0.0` 的 zip 下载构建 Demo，启动时 dylib 从 `.app/Contents/Frameworks` 加载。
 - **Windows 侧的 `install()`/`imrtcConfig.cmake` 完全没跑过**（`.lib`/`.dll` 那一路、`dumpbin /exports`），
   本机只有 macOS。
 - `imrtcConfigVersion.cmake` 选了 `SameMajorVersion`——现在只有 1.0.0 一个版本号，这条策略还没被
@@ -101,8 +100,7 @@
 
 ## 下一步
 
-0. **GitHub Release**：等用户确认后建 tag `1.0.0`，把 `dist/imrtc-desktop-1.0.0-macos.zip` 传上去；传完把
-   `IMRTC_SDK=public` 那条路真跑一次（现在只验证了 404 报错路径）。
+0. ~~GitHub Release~~：2026-09-17 已发 `1.0.0`（https://github.com/BLiYing/im-rtc-desktop/releases/tag/1.0.0 ，zip 从 tag 重打，SHA-256 `af4ec8c4…`），公网包档 Demo 验过。下次发版：改 `Version.h` → tag → `./scripts/package.sh` → `gh release create`。
 1. **Windows 侧新增一条**：`install()`/`imrtcConfig.cmake`/`find_package` 这一路要在 Windows 上过一遍——
    `.lib` 导入库进 `ARCHIVE DESTINATION`、`.dll` 进 `RUNTIME DESTINATION` 目前只是照 CMake 惯例写的，
    没有实机验证过。
@@ -167,7 +165,7 @@
   ./scripts/test.sh                              # 唯一测试入口：体量 + 配置 + 编译 + 单测 + ABI
   ./scripts/package.sh                            # 打发布包：dist/imrtc-desktop-1.0.0-macos.zip
   IMRTC_SDK=local  ./scripts/demo.sh              # Demo 链本机包（先跑 package.sh）
-  IMRTC_SDK=public ./scripts/demo.sh              # Demo 链 GitHub Release 包（还没发布，会 404）
+  IMRTC_SDK=public ./scripts/demo.sh              # Demo 链 GitHub Release 包
   cmake --preset macos-clang && cmake --build --preset macos-clang
   cmake -S . -B build/asan -G Ninja -DIMRTC_ASAN=ON && cmake --build build/asan   # ASan/UBSan
   ```
