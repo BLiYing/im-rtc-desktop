@@ -38,4 +38,16 @@ using EngineOutput = MachineOutput<EngineContext>;
 EngineOutput reduceEngine(const EngineContext& ctx, const MachineInput& input,
                           std::int64_t nowMs = 0);
 
+/**
+ * forceEnd 算出强制收场的结果（门面见 `CallEngine::forceEnd`）：通话机、房间机一起归零，
+ * 抛唯一的结束出口（通话 `onCallEnd`、会议 `onRoomLeft`），并给出该发的结束帧。
+ * 没有进行中的通话也不在房里时原样返回（`emit` 为空）。
+ *
+ * 时长起点优先用**本端**进这通电话的时刻 `startedAtMs`（门面记的），没有才退回整通的
+ * `connectedAtMs`——中途被拉进来的人用后者会偏大（Web / iOS 2026-09-15 真机踩过）。
+ *
+ * 纯函数，与 Web `state/forceEnd.ts`、iOS `IMEngineMachine.forceEnd` 同形。
+ */
+EngineOutput forceEnd(const EngineContext& ctx, std::int64_t nowMs, std::int64_t startedAtMs = 0);
+
 }  // namespace imrtc

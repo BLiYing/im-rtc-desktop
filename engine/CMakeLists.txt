@@ -29,11 +29,13 @@ add_library(im_rtc_engine STATIC
   src/state/RoomMachine.cpp
   src/state/RoomRecv.cpp
   src/state/EngineMachine.cpp
+  src/state/ForceEnd.cpp
   src/CallEngine.cpp
   src/media/MediaEnums.cpp
   src/media/MediaPlane.cpp
   src/CallEngineEvents.cpp
   src/CallEngineSession.cpp
+  src/CallEngineForceEnd.cpp
 )
 
 target_include_directories(im_rtc_engine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)

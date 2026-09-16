@@ -258,6 +258,8 @@ public:
   Error reject() { return call(imrtc_v1_reject(handle_)); }
   Error cancel() { return call(imrtc_v1_cancel(handle_)); }
   Error hangup() { return call(imrtc_v1_hangup(handle_)); }
+  /** forceEnd 强制收场，不等服务端。见 `imrtc_v1_force_end`。 */
+  Error forceEnd() { return call(imrtc_v1_force_end(handle_)); }
   Error inviteMore(const std::vector<std::string>& calleeIds) {
     std::vector<const char*> ids = raw(calleeIds);
     return call(imrtc_v1_invite_more(handle_, ids.data(), static_cast<std::uint32_t>(ids.size())));

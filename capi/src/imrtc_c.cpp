@@ -218,6 +218,9 @@ std::int32_t imrtc_v1_cancel(imrtc_v1_engine* engine) {
 std::int32_t imrtc_v1_hangup(imrtc_v1_engine* engine) {
   return guard(engine, [](CallEngine& target) { target.hangup(); });
 }
+std::int32_t imrtc_v1_force_end(imrtc_v1_engine* engine) {
+  return guard(engine, [](CallEngine& target) { target.forceEnd(); });
+}
 
 std::int32_t imrtc_v1_invite_more(imrtc_v1_engine* engine, const char* const* callee_ids,
                                   std::uint32_t callee_count) {

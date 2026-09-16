@@ -14,6 +14,7 @@ add_executable(im_rtc_engine_tests
   ConnectionTest.cpp
   ReconnectTest.cpp
   CallEngineTest.cpp
+  ForceEndTest.cpp
   MediaPlaneTest.cpp
 )
 

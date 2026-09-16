@@ -265,7 +265,8 @@ void CallEngine::handleIncoming(const std::string& type, const std::string& reqI
       否则轮到填 SDP 时手里没有 offer；
     - pub offer 的应答（room.answer，没有 .ok）要落到 pub PC 上才算协商完成。
   */
-  if (media_) media_->onSignalingFrame(type, reqId, data);
+  // 房间已经收场（forceEnd 之后）迟到的候选 / SDP 不交给媒体面，否则它会凭空再造一对 PC。
+  if (media_ && context_.room.state != RoomState::Idle) media_->onSignalingFrame(type, reqId, data);
   // **非请求帧的应答要回显对方的 req_id**（§3.3）。状态机不记 req_id，由这里带上。
   apply(MachineInput::recv(type, data), reqId);
 }
@@ -329,7 +330,12 @@ void CallEngine::dispatchOutput(EngineOutput output, const std::string& replyReq
 }
 
 void CallEngine::emitAll(const std::vector<EmittedEvent>& events) {
-  for (const EmittedEvent& event : events) emitEvent(event);
+  for (const EmittedEvent& event : events) {
+    // 本端进这通电话的那一刻：forceEnd 本地算时长用它，中途被拉进来的人不算上整通的时长。
+    if (event.cb == "onCallBegin") callStartedAtMs_ = options_.clock();
+    if (event.cb == "onCallEnd") callStartedAtMs_ = 0;
+    emitEvent(event);
+  }
   reactToEvents(events);
 }
 

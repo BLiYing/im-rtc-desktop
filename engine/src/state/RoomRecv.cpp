@@ -139,6 +139,18 @@ RoomOutput handleTrackUnpublished(const RoomContext& ctx, const Json& data) {
 }  // namespace
 
 RoomOutput reduceRoomRecv(const RoomContext& ctx, const std::string& type, const Json& data) {
+  /*
+    **idle 下迟到的房间帧一律丢弃**，唯一例外是 `room.join.ok`：服务端已经把我们放进房了，
+    而本地早就收场了（`forceEnd` 时 join 还在路上）。服务端只验房票、不查通话成员，
+    不补发 `room.leave` 的话别人一直看得见我们。本地状态不动；那条 leave 由 forceEnd 之外的
+    普通请求路径发，它的 `.ok` 回来时同样落在这里被丢掉，不会多抛一次 onRoomLeft。
+    原先 join.ok 在 idle 下照样把房间搭成 joined。与 Web `roomRecv.ts` 的 handleLateFrame 同形。
+  */
+  if (ctx.state == RoomState::Idle) {
+    const std::string roomId = str(data, "room_id");
+    if (type != okType(frame::kRoomJoin) || roomId.empty()) return roomOut(ctx);
+    return roomOut(ctx, {frameOf(frame::kRoomLeave, obj({{"room_id", Json::make(roomId)}}))});
+  }
   if (type == okType(frame::kRoomJoin)) return handleJoinOk(ctx, data);
   if (type == okType(frame::kRoomLeave)) {
     return roomOut(clearedRoom(RoomState::Idle), {},

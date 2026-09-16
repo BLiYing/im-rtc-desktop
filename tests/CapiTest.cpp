@@ -77,6 +77,7 @@ IMRTC_TEST(capiCreateRejectsBadParams, "C ABI —— 参数校验：空指针与
 IMRTC_TEST(capiNullHandleIsSafe, "C ABI —— 对空句柄调任何方法都返回错误码，不崩") {
   CHECK_EQ(imrtc_v1_login(nullptr, "tk"), std::int32_t{IMRTC_V1_ERR_BAD_PARAMS}, "login");
   CHECK_EQ(imrtc_v1_hangup(nullptr), std::int32_t{IMRTC_V1_ERR_BAD_PARAMS}, "hangup");
+  CHECK_EQ(imrtc_v1_force_end(nullptr), std::int32_t{IMRTC_V1_ERR_BAD_PARAMS}, "force_end");
   CHECK_EQ(imrtc_v1_engine_tick(nullptr), std::int32_t{IMRTC_V1_ERR_BAD_PARAMS}, "tick");
   CHECK_EQ(imrtc_v1_attach_view(nullptr, "bob", nullptr), std::int32_t{IMRTC_V1_ERR_BAD_PARAMS},
            "attach_view");

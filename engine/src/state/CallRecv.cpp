@@ -178,6 +178,28 @@ CallOutput handleOutcome(const CallContext& ctx, const Json& data, const char* u
   return callOut(ctx, {}, std::move(emit));
 }
 
+/**
+ * handleLateFrame：idle 下迟到的帧**照旧丢弃**，只有两条例外——它们说明服务端那边
+ * **还有一通挂着本端的电话**，而本地早就收场了（`forceEnd` 时请求还在路上，
+ * 或请求超时回滚之后应答才到）：
+ *
+ * - `call.invite.ok`：邀请落地了，被叫正在响铃。补发 `call.cancel`，否则被叫一直响到超时。
+ * - `call.connected`：有人已经接起来了。补发 `call.hangup`，否则服务端一直把本端当成在通话里。
+ *
+ * 本地状态不动、不抛回调。与 Web `callRecv.ts`、iOS `IMCallMachine.handleLateFrame` 同形。
+ */
+CallOutput handleLateFrame(const CallContext& ctx, const std::string& type, const Json& data) {
+  const std::string callId = str(data, "call_id");
+  if (callId.empty()) return callOut(ctx);
+  if (type == okType(frame::kCallInvite)) {
+    return callOut(ctx, {frameOf(frame::kCallCancel, obj({{"call_id", Json::make(callId)}}))});
+  }
+  if (type == frame::kCallConnected) {
+    return callOut(ctx, {frameOf(frame::kCallHangup, obj({{"call_id", Json::make(callId)}}))});
+  }
+  return callOut(ctx);
+}
+
 }  // namespace
 
 CallOutput reduceCallRecv(const CallContext& ctx, const std::string& type, const Json& data) {
@@ -187,9 +209,9 @@ CallOutput reduceCallRecv(const CallContext& ctx, const std::string& type, const
   // 终态帧优先：**任何非 idle 状态收到 call.ended 都直达 idle**（§5.1）。
   if (type == frame::kCallEnded) return handleEnded(ctx, data);
 
-  // idle 下的迟到帧一律静默丢弃：不抛回调、不发帧、不报错。
-  // 本地状态与服务端赛跑是正常的，客户端得容忍。
-  if (ctx.state == CallState::Idle && type != frame::kCallIncoming) return callOut(ctx);
+  // idle 下的迟到帧一律静默丢弃：不抛回调、不报错。本地状态与服务端赛跑是正常的，客户端得容忍。
+  // 只有两条例外要补发结束帧，见 handleLateFrame。
+  if (ctx.state == CallState::Idle && type != frame::kCallIncoming) return handleLateFrame(ctx, type, data);
 
   if (type == frame::kCallIncoming) return handleIncoming(ctx, data);
   if (type == okType(frame::kCallInvite)) {

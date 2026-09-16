@@ -147,6 +147,19 @@ public:
   void cancel();
   /** hangup 挂断（接通中或接通后）。 */
   void hangup();
+  /**
+   * forceEnd 强制结束当前这一场：**结束帧立刻发出，本地立刻收场，不等服务端。**
+   *
+   * 给「红键按下去、等不到结束事件」用：`hangup()` 只发帧，状态由服务端的 `call.ended` 推进，
+   * 帧没发出去或被拒了这一场就收不掉。按此刻状态挑结束帧（通话中 hangup、响铃中 reject、
+   * 拨出中 cancel、会议里 room.leave），本地抛 `onCallEnd`（会议抛 `onRoomLeft`）；
+   * 服务端随后的 `call.ended` 因为本地已是 idle 被丢掉，不会抛第二次。
+   *
+   * 拨出时 `call.invite.ok` 还没回来就收场：那条 invite.ok 迟到时补发 `call.cancel`，
+   * 迟到的是 `call.connected` 就补发 `call.hangup`；迟到的 `room.join.ok` 补发 `room.leave`。
+   * 连接断着时帧发不出去，只做本地收场。没有通话也不在房里时是空操作。
+   */
+  void forceEnd();
   /** inviteMore 群通话中途加人，通话里的任何人都能发（不在通话里回 1407）。 */
   void inviteMore(const std::vector<std::string>& calleeIds);
   /** joinCall 主动加入一通进行中的群通话。「怎么知道它在进行」是宿主的事。 */
@@ -296,6 +309,8 @@ private:
    * 是宿主自己要拆的，见 logout() 里的注释。
    */
   bool tearingDown_ = false;
+  /** 本端抛 onCallBegin 的本地时刻，0 = 不在通话里。forceEnd 的时长从这里算。 */
+  std::int64_t callStartedAtMs_ = 0;
 };
 
 }  // namespace imrtc

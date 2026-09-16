@@ -438,6 +438,12 @@ IMRTC_API int32_t imrtc_v1_accept(imrtc_v1_engine* engine);
 IMRTC_API int32_t imrtc_v1_reject(imrtc_v1_engine* engine);
 IMRTC_API int32_t imrtc_v1_cancel(imrtc_v1_engine* engine);
 IMRTC_API int32_t imrtc_v1_hangup(imrtc_v1_engine* engine);
+/**
+ * 强制结束当前这一场：结束帧立刻发出、本地立刻收场，不等服务端（红键按下去等不到 on_call_end 时用）。
+ * 通话抛 on_call_end（reason 按此刻状态：hangup / reject / cancel），会议抛 on_room_left；
+ * 服务端随后的结束帧不再抛第二次。没有通话也不在房里时是空操作。与三端的 forceEnd 同义。
+ */
+IMRTC_API int32_t imrtc_v1_force_end(imrtc_v1_engine* engine);
 /** 群通话中途加人，通话里的任何人都能发（不在通话里回 1407）。 */
 IMRTC_API int32_t imrtc_v1_invite_more(imrtc_v1_engine* engine, const char* const* callee_ids,
                                        uint32_t callee_count);
