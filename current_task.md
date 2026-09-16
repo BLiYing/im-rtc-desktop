@@ -106,10 +106,7 @@
 1. **Windows 侧新增一条**：`install()`/`imrtcConfig.cmake`/`find_package` 这一路要在 Windows 上过一遍——
    `.lib` 导入库进 `ARCHIVE DESTINATION`、`.dll` 进 `RUNTIME DESTINATION` 目前只是照 CMake 惯例写的，
    没有实机验证过。
-2. **§A 发布被拒收场：用故障注入上真端走一遍**（先 `FAULT_INJECTION=1 ./scripts/dev.sh`）：通话接通后
-   `curl -X POST $B/v1/dev/faults -d '{"action":"reject","uid":"<本端uid>","frame_type":"room.publish","code":1302}'`，
-   再开一次麦 / 摄像头 → 本端收场、结束原因 error、对端收到挂断。过了把 CLIENT_PARITY 那一行 🟡 转 ✅。
-   代码已提交（`git log` 标题「call: 发布 / 订阅被拒要收场」），真机验收后续再做。
+2. **§A 发布被拒收场 Demo 验不了**（2026-09-17 故障注入试过）：Demo 没接媒体，从不发 `room.publish`，注入的规则一直不命中；只能靠单测（`RoomFsmTest` / `MediaPlaneTest`），CLIENT_PARITY 这一格停 🟡，等接上媒体再验。
 3. **宿主对接 M1/M8 收尾**：① Demo 没有「按 call_id 加入」入口与群号/user_data 的界面展示；② 提醒维护
    `CLIENT_PARITY.md` 的人：`call.invite_more`/`call.join` 桌面早就实现了，若那张表桌面列还写 ⬜ 是文档漂了；
    ③ `imrtc_v1_call_ex`/结构体尾部追加字段也要在 Windows 上过一遍 `dumpbin /exports` 与联调。
