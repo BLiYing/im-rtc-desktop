@@ -53,6 +53,13 @@ struct CallInvite {
   std::string chatGroupId;
   /** 宿主私有字节，原样透传，Engine 不解析。 */
   std::string userData;
+  /**
+   * 这次邀请是谁发的（2026-09-16）。**与 `caller` 不是一回事**：`caller` 恒为这通电话的
+   * 发起人，而群通话里被别人 `invite_more` 拉进来时，`inviter` 才是按下「添加成员」的那个人
+   * （离场的发起人被拉回来时，`caller` 就是他自己）。界面上「谁邀请你」要显示这个。
+   * 服务端没带（旧版本）时 Engine 已回落成 `caller`，宿主不用自己兜底。
+   */
+  std::string inviter;
 };
 
 /** CallBegin 对应 `onCallBegin`：双方在这一刻同时开始计时。 */

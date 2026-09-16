@@ -54,6 +54,10 @@ const FrameFields& incomingFields() {
       stringField("user_data"),
       // 原样带上：被叫与中途加入者靠它决定「添加成员」列哪个群的人（§4.2）。
       stringField("chat_group_id"),
+      // 这次邀请是谁发的（2026-09-16）。**与 caller 不是一回事**：caller 恒为发起人，
+      // invite_more 拉人进来时 inviter 才是按下「添加成员」的那个人。空串 = 旧服务端不带，
+      // 由 handleIncoming 回落成 caller。
+      stringField("inviter"),
   };
   return kFields;
 }

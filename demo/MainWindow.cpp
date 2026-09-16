@@ -290,7 +290,7 @@ void MainWindow::wireCall() {
   connect(bridge_, &EngineBridge::callReceived, this,
           [this](const QString& callId, const QString& caller, const QStringList& callees,
                  const QString& mediaType, bool isGroup, const QString& chatGroupId,
-                 const QString& userData) {
+                 const QString& userData, const QString& inviter) {
             // Demo 暂不展示群号/user_data（HOST_INTEGRATION_DESIGN §3.4 的选人页留给
             // 宿主自己的 provider）；EngineBridge 已经把它们打进日志，联调够用。
             Q_UNUSED(chatGroupId);
@@ -307,8 +307,11 @@ void MainWindow::wireCall() {
             // 浮层先备好来电态但不显示：点开横幅才换过去。
             overlay_->beginIncoming(caller, callees, mediaType, isGroup);
             banner_->showCall(caller, mediaType, isGroup);
+            // 系统提醒显示的是**把你拉进来的那个人**：群里被别人 invite_more 拉进来时，
+            // caller 仍是最初的发起人，显示他对不上（引擎已保证 inviter 非空，这里再兜一次）。
             // 窗口在前台就只有横幅；在后台再跳 Dock / 闪任务栏 + 系统通知。都不抢焦点。
-            alert_->ring(incomingalert::presenceOf(this), caller, mediaType, isGroup);
+            alert_->ring(incomingalert::presenceOf(this), inviter.isEmpty() ? caller : inviter,
+                         mediaType, isGroup);
             dial_->setDialingEnabled(false);
             if (autoAccept_) bridge_->accept();
           });

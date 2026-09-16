@@ -82,7 +82,7 @@ bool dispatchObserverEvent(CallEngineObserver& out, const EmittedEvent& event) {
     target->onCallReceived(CallInvite{str(args, "call_id"), str(args, "caller"),
                                       stringsOf(args, "callee_ids"), str(args, "media_type"),
                                       boolean(args, "is_group"), str(args, "chat_group_id"),
-                                      str(args, "user_data")});
+                                      str(args, "user_data"), str(args, "inviter")});
   } else if (cb == "onCallBegin") {
     target->onCallBegin(CallBegin{str(args, "call_id"), str(args, "room_id"),
                                   str(args, "media_type"), boolean(args, "is_group"),

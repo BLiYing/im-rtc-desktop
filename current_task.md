@@ -6,7 +6,32 @@
 
 ## 当前焦点
 
-**2026-09-15 四端 API 命名核对（本仓部分）已落地，macOS `test.sh` 八步全绿（含 Demo），Windows 未编译未运行。**
+**2026-09-16 协议新字段 `call.incoming.inviter`（本仓部分）已落地，未提交；macOS 编译 + 单测 + Demo 界面测试全绿，Windows 未编译未运行。**
+
+`inviter` = **这次邀请是谁发的**，与 `caller`（恒为发起人）分开：群里被别人 `invite_more` 拉进来时，
+界面上「谁邀请你」要显示 `inviter`（离场的发起人被拉回来时 `caller` 就是他自己，显示 caller 会自指）。
+五端同步改，服务端与协议文档由主会话改，本仓只做客户端这一半：
+
+- `incomingFields()` 加 `stringField("inviter")`（`engine/src/signaling/FramesCall.cpp`）；
+  `handleIncoming`（`engine/src/state/CallRecv.cpp`）解析后**空串回落 `caller`**——回落只做这一次，
+  往上（`onCallReceived` / C ABI / 宿主）拿到的永远非空。
+- `CallInvite` 追加 `std::string inviter`（`engine/include/imrtc/CallEngineObserver.h`），
+  `CallEngineEvents.cpp` 的聚合初始化跟着补最后一个实参。
+- **C ABI 只在尾部追加**（§2 红线 2，与 2026-09-15 追加 `chat_group_id`/`user_data` 同一做法）：
+  `imrtc_v1_call_invite` 末尾加 `const char* inviter`，**不动字段顺序、不动 `struct_size` 判定**；
+  旧宿主结构体更小，读不到它也不会崩。`capi/src/CObserver.cpp` 填值。
+- 封装层不受 ABI 约束，直接改签名：`CallEngine.hpp::Observer::onCallReceived` 末尾加 `inviter` 参数 + 跳板透传；
+  `demo/EngineBridge.{h,cpp}`（信号与 override）、`tools/Smoke.cpp` 跟着改——**Smoke.cpp 不改会编译失败**
+  （非虚函数 `override` 隐藏虚函数，8 vs 7 个参数），上一轮改这个签名时也是它先炸。
+- Demo：只改**系统来电提醒**显示的名字（`demo/MainWindow.cpp` 的 `alert_->ring(...)` 用 `inviter`），
+  窗内横幅与浮层仍用 `caller`，没有扩大改动面。
+- 测试：`tests/CallFsmTest.cpp` 新增 `incomingCarriesInviter`（带 inviter 原样抛 / 缺省回落 caller，
+  并钉住「caller 不许被 inviter 顶掉」）。**一致性向量本仓代码不用改**：`expectSubset` 是子集比对
+  （`tests/Vectors.cpp`），多抛一个 arg 不会让五仓共用的向量变红；主会话另在 `call_fsm.json` 加了两条 inviter 用例（带 inviter / 缺省回落），本仓 `./scripts/test.sh` 跑过（125 例，输出里能看到那条新用例）。
+- 验证（**没跑全量 `test.sh`**）：`cmake --build --preset macos-clang` 全过（含 Qt Demo）、
+  引擎单测 **125 绿**（原 124 + 本轮 1）、Demo 五组界面测试全绿、包装头回调覆盖 26/26、体量门禁通过（3 条 WARN，见下一步 7）。
+
+**上一轮：2026-09-15 四端 API 命名核对（本仓部分）已落地，macOS `test.sh` 八步全绿（含 Demo），Windows 未编译未运行。**
 
 - `imrtc_v1_call_end` 追加 `imrtc_v1_end_reason reason_code`（与 iOS `IMCallEndReason` 同值，12 个封闭值，陌生值折 ERROR）；
   引擎侧新增 `imrtc::EndReason` + `endReasonOf()`（`engine/include/imrtc/Reasons.h`），`CallEnd` 结构体追加
@@ -105,8 +130,8 @@ Kit 选人页（M2，桌面没有 Kit，本产品设计已注明不适用）。*
 5. **`WebRTCAdapter`**（推迟，等 Apple Silicon 或 Windows 机器；做完与 Web / iOS 各互打一次）。ICE 重启的信令半边已做完，只剩把 `restartPubICE()` 交给 `createOffer({iceRestart:true})` 并在 offer 生成后清掉。
    规则：各自重启自己 offer 的那条（pub 客户端救、sub 服务端救）；触发用 `failed` 不用 `disconnected`；「要重启」和「要补一次协商」必须分开记。
 6. UX_FLOWS §07 第 1 条（关窗语义）/ 第 2 条（托盘常驻 + 绿点 / 菜单）没排期；说话指示器等媒体面。
-7. 体量预警（阈值 600，预警线 480，碰之前先看行数）：`demo/MainWindow.cpp` 560、`capi/include/imrtc/imrtc_c.h` 525、
-   `capi/include/imrtc/CallEngine.hpp` 496。`capi/src/imrtc_c.cpp` 2026-09-15 拆成 `imrtc_c.cpp`（369）+
+7. 体量预警（阈值 600，预警线 480，碰之前先看行数）：`demo/MainWindow.cpp` 563、`capi/include/imrtc/imrtc_c.h` 535、
+   `capi/include/imrtc/CallEngine.hpp` 503（2026-09-16 加 `inviter` 后各涨 3~10 行）。`capi/src/imrtc_c.cpp` 2026-09-15 拆成 `imrtc_c.cpp`（369）+
    `CObserver.{h,cpp}` + `CApiConvert.{h,cpp}` 之后暂时不紧张，但两个 C++ 头（纯 C 头不好拆、封装头是 header-only）
    涨得快，真到 600 再想怎么拆。
 8. 日志下一步：环形缓冲 + `exportDiagnostics()`（LOGGING.md §7 的 P3），四端一起定形状。按需：C# / P/Invoke 绑定。

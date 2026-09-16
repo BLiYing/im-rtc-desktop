@@ -152,9 +152,10 @@ signals:
   void kickedOut(imrtc_v1_kicked_reason reason);
   void engineError(qint32 code, const QString& name, const QString& forType);
 
+  /** inviter 是**谁把你拉进来的**：首次邀请就是 caller，invite_more 则是按下「添加成员」的人。 */
   void callReceived(const QString& callId, const QString& caller, const QStringList& calleeIds,
                     const QString& mediaType, bool isGroup, const QString& chatGroupId,
-                    const QString& userData);
+                    const QString& userData, const QString& inviter);
   /** caller / chatGroupId / userData 见 imrtc::capi::Observer::onCallBegin 的取值/回落规则。 */
   void callBegan(const QString& callId, const QString& roomId, const QString& role,
                 const QString& caller, const QString& chatGroupId, const QString& userData);
@@ -190,8 +191,8 @@ private:
   void onError(std::int32_t code, const std::string& name, const std::string& forType) override;
   void onCallReceived(const std::string& callId, const std::string& caller,
                       const std::vector<std::string>& calleeIds, const std::string& mediaType,
-                      bool isGroup, const std::string& chatGroupId,
-                      const std::string& userData) override;
+                      bool isGroup, const std::string& chatGroupId, const std::string& userData,
+                      const std::string& inviter) override;
   void onCallBegin(const std::string& callId, const std::string& roomId, const std::string& role,
                    const std::string& caller, const std::string& chatGroupId,
                    const std::string& userData) override;

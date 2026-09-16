@@ -78,6 +78,15 @@ CallOutput handleIncoming(const CallContext& ctx, const Json& data) {
   next.chatGroupId = str(data, "chat_group_id");
   next.userData = str(data, "user_data");
 
+  /*
+    inviter 是**这次邀请是谁发的**：首次邀请就是主叫本人，`call.invite_more` 拉进来的人
+    则是按下「添加成员」的那个人——`caller` 恒为发起人，两者可以不同。
+    **回落只在这里做一次**：旧服务端不带这个字段，空串就退回 caller，
+    往上（onCallReceived / C ABI / 宿主）拿到的永远是个非空的人。
+  */
+  std::string inviter = str(data, "inviter");
+  if (inviter.empty()) inviter = next.callerUid;
+
   Json calleeIds = Json::makeArray();
   for (const std::string& uid : strArray(data, "callee_ids")) {
     calleeIds.push(Json::make(uid));
@@ -87,6 +96,7 @@ CallOutput handleIncoming(const CallContext& ctx, const Json& data) {
                  {eventOf("onCallReceived",
                           obj({{"call_id", Json::make(next.callId)},
                                {"caller", Json::make(next.callerUid)},
+                               {"inviter", Json::make(inviter)},
                                // **原样带上**：群通话里被叫要靠它摆占位格。
                                {"callee_ids", std::move(calleeIds)},
                                {"media_type", Json::make(mediaType)},

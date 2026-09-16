@@ -204,3 +204,39 @@ IMRTC_TEST(callLocalAcceptsBoundaryValues,
   CHECK_EQ(result.send.size(), std::size_t{1}, "边界值应当正常发出 call.invite");
   CHECK_TRUE(result.state.state == CallState::Inviting, "边界值应当正常进入 inviting");
 }
+
+namespace {
+
+/** incomingData 拼一条 call.incoming；inviter 为空表示「旧服务端压根不带这个字段」。 */
+Json incomingData(const std::string& inviter) {
+  Json data = Json::makeObject();
+  data.set("call_id", Json::make(std::string("call-1")));
+  data.set("room_id", Json::make(std::string("r-1")));
+  data.set("caller", Json::make(std::string("alice")));
+  data.set("media_type", Json::make(std::string("audio")));
+  data.set("is_group", Json::make(true));
+  if (!inviter.empty()) data.set("inviter", Json::make(inviter));
+  return data;
+}
+
+/** invitedBy 收一条 call.incoming，返回抛给宿主的 inviter。 */
+std::string invitedBy(const std::string& inviter, const std::string& label) {
+  const CallContext ctx;
+  const CallOutput result =
+      imrtc::reduceCall(ctx, MachineInput::recv("call.incoming", incomingData(inviter)));
+  CHECK_EQ(result.emit.size(), std::size_t{1}, label + "：该抛且只抛一条 onCallReceived");
+  CHECK_EQ(result.emit[0].cb, std::string("onCallReceived"), label + "：回调名");
+  CHECK_EQ(text(result.emit[0].args, "caller"), std::string("alice"),
+           label + "：caller 恒为发起人，不许被 inviter 顶掉");
+  return text(result.emit[0].args, "inviter");
+}
+
+}  // namespace
+
+IMRTC_TEST(incomingCarriesInviter,
+           "call.incoming —— inviter 是「谁把你拉进来的」，缺省回落 caller（协议 §4.1，2026-09-16）") {
+  // invite_more 拉进来的人：caller 仍是最初的发起人，inviter 是按下「添加成员」的那个。
+  CHECK_EQ(invitedBy("carol", "带 inviter"), std::string("carol"), "带 inviter 时原样抛给宿主");
+  // 旧服务端不带这个字段：回落成 caller，宿主永远拿得到一个非空的人。
+  CHECK_EQ(invitedBy("", "不带 inviter"), std::string("alice"), "缺省时回落 caller");
+}

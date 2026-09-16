@@ -86,7 +86,12 @@ const FrameFields& inviteOkFields();
 const FrameFields& callIdFields();
 /** inviteMoreFields：群通话中途加邀（P4）。通话里的任何人都能发。 */
 const FrameFields& inviteMoreFields();
-/** incomingFields：被叫收到的邀请，对应 onCallReceived。 */
+/**
+ * incomingFields：被叫收到的邀请，对应 onCallReceived。
+ *
+ * inviter 是**这次邀请是谁发的**（2026-09-16），与 caller（恒为发起人）分开：
+ * invite_more 拉人进来时才不同。空串 = 旧服务端不带，由 handleIncoming 回落成 caller。
+ */
 const FrameFields& incomingFields();
 /** ringingFields：告诉主叫「对方设备开始响铃了」。它**不对应任何回调**。 */
 const FrameFields& ringingFields();

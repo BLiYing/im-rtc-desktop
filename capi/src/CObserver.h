@@ -29,7 +29,7 @@ public:
   void onKickedOut(KickedReason reason) override;
   void onError(std::int32_t code, const std::string& name, const std::string& forType) override;
 
-  void onCallReceived(const CallInvite& invite) override;
+  void onCallReceived(const CallInvite& invite) override;  // invite.inviter：谁把你拉进来的
   void onCallBegin(const CallBegin& begin) override;
   void onCallEnd(const CallEnd& end) override;
   void onCallMissed(const CallMissed& missed) override;

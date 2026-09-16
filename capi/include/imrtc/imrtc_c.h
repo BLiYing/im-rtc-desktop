@@ -183,6 +183,16 @@ typedef struct imrtc_v1_call_invite {
   const char* chat_group_id;
   /** 宿主私有字节，原样透传，引擎不解析。 */
   const char* user_data;
+  /*
+    下面这个字段是 2026-09-16 追加的，理由与上面那两个相同：**只追加、不改旧字段**
+    （CONVENTIONS §2 红线 2）。旧宿主的结构体更小，读不到它也不会崩。
+  */
+  /**
+   * 这次邀请是谁发的。**与 caller 不是一回事**：caller 恒为这通电话的发起人，
+   * 群通话里被别人 invite_more 拉进来时，inviter 才是按下「添加成员」的那个人。
+   * 界面上「谁邀请你」要显示这个。服务端没带（旧版本）时引擎已回落成 caller。
+   */
+  const char* inviter;
 } imrtc_v1_call_invite;
 
 /** 通话接通，对应 on_call_begin。 */

@@ -102,12 +102,18 @@ public:
   virtual void onError(std::int32_t code, const std::string& name, const std::string& forType) {
     (void)code; (void)name; (void)forType;
   }
+  /**
+   * `inviter` 是这次邀请**是谁发的**（2026-09-16 追加）：`caller` 恒为发起人，而群通话里
+   * 被别人 `invite_more` 拉进来时，`inviter` 才是按下「添加成员」的那个人。界面上
+   * 「谁邀请你」显示 `inviter`。服务端没带时引擎已回落成 `caller`，不会是空串。
+   */
   virtual void onCallReceived(const std::string& callId, const std::string& caller,
                               const std::vector<std::string>& calleeIds,
                               const std::string& mediaType, bool isGroup,
-                              const std::string& chatGroupId, const std::string& userData) {
+                              const std::string& chatGroupId, const std::string& userData,
+                              const std::string& inviter) {
     (void)callId; (void)caller; (void)calleeIds; (void)mediaType; (void)isGroup;
-    (void)chatGroupId; (void)userData;
+    (void)chatGroupId; (void)userData; (void)inviter;
   }
   /**
    * `caller` / `chatGroupId` / `userData` 取 `call.connected` 里的值，为空时回落到
@@ -348,7 +354,8 @@ private:
     std::vector<std::string> ids;
     for (std::uint32_t i = 0; i < invite->callee_count; ++i) ids.push_back(text(invite->callee_ids[i]));
     o->onCallReceived(text(invite->call_id), text(invite->caller), ids, text(invite->media_type),
-                      invite->is_group != 0, text(invite->chat_group_id), text(invite->user_data));
+                      invite->is_group != 0, text(invite->chat_group_id), text(invite->user_data),
+                      text(invite->inviter));
   }
   static void cbCallBegin(void* u, const imrtc_v1_call_begin* begin) {
     Observer* o = self(u);

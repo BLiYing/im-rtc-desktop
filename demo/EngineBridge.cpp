@@ -254,17 +254,18 @@ void EngineBridge::onError(std::int32_t code, const std::string& name,
 void EngineBridge::onCallReceived(const std::string& callId, const std::string& caller,
                                   const std::vector<std::string>& calleeIds,
                                   const std::string& mediaType, bool isGroup,
-                                  const std::string& chatGroupId, const std::string& userData) {
+                                  const std::string& chatGroupId, const std::string& userData,
+                                  const std::string& inviter) {
   assertOnGuiThread("onCallReceived");
   // 通话生命周期的三条日志：联调时「到底谁没收到」全靠它们定位。
-  qCInfo(lcBridge, "onCallReceived call=%s caller=%s media=%s group=%d chat_group=%s",
-         callId.c_str(), caller.c_str(), mediaType.c_str(), isGroup ? 1 : 0,
+  qCInfo(lcBridge, "onCallReceived call=%s caller=%s inviter=%s media=%s group=%d chat_group=%s",
+         callId.c_str(), caller.c_str(), inviter.c_str(), mediaType.c_str(), isGroup ? 1 : 0,
          chatGroupId.c_str());
   QStringList ids;
   ids.reserve(static_cast<qsizetype>(calleeIds.size()));
   for (const std::string& id : calleeIds) ids << qs(id);
   emit callReceived(qs(callId), qs(caller), ids, qs(mediaType), isGroup, qs(chatGroupId),
-                    qs(userData));
+                    qs(userData), qs(inviter));
 }
 
 void EngineBridge::onCallBegin(const std::string& callId, const std::string& roomId,

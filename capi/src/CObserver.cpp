@@ -46,6 +46,7 @@ void CObserver::onCallReceived(const CallInvite& invite) {
   out.is_group = fromBool(invite.isGroup);
   out.chat_group_id = invite.chatGroupId.c_str();
   out.user_data = invite.userData.c_str();
+  out.inviter = invite.inviter.c_str();
   table_.on_call_received(table_.user_data, &out);
 }
 
