@@ -1,203 +1,165 @@
 # Current Task — im-rtc-desktop（C++17 Engine + C ABI + Qt Demo）
 
-> **活快照**：就地覆盖、不追加。历史见 `git log` 与 [current_task.archive.md](current_task.archive.md)（末节「2026-09-11 精简前全文」）。
+> **活快照**：就地覆盖、不追加。历史见 `git log` 与 [current_task.archive.md](current_task.archive.md)（末节「2026-09-16（发布打包 + Demo 三档之前）：精简前全文」）。
 > 规范 [CONVENTIONS.md](CONVENTIONS.md)（**§2 是 C ABI 边界，本仓最重要的一条**）· 分期 server `docs/design/RTC_CALL_DESIGN.md` §8（桌面）/ §10。
 > ✅ 状态只写在 `../im-rtc-server/docs/CLIENT_PARITY.md`，桌面按 §1.1 交付分层表逐行填，**不许用「桌面 ✅」一个格子结账**。
 
 ## 当前焦点
 
-**2026-09-16（第二轮，已提交（`git log` 里标题为「call: 发布 / 订阅被拒要收场」那笔），未上真端）：静默失败审计 §A——发布 / 订阅被拒要收场。** `./scripts/test.sh` 8 步全绿（129 例），macOS only，Windows 未编译。C ABI 导出面不变（33 个）。
-- `CallEngine::failLocally` 收帧数据：`room.publish` 被拒且在通话里 → 复用内部 `call_failed`（`CallMachine.cpp` 里通话中 / 接通中补发 `call.hangup`，时长改按 `connectedAtMs` 算）；否则 `publish_failed`；`room.subscribe` → `subscribe_failed`。
-- 已知差异：没有 `callStartedAtMs`，群通话中途被拉进来的人撞上这条时时长偏大（与 `synthesizeNetworkEnd` 同一既有限制）；结束帧走普通发送队列，不像三端 `forceEnd` 那样绕开在途请求直发。
-- 上一轮 `call.incoming.inviter` 已提交（`bb1ec1e`），下面那段写的「未提交」是旧话。
+**2026-09-16（第三轮，本仓部分，已提交（标题「构建: SDK 公网发布准备」，未推送），代码审查零问题）：SDK 公网发布打包 + Demo 三档 SDK 开关。** 仓库要发 GitHub Release
+（tag `1.0.0`，等用户确认才建），交付物是 zip，第三方 `find_package(imrtc)` 集成。全部已实现并真跑过验证。
 
-**2026-09-16 协议新字段 `call.incoming.inviter`（本仓部分）已落地，未提交；macOS 编译 + 单测 + Demo 界面测试全绿，Windows 未编译未运行。**
+- **capi 新增 `install()`**：只装动态库 `im_rtc_engine_capi`（静态库那份仍是仓内测试专用、不装）+ 两个头
+  （`imrtc_c.h`/`CallEngine.hpp`）+ `install(EXPORT)`，导出目标名 `imrtc::capi`（与源码档 Demo 链的别名同名，
+  `demo/CMakeLists.txt` 不用分两档写）。新增 `capi/cmake/imrtcConfig.cmake.in` → 生成 `imrtcConfig.cmake` +
+  `imrtcConfigVersion.cmake`（`write_basic_package_version_file` COMPATIBILITY **SameMajorVersion**——ABI 红线 2
+  「只追加字段」保证同大版本内新版 dylib 对旧头永远兼容，大版本号只在协议不兼容时才升，所以选它而非
+  ExactVersion）。install_name 显式设成 `@rpath/libim_rtc_engine_capi.dylib`（原本就是 CMake 默认值，这次写成
+  显式属性、不再依赖隐式默认）。`imrtcConfig.cmake` **没有 `find_dependency()`**：transport_ix/IXWebSocket 是
+  engine 内部 PRIVATE 依赖、静态链进 dylib 内部，已确认宿主感知不到、也不需要装它的头或库。
+- **LICENSE（MIT，2026-09-16 用户补充拍板）**：仓根已有 `LICENSE`（MIT，Copyright (c) 2026 BLiYing，未改动其内容），
+  `capi/CMakeLists.txt` 新增 `install(FILES ../LICENSE DESTINATION .)` 把它装到发布包**根目录**（zip 解压后
+  第一层就能看见，不在 `include/`/`lib/` 底下）；`scripts/package.sh` 装完后核对 `dist/.../LICENSE` 存在、
+  打完 zip 再核对 `unzip -l` 里确实有 `imrtc-desktop-1.0.0-macos/LICENSE` 这一条；README「第三方集成」一节
+  补了一句 MIT 出处。
+- 版本号唯一来源仍是 `engine/include/imrtc/Version.h` 的 `kSdkVersion`：顶层 CMakeLists.txt 用
+  `file(STRINGS)` 抠出设成 `IMRTC_VERSION` 给 `install()` 用；`scripts/package.sh` 自己也抠一遍给 zip 文件名用，
+  抠完立刻跟 CMake 配置日志那行核对一致（不一致就失败）——两处独立抠、互相校验。
+- **新脚本 `scripts/package.sh`**：release preset（`macos-clang-release`，universal）配置 → 只编
+  `im_rtc_engine_capi` 目标 → `cmake --install` 到 `dist/imrtc-desktop-1.0.0-macos/` → `otool -D`（@rpath 名）+
+  `lipo -archs`（x86_64+arm64）+ 复用 `scripts/check-abi.sh` 核对导出符号（33 个）→ 打
+  `dist/imrtc-desktop-1.0.0-macos.zip`。`dist/` 已进 `.gitignore`。
+- **顺带修了 `scripts/check-abi.sh` 一个真 bug**：它原来假设 `dyld_info -exports` 只有一份 3 行表头
+  （`tail -n +4`），universal（x86_64+arm64）库会按架构各打一份表头，第二份表头被当成数据行，误判出
+  「stray 符号」——之前一直没暴露，因为这脚本至今只跑过 debug 单架构构建。改成只认「第一列是十六进制
+  偏移量」的行（`awk '$1 ~ /^0x[0-9A-Fa-f]+$/'`），`sort -u` 去重两个架构的重复符号。修完 universal 库也是
+  干净的 33 个。
+- **Demo 三档 SDK 开关**：顶层 CMakeLists.txt 新增缓存变量 `IMRTC_SDK_DIR`——设了它就整个切轨：不
+  `add_subdirectory` engine/transport/capi/tools，不建引擎测试，改
+  `find_package(imrtc ${IMRTC_VERSION} CONFIG REQUIRED PATHS ${IMRTC_SDK_DIR} NO_DEFAULT_PATH)` 再照常
+  `add_subdirectory(demo)`；配置时印 `message(STATUS "Demo 用的 SDK：源码 / 发布包 <路径>")`——两档版本号都是
+  1.0.0，只有这行分得清。
+- `demo/CMakeLists.txt`：`IMRTC_SDK_DIR` 档下用 `POST_BUILD` 把 `imrtc::capi` 的 dylib 拷进
+  `imrtc_demo.app/Contents/Frameworks`，另**追加**一条 `@executable_path/../Frameworks` 的 rpath（
+  `target_link_options(... -Wl,-rpath,...)`）；`imrtc_demo_shots`（非 bundle）拷到可执行文件旁边、追加
+  `@executable_path`。源码档完全不走这段（`if(IMRTC_SDK_DIR)` 整段跳过），行为不变。**踩过一个坑**：第一版
+  用 `set_target_properties(... BUILD_WITH_INSTALL_RPATH ON INSTALL_RPATH "@executable_path/../Frameworks")`，
+  这是**替换**而不是追加——CMake 自动算出的那份 build-tree rpath（指向 Qt6 的 `lib/` 目录）被整个顶掉，
+  实跑 `imrtc_demo` 直接 `Library not loaded: @rpath/QtWidgets.framework/...`。第一次验证没测出来是因为
+  `DYLD_PRINT_LIBRARIES` 的输出被 `grep -i libim_rtc_engine_capi` 过滤了，把 Qt 那条报错挡在看不见的地方；
+  换 `scripts/demo.sh` 跑真正的 `exec` 路径（不加任何 grep 过滤）才暴露。改成 `target_link_options` 追加后，
+  `otool -l` 能看到三条 `LC_RPATH`（`@executable_path/../Frameworks` + dist 里 capi 的绝对路径 + Qt 的
+  `lib/`），`imrtc_demo.app` 完整启动（`DYLD_PRINT_LIBRARIES` 确认 1404 行库加载记录、零 "not loaded"、
+  `libim_rtc_engine_capi.dylib` 确实是从 `Contents/Frameworks/` 那份加载的）。
+- `scripts/demo.sh` 加 `IMRTC_SDK=source|local|public`（默认 source，行为不变）：`local` 用
+  `dist/imrtc-desktop-1.0.0-macos`（不存在就报错提示先跑 `package.sh`），配置到独立目录
+  `build/macos-clang-sdk-local`；`public` 从
+  `https://github.com/BLiYing/im-rtc-desktop/releases/download/1.0.0/imrtc-desktop-1.0.0-macos.zip` 下载到
+  `dist/public/` 解压再用，配置到 `build/macos-clang-sdk-public`；现在还没发布，实测 `curl` 拿到 404，脚本报
+  「大概率是还没发布……先用 IMRTC_SDK=local 验」，不是裸 404 堆栈。三档各用各的 build 目录，互不污染缓存。
+- README 新增「第三方集成（CMake 最小示例）」一节：zip 布局、`find_package` + `target_link_libraries(imrtc::capi)`
+  的最小 CMakeLists、`main.cpp` 最小调用（create/destroy）、`.app`/非 bundle 两种拷 dylib + 布 rpath 的写法、
+  「不需要 IXWebSocket」说明；「跑一轮」那节补了 `IMRTC_SDK` 三档说明。
 
-`inviter` = **这次邀请是谁发的**，与 `caller`（恒为发起人）分开：群里被别人 `invite_more` 拉进来时，
-界面上「谁邀请你」要显示 `inviter`（离场的发起人被拉回来时 `caller` 就是他自己，显示 caller 会自指）。
-五端同步改，服务端与协议文档由主会话改，本仓只做客户端这一半：
+**验证（真跑过）**：
+- `./scripts/test.sh` 全绿：**129 个用例**、ABI 导出 **33 个**、包装头回调 **26/26**、Demo 界面测试 5 组全过——
+  这是在完成上述全部 CMake 改动**之后**重新跑的，确认没破坏源码档默认路径。
+- `./scripts/package.sh`：产出 `dist/imrtc-desktop-1.0.0-macos.zip`（约 720K）；装出来的 dylib `otool -D` =
+  `@rpath/libim_rtc_engine_capi.dylib`，`lipo -archs` = `x86_64 arm64`，导出符号 33 个。
+- **本地包档**：`-DIMRTC_SDK_DIR=$(pwd)/dist/imrtc-desktop-1.0.0-macos -DIMRTC_BUILD_DEMO=ON` 配置打出
+  「Demo 用的 SDK：发布包 …」；`cmake --build ... --target imrtc_demo imrtc_demo_shots` 通过；
+  `build/macos-clang-sdk-local/` 下**没有** engine/capi 源码目标产物（只有 `demo/` 一个子目录）；`otool -L`
+  看 `imrtc_demo` 引用 `@rpath/libim_rtc_engine_capi.dylib`，dylib 确实在
+  `imrtc_demo.app/Contents/Frameworks/` 里；`DYLD_PRINT_LIBRARIES=1` 跑 `imrtc_demo_shots`（离线截图工具，
+  不用服务端）打印实际加载的是 build 目录里拷进去的那份，`cmp` 过与 `dist/` 那份逐字节相同，跑完自己退出；
+  另外**真正启动了 `imrtc_demo.app` 本体**（不是只测 shots）确认 Qt 的库也一起解析成功、零 "not loaded" 错误、
+  `libim_rtc_engine_capi.dylib` 确实从 `Contents/Frameworks/` 加载——上面那条 rpath 坑就是这一步测出来的。
+- **仓外最小消费者**：`scratchpad/desktop-consumer`（不进仓库）只
+  `find_package(imrtc 1.0.0 CONFIG REQUIRED)` + `target_link_libraries(imrtc::capi)`，`main.cpp` 调
+  `imrtc_v1_version()`/`imrtc_v1_engine_create`/`imrtc_v1_engine_destroy`；配置 + 编译 + 运行通过，打印
+  `1.0.0` / create 成功 / destroy 完成。
 
-- `incomingFields()` 加 `stringField("inviter")`（`engine/src/signaling/FramesCall.cpp`）；
-  `handleIncoming`（`engine/src/state/CallRecv.cpp`）解析后**空串回落 `caller`**——回落只做这一次，
-  往上（`onCallReceived` / C ABI / 宿主）拿到的永远非空。
-- `CallInvite` 追加 `std::string inviter`（`engine/include/imrtc/CallEngineObserver.h`），
-  `CallEngineEvents.cpp` 的聚合初始化跟着补最后一个实参。
-- **C ABI 只在尾部追加**（§2 红线 2，与 2026-09-15 追加 `chat_group_id`/`user_data` 同一做法）：
-  `imrtc_v1_call_invite` 末尾加 `const char* inviter`，**不动字段顺序、不动 `struct_size` 判定**；
-  旧宿主结构体更小，读不到它也不会崩。`capi/src/CObserver.cpp` 填值。
-- 封装层不受 ABI 约束，直接改签名：`CallEngine.hpp::Observer::onCallReceived` 末尾加 `inviter` 参数 + 跳板透传；
-  `demo/EngineBridge.{h,cpp}`（信号与 override）、`tools/Smoke.cpp` 跟着改——**Smoke.cpp 不改会编译失败**
-  （非虚函数 `override` 隐藏虚函数，8 vs 7 个参数），上一轮改这个签名时也是它先炸。
-- Demo：只改**系统来电提醒**显示的名字（`demo/MainWindow.cpp` 的 `alert_->ring(...)` 用 `inviter`），
-  窗内横幅与浮层仍用 `caller`，没有扩大改动面。
-- 测试：`tests/CallFsmTest.cpp` 新增 `incomingCarriesInviter`（带 inviter 原样抛 / 缺省回落 caller，
-  并钉住「caller 不许被 inviter 顶掉」）。**一致性向量本仓代码不用改**：`expectSubset` 是子集比对
-  （`tests/Vectors.cpp`），多抛一个 arg 不会让五仓共用的向量变红；主会话另在 `call_fsm.json` 加了两条 inviter 用例（带 inviter / 缺省回落），本仓 `./scripts/test.sh` 跑过（125 例，输出里能看到那条新用例）。
-- 验证（**没跑全量 `test.sh`**）：`cmake --build --preset macos-clang` 全过（含 Qt Demo）、
-  引擎单测 **125 绿**（原 124 + 本轮 1）、Demo 五组界面测试全绿、包装头回调覆盖 26/26、体量门禁通过（3 条 WARN，见下一步 7）。
+**没做的 / 已知限制**：
+- `IMRTC_SDK=public` 只验证了「还没发布时报错清楚」，**没验证过真下载**——得等用户确认建 tag `1.0.0` 的
+  Release、上传这次打的 zip 才能验。
+- **Windows 侧的 `install()`/`imrtcConfig.cmake` 完全没跑过**（`.lib`/`.dll` 那一路、`dumpbin /exports`），
+  本机只有 macOS。
+- `imrtcConfigVersion.cmake` 选了 `SameMajorVersion`——现在只有 1.0.0 一个版本号，这条策略还没被
+  「发第二个小版本」真正验证过。
+- README 其余章节（状态/依赖/开发）里的行数、用例数、导出面数字是旧的（写于更早阶段），这次只新增了
+  「第三方集成」一节与「跑一轮」里的三档说明，没有通篇校准——不在本次任务范围内。
 
-**上一轮：2026-09-15 四端 API 命名核对（本仓部分）已落地，macOS `test.sh` 八步全绿（含 Demo），Windows 未编译未运行。**
+以上已提交、**未推送**；tag / Release 等用户逐项确认后再做。
 
-- `imrtc_v1_call_end` 追加 `imrtc_v1_end_reason reason_code`（与 iOS `IMCallEndReason` 同值，12 个封闭值，陌生值折 ERROR）；
-  引擎侧新增 `imrtc::EndReason` + `endReasonOf()`（`engine/include/imrtc/Reasons.h`），`CallEnd` 结构体追加
-  `reasonCode` 字段；capi 新增 `toEndReason()` 转换 + 12 条 `static_assert`。`CallEngine.hpp::Observer::onCallEnd`
-  末尾追加 `imrtc_v1_end_reason reasonCode` 参数（封装层不受 ABI 约束，直接改签名），Demo/`tools/Smoke.cpp` 同步。
-- `on_call_cancelled` 的参数名 `by` 改成 `uid`（只改名，ABI 不变）：C 头、`CallEngineObserver::onCallCancelled`、
-  capi 的 `CObserver`、`CallEngine.hpp`、Demo 的 `EngineBridge`/`MainWindow` 变量名一起改。
-- 新增 `imrtc_v1_open_microphone` / `imrtc_v1_close_microphone`，旧的 `imrtc_v1_open_mic` / `close_mic` 保留做
-  已弃用别名（直接转发）。`CallEngine.hpp` 的 `openMic()/closeMic()` 直接改名成 `openMicrophone()/closeMicrophone()`
-  （封装层头文件内联，不受 ABI 约束）；`demo/EngineBridge.cpp` 跟着改调用。
-- **评估后落地**：`on_disconnected` 补充关闭码与 willReconnect——engine 的 `Connection` 层本来就有这两样
-  （`ConnectionEvents::onDisconnected(code, reason, willReconnect)`），只是门面此前没往上传。做法：
-  `imrtc_v1_observer` 尾部追加 `on_disconnected_ex(user_data, code, will_reconnect)`；`imrtc_v1_engine_set_observer`
-  的 struct_size 版本闸从「必须等于当前 sizeof」改成「按 `offsetof(observer, on_disconnected_ex)` 判最低线 +
-  `memcpy` 精确拷贝宿主给的字节数」，否则旧宿主（没有这个字段）会被新字段直接拒之门外，UB 风险也没了。
-  内部 `CallEngineObserver::onDisconnected()` 直接改签名加 `(code, willReconnect)` 两个参数（不受 ABI 约束）。
-- **评估后放弃**：`tokenWillExpire` 回调——C++ engine 里没有任何票据到期计时逻辑（`Connection`/`CallEngine` 都不
-  持有过期时刻，只有服务端错误码 1102 `token_expired`），按规矩不为此新写计时器，没加 `on_token_will_expire`。
-  这与 `imrtc_v1_force_end`（也没做）一起，仍是 current_task 里 0.5 那条记着的差距，等专门排期再补。
-- `capi/src/imrtc_c.cpp` 超过 600 行体量红线后拆成三个文件：`imrtc_c.cpp`（入口点控制流，369 行）+
-  `CObserver.{h,cpp}`（回调表转发类）+ `CApiConvert.{h,cpp}`（C/C++ 两套类型与枚举的转换 + 枚举漂移的
-  `static_assert` 哨兵），`capi/CMakeLists.txt` 同步加两个源文件。
-- `demo/MainWindow.cpp` 修了一个真 bug：`handledOnOtherDevice` 的 action 比较值原来写的是 `"accepted"` /
-  `"rejected"`，但 `engine/src/Enums.cpp` 的 `handledActions()` 实际吐的是 `"accept"` / `"reject"`——
-  比较永远不成立，界面永远走「已在其他设备拒绝」那个分支。`imrtc_c.h`/`CallEngine.hpp` 里同名的文档注释一并改正。
-- 新增/改动测试：`tests/CallEngineTest.cpp` 的 `Recorder::onDisconnected` 换新签名，3 处既有断言（含关闭码/
-  willReconnect）与 1 处前缀判断跟着改；新增 `onCallEnd` 的 `reasonCode` 断言。`tests/CapiTest.cpp` 新增
-  「旧宿主 struct_size 不该被新字段拒」与「新旧麦克风函数名等价」两条。跑 `./scripts/test.sh`：**124 个用例全绿**
-  （原 122 + 本轮 2 条新增）、导出面 **33**（原 31 + 2 个新麦克风函数）、C++ 包装头回调覆盖 **26/26**
-  （原 25 + `on_disconnected_ex`），Demo 5 组界面测试全绿。
+---
 
-**宿主对接 M1 + M8（本仓部分，2026-09-14 及之前）**——已实现，仍然有效：
-
-- `chat_group_id` / `user_data` 随 `call()` 一路进 `call.invite`（`inviteFields()`），被叫 `onCallReceived`
-  带 `chat_group_id`/`user_data`（`incomingFields()`），接通 `onCallBegin` 带 `caller`/`chat_group_id`/`user_data`
-  （`connectedFields()`）——取 `call.connected` 里的值，为空回落到本通 `call.incoming`/`call()` 选项记下的值
-  （`CallContext::callerUid/chatGroupId/userData`，`engine/src/state/CallRecv.cpp`）。
-- 本地先拦：`chat_group_id` 超 64 字节/含空白换行、`user_data` 超 4096 字节 → `onError(1004)` + `onCallEnd(error)`，
-  不上线路（`engine/src/state/CallMachine.cpp` 的 `localCallRejected`/`chatGroupIdValid`/`userDataValid`）。
-  本仓原先没有「callee_ids 里有自己」的本地校验（那条只由服务端 1004 兜底），这条新加的按同一出口做。
-- 错误码 1409 `invite_denied` 已加（`engine/include/imrtc/Errors.h` + `Errors.cpp` + `capi/include/imrtc/imrtc_c.h`
-  的 `IMRTC_V1_ERR_INVITE_DENIED`），`error_codes.json` 逐条相等的断言（`tests/ConformanceTest.cpp`）过。
-- C++ 门面新增 `CallEngine::call(..., const CallOptions&)` 重载（旧 3 参 `call()` 不动）；`joinCall(callId)`
-  与 `inviteMore(uids)` **发现本仓早就实现了**（`call.join`/`call.invite_more` 状态机分支、`imrtc_v1_join_call`/
-  `imrtc_v1_invite_more` 都已存在）——`CLIENT_PARITY.md` 桌面列若还写 ⬜，是文档漂了，不是代码缺。
-- capi 追加式新增：`imrtc_v1_call_options` 结构体 + `imrtc_v1_call_ex()`；`imrtc_v1_call_invite`/
-  `imrtc_v1_call_begin` 尾部追加字段（`chat_group_id`/`user_data`/`caller`，走「只加字段不加回调」的扩展方式，
-  因为这两个结构体本来就是按单指针传的，追加字段对旧宿主零风险）。旧 `imrtc_v1_call`、旧回调表布局不动。
-  `capi/include/imrtc/CallEngine.hpp` 同步加 `CallOptions`/`callEx`，`Observer::onCallReceived/onCallBegin`
-  签名直接改（桌面还没有宿主接入，改签名比留兼容分支更便宜，参照 iOS 的同期决定）。
-  `demo/EngineBridge.*`、`tools/Smoke.cpp` 跟着改签名，Demo 仍能编译。
-- 三条新一致性向量（`caller_group_call_carries_chat_group_id` / `callee_group_call_learns_chat_group_id` /
-  `member_joins_ongoing_group_call` 的新增字段）全绿；`envelope.json` 的 `call_invite_defaults` 补字段、
-  新增 `call_incoming_defaults`/`call_connected_defaults` 全绿。
-
-**上一轮（2026-09-11，macOS 已手点验，Windows 未编译未运行）**：窗口在后台时的来电提醒（`demo/IncomingAlert`
-等）、设置页「详细日志」+ SDK 1.0.0。
-
-**整体状态**：P5 C ABI + Qt Demo 已交付（macOS `test.sh` 八步全绿）。导出面 33 个 `imrtc_v1_*`（`scripts/check-abi.sh` 守，
-2026-09-15 加了 `imrtc_v1_open_microphone`/`imrtc_v1_close_microphone` 后从 31 涨到 33）；`scripts/smoke.sh` 经 C ABI 对真服务端跑通（本轮未重跑，未改动
-握手/振铃主流程）。**媒体推迟、按纯信令模式交付**：能拨号、进房、收到全部状态回调，就是没有声音和画面。
-还没有：真实媒体（SDP / ICE / 声画）、设备枚举、渲染路径 B（原始帧回调）、共享屏幕、C# 绑定、群通话
-Kit 选人页（M2，桌面没有 Kit，本产品设计已注明不适用）。**Windows 一次都没编译过。**
+**整体状态**：P5 C ABI + Qt Demo 已交付（macOS `test.sh` 八步全绿）。导出面 33 个 `imrtc_v1_*`；现在多了一条
+公网分发链路（打包 + 三档 Demo + 第三方最小集成示例，均已验证）。**媒体推迟、按纯信令模式交付**：能拨号、
+进房、收到全部状态回调，就是没有声音和画面。还没有：真实媒体（SDP / ICE / 声画）、设备枚举、渲染路径 B
+（原始帧回调）、共享屏幕、C# 绑定、群通话 Kit 选人页（M2，桌面没有 Kit，本产品设计已注明不适用）。
+**Windows 一次都没编译过**（含这次新增的 install()/find_package 路径）。
 
 ## 下一步
 
-0. **§A 发布被拒收场：用故障注入上真端走一遍**（先 `FAULT_INJECTION=1 ./scripts/dev.sh`）：通话接通后 `curl -X POST $B/v1/dev/faults -d '{"action":"reject","uid":"<本端uid>","frame_type":"room.publish","code":1302}'`，再开一次麦 / 摄像头 → 本端收场、结束原因 error、对端收到挂断。过了把 CLIENT_PARITY 那一行 🟡 转 ✅。代码已提交，真机验收后续再做（2026-09-16 用户定）。
-0. **宿主对接 M1/M8 收尾**：① Demo 没有做「按 call_id 加入」入口与群号/user_data 的界面展示——
-   `EngineBridge`/`Smoke.cpp` 已经把新字段打到日志/信号里，UI 消费留给有余力时再做（`demo/MainWindow.cpp`
-   560/600，加 UI 前先看体量；`capi/src/imrtc_c.cpp` 2026-09-15 已拆成三个文件，暂时不紧张，见下一步 7）。
-   ② 提醒维护 `CLIENT_PARITY.md` 的人：
-   `call.invite_more`/`call.join` 桌面这边其实早就实现了，若那张表桌面列还写 ⬜ 是文档漂了。
-   ③ Windows 侧还没编译过，新加的 `imrtc_v1_call_ex`/结构体尾部追加字段也要在 Windows 上过一遍
-   `dumpbin /exports` 与联调（见下一条一起排）。
-0.5 **C ABI 与其余三端的两处不对等（2026-09-15 写 `/guide` 时发现，仍未做——命名核对那一轮评估过，见「当前焦点」）**：
-   ① **没有 `forceEnd`**：Web / iOS / Android 都有「红键等不到 `callEnd` 时，结束帧立刻上线路、本地立刻收场」的同步兜底，
-   C ABI 只能靠 `hangup` / `reject` / `cancel` 等服务端应答；② **observer 没有「票快到期」回调**（其余三端都有，默认提前 60 秒），
-   宿主只能自己按 `/v1/tokens` 回的 `expires_at_ms` 定时调 `imrtc_v1_update_token`，且 `update_token` 也没有到期时刻参数。
-   **②比预想更麻烦**：查过 `Connection`/`CallEngine` 全部状态，本仓压根没有任何票据到期计时逻辑（只有服务端错误码
-   1102 `token_expired` 这个事后信号），所以补 `on_token_will_expire` 不是「加个字段就行」的追加式活，得先在 engine
-   里造一个到期计时器（多半挂在 `tick()` 那条时间线上），形状还没定，不要临时糊一个。
-   ①③ 都还成立：新函数 `imrtc_v1_force_end` + engine 里的到期计时器 + observer 尾部追加 `on_token_will_expire`
-   （`struct_size` 闸兜旧宿主，做法参照 2026-09-15 `on_disconnected_ex` 那次——`offsetof` 判最低线 + `memcpy` 精确拷贝，
-   别用「struct_size 必须等于当前 sizeof」那种会把旧宿主拒之门外的旧写法）。导出面现在是 33，加 `force_end` 会到 34，
-   同步 `capi/exported_symbols.txt`（通配符，不用真的改）与 `scripts/check-abi.sh` 的期待。指南 `/guide/desktop` 的续票与
-   `/guide/api#force-end` 届时一起改。
-1. **到 Windows 上编译并手点**（等机器 / 集成方）。后台来电提醒四条：① 最小化 / 非活动时来电，任务栏按钮持续闪；② 对方取消后立刻停闪、不留橙色高亮；
-   ③ 闪着时切回窗口系统自己停，之后接通 / 挂断不出错；④ 气泡靠藏托盘图标收起。设置页详细日志也点一次。
-2. `Shots` 的设置页截图（高度改到 680）没重新生成、没人看过。
-3. 静默失败点清单（P0×2 / P1×4 / P2×6）：`../im-rtc-server/docs/ops/silent-failure/desktop.md`，逐条状态只在那里。
-   两条里的第一条**数据层已经不缺了**（2026-09-15 加了 `on_disconnected_ex(code, will_reconnect)`，`EngineBridge::onDisconnected`
-   已经能拿到这两个值，目前只落日志），**界面层还没接**——`MainWindow` 收到的还是老的 `disconnected()` 信号（无参），
-   仍然统一显示「正在重连…」；把 `EngineBridge::disconnected` 信号也带上这两个参数、`MainWindow` 按 `will_reconnect`
-   分情况展示，是这条真正意义上的收尾，还没做。第二条没动：`deps.send` 对非请求帧无条件返回 true。
-4. **异步口子的形状**（一次定完，别定出两套风格）：渲染路径 B 原始帧回调 + `probeMicrophone` / `startLocalPreview` 出 C ABI——帧格式（I420/NV12）、内存谁 free、
-   30fps 跨 ABI 的回调频率、completion `user_data` 生命周期。实现等媒体，形状现在就能定。
-5. **`WebRTCAdapter`**（推迟，等 Apple Silicon 或 Windows 机器；做完与 Web / iOS 各互打一次）。ICE 重启的信令半边已做完，只剩把 `restartPubICE()` 交给 `createOffer({iceRestart:true})` 并在 offer 生成后清掉。
-   规则：各自重启自己 offer 的那条（pub 客户端救、sub 服务端救）；触发用 `failed` 不用 `disconnected`；「要重启」和「要补一次协商」必须分开记。
-6. UX_FLOWS §07 第 1 条（关窗语义）/ 第 2 条（托盘常驻 + 绿点 / 菜单）没排期；说话指示器等媒体面。
-7. 体量预警（阈值 600，预警线 480，碰之前先看行数）：`demo/MainWindow.cpp` 563、`capi/include/imrtc/imrtc_c.h` 535、
-   `capi/include/imrtc/CallEngine.hpp` 503（2026-09-16 加 `inviter` 后各涨 3~10 行）。`capi/src/imrtc_c.cpp` 2026-09-15 拆成 `imrtc_c.cpp`（369）+
-   `CObserver.{h,cpp}` + `CApiConvert.{h,cpp}` 之后暂时不紧张，但两个 C++ 头（纯 C 头不好拆、封装头是 header-only）
-   涨得快，真到 600 再想怎么拆。
-8. 日志下一步：环形缓冲 + `exportDiagnostics()`（LOGGING.md §7 的 P3），四端一起定形状。按需：C# / P/Invoke 绑定。
+0. **GitHub Release**：等用户确认后建 tag `1.0.0`，把 `dist/imrtc-desktop-1.0.0-macos.zip` 传上去；传完把
+   `IMRTC_SDK=public` 那条路真跑一次（现在只验证了 404 报错路径）。
+1. **Windows 侧新增一条**：`install()`/`imrtcConfig.cmake`/`find_package` 这一路要在 Windows 上过一遍——
+   `.lib` 导入库进 `ARCHIVE DESTINATION`、`.dll` 进 `RUNTIME DESTINATION` 目前只是照 CMake 惯例写的，
+   没有实机验证过。
+2. **§A 发布被拒收场：用故障注入上真端走一遍**（先 `FAULT_INJECTION=1 ./scripts/dev.sh`）：通话接通后
+   `curl -X POST $B/v1/dev/faults -d '{"action":"reject","uid":"<本端uid>","frame_type":"room.publish","code":1302}'`，
+   再开一次麦 / 摄像头 → 本端收场、结束原因 error、对端收到挂断。过了把 CLIENT_PARITY 那一行 🟡 转 ✅。
+   代码已提交（`git log` 标题「call: 发布 / 订阅被拒要收场」），真机验收后续再做。
+3. **宿主对接 M1/M8 收尾**：① Demo 没有「按 call_id 加入」入口与群号/user_data 的界面展示；② 提醒维护
+   `CLIENT_PARITY.md` 的人：`call.invite_more`/`call.join` 桌面早就实现了，若那张表桌面列还写 ⬜ 是文档漂了；
+   ③ `imrtc_v1_call_ex`/结构体尾部追加字段也要在 Windows 上过一遍 `dumpbin /exports` 与联调。
+4. **C ABI 与其余三端的两处不对等**（仍未做）：① 没有 `forceEnd`；② observer 没有「票快到期」回调，补
+   `on_token_will_expire` 得先在 engine 里造一个到期计时器，形状还没定。导出面加 `force_end` 会从 33 到 34，
+   记得同步这次改过的 `scripts/check-abi.sh`（阈值判断是「≥20」不是写死某个数，不用改）与
+   `capi/exported_symbols.txt`（通配符不用真改）。
+5. 到 Windows 上编译并手点（等机器 / 集成方）。后台来电提醒四条 + 设置页详细日志，见 archive 09-11 那条。
+6. `Shots` 的设置页截图（高度改到 680）没重新生成、没人看过。
+7. 静默失败点清单（P0×2 / P1×4 / P2×6）：`../im-rtc-server/docs/ops/silent-failure/desktop.md`。第一条
+   数据层不缺了，界面层还没接（`MainWindow` 还没按 `will_reconnect` 分情况展示）；第二条没动。
+8. **异步口子的形状**（一次定完）：渲染路径 B 原始帧回调 + `probeMicrophone`/`startLocalPreview` 出 C ABI。
+9. `WebRTCAdapter`（推迟，等 Apple Silicon 或 Windows 机器）。
+10. UX_FLOWS §07 关窗语义/托盘常驻没排期。
+11. 体量预警（阈值 600，预警线 480）：`demo/MainWindow.cpp` 563、`capi/include/imrtc/imrtc_c.h` 535、
+    `capi/include/imrtc/CallEngine.hpp` 503、`engine/src/CallEngine.cpp` 502（这次
+    `./scripts/check-file-size.sh` 看到的一条 WARN，本次没碰这个文件，是既有体量、不是新引入）。
+12. 日志下一步：环形缓冲 + `exportDiagnostics()`。按需：C# / P/Invoke 绑定。
 
 ## 已知坑 / 限制
 
-**媒体推迟（2026-09-06 已决定，不是待办，别再当「卡住了」讨论）**
-- libwebrtc 桌面预编译包（shiguredo）没有 macOS x86_64，本机是 Intel → 等 Apple Silicon 或 Windows。已排除：`bengreenier/webrtc` darwin-x64（冻在约 M115）、
-  自己从源码编（数十 GB，本机数据卷 97% 满）、stasel XCFramework（ObjC API，Windows 用不了）。版本打算锁 m150.7871.3.2。平台矩阵与生态背景见 archive。
-- 影响面关死在还没写的 `WebRTCAdapter.cpp`。Demo 里静音 / 摄像头按钮是禁用态（没接适配器时 `openMic()` 静默空操作），落地后打开 `CallOverlay` 的 `setBlocked({})`。
-- 本机只有 macOS：**不许把「macOS 过了」写成「桌面端完成」**，每次交付分平台说清楚。
+**发布打包 / Demo 三档（2026-09-16 新增）**
+- `check-abi.sh` 对 **universal（多架构）dylib** 的解析方式变了（改认「第一列是十六进制偏移量」，见上）——
+  以后谁再改这个脚本，记得拿 `dist/` 里那份 universal 库回归一次，别只拿 debug 单架构库测。
+- `imrtcConfig.cmake` **没有 `find_dependency()`**：这是刻意的（IXWebSocket 是 PRIVATE、静态链进 dylib），
+  不是漏写；以后如果 capi 换成 PUBLIC 链接某个第三方库，这里要跟着补。
+- `IMRTC_SDK_DIR` 档下 `tests/`（引擎单测、一致性向量）完全不构建——这档只验证 Demo 的「对外集成」，
+  不是「换个方式跑全部测试」，回归引擎逻辑仍然只能在源码档做。
+- 三档 build 目录（`build/macos-clang`、`build/macos-clang-sdk-local`、`build/macos-clang-sdk-public`）都在
+  `.gitignore` 的 `build/` 规则下，`dist/` 单独加了一条。
+- **`IMRTC_SDK_DIR` 档下的 rpath 只能追加，不能用 `set_target_properties(... INSTALL_RPATH ...)` 替换**：
+  Demo 除了 `imrtc::capi` 还链着 Qt6 好几个 framework，CMake 自动算出的 build-tree rpath 里带着 Qt 的
+  `lib/` 目录，替换掉就是 `Library not loaded: @rpath/QtWidgets.framework/...`。改用
+  `target_link_options(... "-Wl,-rpath,..." )` 是追加，别再改回 `INSTALL_RPATH` 属性那种写法。
+- **LICENSE 是仓根现成文件，`install()` 只是原样拷贝**，不是这次新写的许可证文本——`capi/CMakeLists.txt`
+  改动前确认过内容与用户给的一致，没有动它。
+- **踩过第二个坑，这次在 `scripts/package.sh` 自己身上**：验证「zip 里有没有 LICENSE」最初写成
+  `unzip -l "$ZIP_PATH" | grep -q "...LICENSE\$"`，间歇性报「zip 里没有」——但 `unzip -l` 单独重跑、
+  或者去掉 `-q` 都必现「文件其实在」。根因是 `grep -q` 一找到匹配就提前退出、不读完管道，这时 `unzip`
+  可能还在写后面的文件列表，写入命中已关闭的读端触发 SIGPIPE、非零退出；脚本开了 `set -o pipefail`，
+  这个非零状态会盖过 grep「找到了」那个结果，于是 `if !` 判断为真、误报没找到——**现象是时序竞态，
+  不是文件真的丢了**，这也是为什么手动重跑那条管道总是"修复"了问题（连续两次调度时机不同）。
+  修法：`ZIP_LISTING=$(unzip -l "$ZIP_PATH")` 先把输出整份捕获进变量，再对变量 `grep`，管道两端不再
+  直接相连，没有提前关闭读端这回事。**以后往这类脚本里加 `xxx -l | grep -q` 这种写法要留个心眼**：
+  只要左边命令的输出可能超过一个 pipe buffer（多行、体量不小），配合 `-q`/`pipefail`就有这个坑；
+  `echo "$var" | grep -qw ...` 这种左边是单行小字符串、一次 write() 能写完的，不受影响，原样保留。
 
-**后台来电提醒 / 横幅（2026-09-11）**
-- macOS 系统通知撤不掉（Qt 没接口，`withdraw()` 只能藏托盘图标）；通话结束后再点只激活应用、`IncomingAlert` 不展开（有用例）。Qt cocoa 走的是已废弃的 `NSUserNotificationCenter`。
-- 托盘图标只在响铃期间出现（发通知必须先 `show()`，没托盘的 Linux 只剩注意请求）；「被挡住」只能按「不是活动窗口」判；
-  **不在窗口激活时 `clear()`**（会和「点通知」回调抢先后，点了不展开）；Demo 没有铃声。
-- `_win.cpp` 只在 Mac 上用 mingw-w64 头 + Qt 6.8.3 头 `-fsyntax-only` 过，MSVC 没编过。
-- 横幅 / 后台提醒的 `MainWindow` 接线没有集成测试（要真引擎，两台实例手点）。Demo 没有 Web 的 `bannerFirst` 开关，固定横幅先行。
-- 横幅用了 `QGraphicsDropShadowEffect`：别往横幅里放原生子窗口（会画到阴影外）。
-
-**C ABI**
-- **群通话宿主对接（2026-09-15）**：`onCallBegin` 的 `caller` 回落只在 callee 一侧成立
-  （靠 `call.incoming` 记下的 `callerUid`）；caller 自己那侧如果 `call.connected.caller`
-  缺席（真正的老服务端），`onCallBegin.caller` 会是空串——caller 本来就知道自己是谁，
-  这个空洞目前判断为可接受，等真遇到老服务端联调再看要不要补。
-- 本仓至今**没有**「`callee_ids` 里有自己」的本地预校验（协议 §2.2 由服务端 1004 兜底）；
-  新加的 `chat_group_id`/`user_data` 本地校验（`localCallRejected`）是按设计文档「与它同一个
-  出口」的说法做的，出口形状（onError 1004 + onCallEnd(error)、不转移状态）是本仓自己定的，
-  不是抄的既有代码——五端联调时确认一下其它端「有自己」那条走的是不是同一个形状。
-- 三处不向后兼容改动（趁 0.1.0 没宿主时改）：`on_kicked_out` 多了 `reason` 参数（导出面没变，`check-abi.sh` 拦不住，第一个宿主接入后补原因就得走版本协商）；
-  `imrtc_v1_speaker` / `imrtc_v1_quality` 加首字段 `uint32_t struct_size`（唯二按数组交出去的结构体）；C++ 内部 `CallEngineOptions.wallClock`（`clock` 改为单调时钟，`wallClock` 只填信封 `ts`）。
-- **《接入指南》第一页三条**：回调在 Engine 线程上抛、切 UI 线程是宿主的事；回调给出的指针只在该次回调期间有效；`imrtc_v1_engine_destroy` 阻塞到回调静默（GC 语言宿主尤其要紧）。
-- `Connection` 不是线程安全的：宿主必须在同一线程调 Engine 方法（`IxTransport` 把 IX 回调排进 `poll()`）。engine 不自己起线程，时钟在 `CallEngine` 门面收口，宿主按 ~200ms~1s 调 `tick()`。
-- 导出面靠脚本守：`-fvisibility=hidden` 挡不住 libc++ RTTI（实测漏 42 个 typeinfo），白名单 `capi/exported_symbols.txt`；Windows 侧仍要 `dumpbin /exports` 核一次。
-- Demo 必须经 capi 调引擎（`demo/EngineBridge.cpp` 用 `imrtc::capi::Engine`）；`engine/` 里出现 `Q` 开头类型直接打回。Electron / CEF / Tauri 宿主不接本仓，用 `@im-rtc/call-engine`。
-- 包里会有两份 TLS（信令走平台 TLS、libwebrtc 带 BoringSSL），打包体积与 Windows 的 mbedTLS 依赖在第四刀复核。libwebrtc 静态链进动态库内部，API 变化由 `MediaAdapter` 隔离。
-- macOS 摄像头 / 麦克风权限与 Hardened Runtime entitlement 必须由宿主 App 的 bundle 声明，SDK 代劳不了。
-
-**协议 / 引擎**
-- `room.mute` 要服务端 `track_id` 不是 cid（`publishTrackIds` / `Deps::trackIdOfCid`）；`publish.ok` 回来前静音当前报 `invalid_state`，没做意图重放。
-- 层名写错的症状是「画面糊而一切正常」（服务端按协议兜底不报错）：`imrtc_v1_set_remote_layer` 的同步 `BAD_PARAMS` 是宿主唯一反馈，别当冗余删掉。
-- 报层要在 `onUserVideoAvailable` 里报：建格子时还没 track_id，调用被静默丢掉（返回 0），只报一次就永远按默认 `m` 下发。
-- 本端预览走 `attachLocalView`，不是 `attachView(自己的 uid, …)`。
-- 红按钮：动作按「有没有 call」分叉（会议房 `leaveRoom()`，1v1 与群通话 `hangup()`），文案按人数分叉；规则在 `CallOverlay::dangerAction()`，有变异测试守着。
-- `logout()` 本地合成 `onCallEnd(reason=network)`；**待与协议确认**：§5.1 的 I8 只写了「重连恢复失败」一个例外。
-- 4401 重试上限 3，连续 3 次抛 `onKickedOut` 回登录页换票。**2006 阈值「3」未校准、Kit 不接 2006**：见 server「已知坑」。
-- 测试 `FakeTransport` 默认同步回调、真件异步：依赖「close() 返回时回调已抛完」的用例要开 `FakeNet::deferClose`。
-- SDK 版本号只改 `engine/include/imrtc/Version.h`（五端统一 1.0.0）。详细日志存 QSettings `log/verbose`，但设了环境变量 `IMRTC_LOG_LEVEL` 以它为准（脚本联调时勾选「不生效」是这个原因）。
-
-**Qt / 构建 / 联调**
-- Qt 6.8 + Xcode 26 撞 `ld: framework 'AGL' not found`：修法在 Demo `CMakeLists.txt`（直接查 SDK 目录，别用 `find_library`，它会误报「存在」），也要写进《接入指南》。
-- 本机 `lupdate` 起不来（链了 QtQml，没装 qtdeclarative；决定不装，只影响本机）：`demo/i18n/imrtc_demo_en.ts` 手工维护，**加了 `tr()` 记得同步 .ts**，否则英文下静默退回中文。
-  真要装：`aqt install-qt mac desktop 6.8.3 clang_64 --archives qtdeclarative -O ~/Qt`。
-- 原生子窗口盖住同一窗口里所有 Qt 绘制（`raise()` 没用）：格子的名字 / 角标 / 描边放进画面之后创建的原生子窗口（`demo/VideoTile.cpp` 的 `TileChrome`）。
-- 原生视图尺寸滞后于 `resizeEvent`，几何一律以 Qt 控件尺寸为准；`autoresizingMask` 与显式 `frame` 不能同时开（会相乘）。
-- 带原生子窗口的截图用 `QScreen::grabWindow`（`QWidget::grab()` 内容滞后一帧）。
-- 隐藏控件不腾地方（`addStretch()` 吃空间），铺满用 `QStackedWidget` 分页。
-- 提示不许用 `QMessageBox` 静态函数（嵌套事件循环等人点确定，挡掉过自动挂断），用 `MainWindow::toast()`；只有破坏性操作用模态。
-- `test.sh` 里不许写死测试可执行文件名，遍历 `imrtc_demo_*_test`。
-- 联调每轮换用户名（上一轮被 kill 的进程在服务端挂 30 s「通话中」→ `busy`）；同机两实例加 `--profile`（macOS `QStandardPaths` 不理 `$HOME`，`scripts/demo.sh` 已自动传）。
+（其余既有已知坑——媒体推迟、后台来电提醒、C ABI 群通话/不兼容改动、协议/引擎、Qt/构建/联调——原文见
+[current_task.archive.md](current_task.archive.md)「2026-09-16（发布打包 + Demo 三档之前）：精简前全文」一节，
+内容未变，这里不重复贴。）
 
 ## 关联工程 / 常用命令
 
@@ -205,7 +167,10 @@ Kit 选人页（M2，桌面没有 Kit，本产品设计已注明不适用）。*
 - 集成方：公司现有 Windows/Mac Qt 项目（不在本机，需对方配合）。
   ```bash
   ./scripts/install-hooks.sh                     # 新 clone 跑一次
-  ./scripts/test.sh                              # 唯一测试入口：体量 + 配置 + 编译 + 单测
+  ./scripts/test.sh                              # 唯一测试入口：体量 + 配置 + 编译 + 单测 + ABI
+  ./scripts/package.sh                            # 打发布包：dist/imrtc-desktop-1.0.0-macos.zip
+  IMRTC_SDK=local  ./scripts/demo.sh              # Demo 链本机包（先跑 package.sh）
+  IMRTC_SDK=public ./scripts/demo.sh              # Demo 链 GitHub Release 包（还没发布，会 404）
   cmake --preset macos-clang && cmake --build --preset macos-clang
   cmake -S . -B build/asan -G Ninja -DIMRTC_ASAN=ON && cmake --build build/asan   # ASan/UBSan
   ```

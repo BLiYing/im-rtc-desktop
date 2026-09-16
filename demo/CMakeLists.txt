@@ -164,3 +164,40 @@ set_target_properties(imrtc_demo PROPERTIES
   MACOSX_BUNDLE_GUI_IDENTIFIER "com.imrtc.demo"
   MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.in"
 )
+
+# ── 发布包档（IMRTC_SDK_DIR）：把 dylib 拷进 .app，另加一条 @executable_path/../Frameworks 的 rpath ──
+#
+# 源码档下 rpath 指向构建目录里的 capi/（CMake 默认行为，见顶层 CMakeLists.txt 的注释），
+# 那是本仓自己联调用的，不是第三方能依赖的东西。装出来的 SDK 离开了这台机器、这个构建目录，
+# imrtc::capi 这个导入目标指向的是 dist 包里的绝对路径——真要能重新分发这个 .app，
+# 就必须把 dylib 拷进包里、用相对路径的 rpath 指回去。这正是第三方接入时必须做的一步，
+# Demo 在这里替他们验一遍（IMRTC_SDK_DIR 未设时，也就是源码档，完全不走这段）。
+#
+# **只许追加 rpath，不许用 INSTALL_RPATH 属性去替换**：Demo 还链着 Qt6::Widgets 等好几个
+# framework，CMake 默认会自动算出一份 build-tree rpath（指到 CMAKE_PREFIX_PATH 里 Qt 的 lib/
+# 目录 + imrtc::capi 的实际所在目录），那份 rpath 缺了 Demo 就直接是
+# `Library not loaded: @rpath/QtWidgets.framework/...`——第一版写成
+# `set_target_properties(... BUILD_WITH_INSTALL_RPATH ON INSTALL_RPATH "@executable_path/../Frameworks")`
+# 就是把整份自动 rpath 换成只有这一条，Qt 那份丢了，`scripts/demo.sh` 实跑直接崩，
+# 靠 `DYLD_PRINT_LIBRARIES` + 不过滤输出才验出来（当时 grep 只筛了 imrtc 那一行，把 Qt 的报错
+# 挡在了看不见的地方）。改成 `target_link_options(... -Wl,-rpath,...)` 是**追加**，不动自动算出的那份。
+if(IMRTC_SDK_DIR)
+  target_link_options(imrtc_demo PRIVATE "-Wl,-rpath,@executable_path/../Frameworks")
+  add_custom_command(TARGET imrtc_demo POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+            "$<TARGET_BUNDLE_CONTENT_DIR:imrtc_demo>/Frameworks"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:imrtc::capi>"
+            "$<TARGET_BUNDLE_CONTENT_DIR:imrtc_demo>/Frameworks/$<TARGET_FILE_NAME:imrtc::capi>"
+    COMMENT "拷 imrtc dylib 进 imrtc_demo.app/Contents/Frameworks（发布包档，第三方也得这么做）")
+
+  # imrtc_demo_shots 不是 .app bundle（没设 MACOSX_BUNDLE），拷到可执行文件旁边、
+  # 追加 @executable_path 这条 rpath 即可——它只用来做「DYLD_PRINT_LIBRARIES 确认加载了哪份
+  # dylib」这类离线验证，不需要 Frameworks 目录那一套；同样不动自动算出的 Qt rpath。
+  target_link_options(imrtc_demo_shots PRIVATE "-Wl,-rpath,@executable_path")
+  add_custom_command(TARGET imrtc_demo_shots POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:imrtc::capi>"
+            "$<TARGET_FILE_DIR:imrtc_demo_shots>/$<TARGET_FILE_NAME:imrtc::capi>"
+    COMMENT "拷 imrtc dylib 到 imrtc_demo_shots 旁边（发布包档验证用）")
+endif()

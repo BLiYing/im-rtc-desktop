@@ -24,7 +24,15 @@ case "$(uname -s)" in
   Darwin)
     # dyld_info -exports 给的是**导出表**，不是符号表。nm -g 会把没导出的全局符号
     # 也列出来，用它判会得出错误结论（第一次就这么误判过）。
-    EXPORTS=$(dyld_info -exports "$LIB" | tail -n +4 | awk '{print $2}' | grep -v '^$')
+    #
+    # **universal（x86_64+arm64）库会重复一份表头**：dyld_info 每个架构各打印一次
+    # 「<路径> [arch]:」「-exports:」「offset symbol」，`tail -n +4` 只跳得掉第一份，
+    # 第二份表头会被当成数据行，误判出两条「stray 符号」（package.sh 打包 universal 库
+    # 时第一次踩到）。改成只认「第一列是十六进制偏移量」的行，与表头出现几次无关；
+    # 两个架构导出同一批符号，`sort -u` 去重，避免总数虚高成两倍。
+    EXPORTS=$(dyld_info -exports "$LIB" \
+      | awk '$1 ~ /^0x[0-9A-Fa-f]+$/ { print $2 }' \
+      | sort -u)
     ;;
   *)
     echo "本脚本只在 macOS 上有实现。Windows 侧由 __declspec(dllexport) 天然收口，"

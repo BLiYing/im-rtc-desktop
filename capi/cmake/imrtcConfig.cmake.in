@@ -1,0 +1,13 @@
+@PACKAGE_INIT@
+#
+# imrtcConfig.cmake —— 第三方 `find_package(imrtc CONFIG REQUIRED)` 读的就是这份。
+#
+# 这个包只导出一个目标：imrtc::capi（动态库 + 两个头，见 capi/CMakeLists.txt 的 install()）。
+# transport_ix（IXWebSocket）是引擎内部 PRIVATE 依赖、静态链进 imrtc::capi 内部，
+# 宿主不需要知道它存在，所以这里**没有 find_dependency()**——不装它的头、不装它的库，
+# 也就没有第二份东西要宿主去满足。imrtcTargets.cmake 里 imrtc::capi 的 INTERFACE_LINK_LIBRARIES
+# 同理不会出现任何第三方目标。
+
+include("${CMAKE_CURRENT_LIST_DIR}/imrtcTargets.cmake")
+
+check_required_components(imrtc)

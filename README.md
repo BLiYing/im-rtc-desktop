@@ -61,11 +61,81 @@ cmake --preset macos-clang -DIMRTC_WITH_IX_TRANSPORT=OFF
 
 engine 与 31 个用例照样能编能跑（少掉的 5 个是 IxTransport 的契约测试）。
 
+## 第三方集成（CMake 最小示例）
+
+发布物是一个 zip（`imrtc-desktop-<版本>-macos.zip`，挂在
+[GitHub Release](https://github.com/BLiYing/im-rtc-desktop/releases)），**MIT 协议**（见包根的
+`LICENSE`，与本仓根目录同一份），布局：
+
+```
+imrtc-desktop-1.0.0-macos/
+├── LICENSE                        # MIT
+├── include/imrtc/imrtc_c.h        # 纯 C 头，对外唯一边界
+├── include/imrtc/CallEngine.hpp   # header-only C++ RAII 包装（可选，方便 C++ 宿主）
+└── lib/
+    ├── libim_rtc_engine_capi.dylib
+    └── cmake/imrtc/               # imrtcConfig.cmake + imrtcConfigVersion.cmake + imrtcTargets.cmake
+```
+
+解压后 `find_package(imrtc)`，链接导出目标 `imrtc::capi`（本仓的 Demo 在
+`IMRTC_SDK_DIR` 档下走的就是同一条路，见 `demo/CMakeLists.txt`）：
+
+```cmake
+# CMakeLists.txt
+find_package(imrtc 1.0.0 CONFIG REQUIRED
+             PATHS /path/to/imrtc-desktop-1.0.0-macos NO_DEFAULT_PATH)
+# 也可以不传 PATHS，改用 -DCMAKE_PREFIX_PATH=/path/to/imrtc-desktop-1.0.0-macos 配置
+
+add_executable(my_app main.cpp)
+target_link_libraries(my_app PRIVATE imrtc::capi)   # 头文件路径随目标自动带上，不用再手写 include_directories
+```
+
+```cpp
+// main.cpp
+#include "imrtc/imrtc_c.h"   // 纯 C 头；C++ 宿主也可以换成 "imrtc/CallEngine.hpp"
+
+int main() {
+  imrtc_v1_options options{};
+  options.struct_size = sizeof(options);
+  options.url = "wss://your-server/ws";
+  options.device_id = "some-stable-device-id";
+
+  imrtc_v1_engine* engine = nullptr;
+  if (imrtc_v1_engine_create(&options, &engine) != 0) return 1;
+  // ... 调用 imrtc_v1_login / imrtc_v1_call / imrtc_v1_engine_tick ...
+  imrtc_v1_engine_destroy(engine);   // 阻塞到所有回调静默才返回，见 CONVENTIONS §2 红线 6
+}
+```
+
+**动态库要自己带在身上，并布好 rpath**——`imrtc::capi` 是 `.dylib`，CMake 不会替你把它拷进
+最终的 `.app` / 可执行文件旁边。macOS 上典型做法（`.app` bundle）：
+
+```cmake
+# 把 dylib 拷进 .app/Contents/Frameworks，可执行文件的 rpath 指到那
+set_target_properties(my_app PROPERTIES
+  BUILD_WITH_INSTALL_RPATH ON
+  INSTALL_RPATH "@executable_path/../Frameworks")
+add_custom_command(TARGET my_app POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E make_directory
+          "$<TARGET_BUNDLE_CONTENT_DIR:my_app>/Frameworks"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          "$<TARGET_FILE:imrtc::capi>"
+          "$<TARGET_BUNDLE_CONTENT_DIR:my_app>/Frameworks/$<TARGET_FILE_NAME:imrtc::capi>")
+```
+
+不是 `.app` bundle（纯命令行 / 非 bundle 可执行文件）就把 `INSTALL_RPATH` 换成
+`@executable_path`，dylib 拷到可执行文件同一目录。这正是本仓 `demo/CMakeLists.txt` 在
+`IMRTC_SDK_DIR` 档下对自己的 Demo 做的事——**Demo 在这一档下替第三方把这条路验一遍**，不是只在源码档里自己链自己。
+
+不需要装 IXWebSocket 的头或库：它是 engine 内部 `PRIVATE` 依赖，静态链进 `imrtc::capi`
+内部，`imrtcConfig.cmake` 不 `find_dependency()` 它，第三方感知不到它的存在。
+
 ## 开发
 
 ```bash
 ./scripts/install-hooks.sh                                  # 新 clone 跑一次
 ./scripts/test.sh                                           # 唯一入口：体量 + 配置 + 编译 + 单测
+./scripts/package.sh                                         # 打发布包：dist/imrtc-desktop-<版本>-macos.zip
 ```
 
 一致性向量**只读 `im-rtc-server/docs/conformance/` 那一份**（默认按同级目录找，
@@ -104,9 +174,16 @@ ASan / UBSan / TSan 都干净。
 ```bash
 cd ../im-rtc-server && ./scripts/dev.sh     # 起本地服务端
 cd -                && ./scripts/smoke.sh   # 跑一轮（命令行）
-./scripts/demo.sh alice bob                 # 跑一轮（Qt Demo，要装 Qt 6）
+./scripts/demo.sh alice bob                 # 跑一轮（Qt Demo，要装 Qt 6；源码档）
 ./scripts/demo-shots.sh                     # 不要服务端，把各界面态渲染成 PNG
 ```
+
+`scripts/demo.sh` 按 `IMRTC_SDK` 环境变量切三档（各用各的 build 目录，互不污染）：
+`source`（默认，现状，Demo 直接 `add_subdirectory` 引擎源码）/
+`local`（`IMRTC_SDK=local ./scripts/demo.sh`，用本机 `./scripts/package.sh` 打出来的包）/
+`public`（`IMRTC_SDK=public ./scripts/demo.sh`，从 GitHub Release 下载）。
+后两档下 Demo 对引擎的链接方式与上面「第三方集成」那节完全一样——这不是抄近道，
+是刻意让 Demo 替第三方把「发布包够不够用」先验一遍。
 
 装 Qt 6（macOS，最小集，实测 1.8 GB）：
 
