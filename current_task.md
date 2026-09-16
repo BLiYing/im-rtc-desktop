@@ -6,6 +6,11 @@
 
 ## 当前焦点
 
+**2026-09-16（第二轮，已提交（`git log` 里标题为「call: 发布 / 订阅被拒要收场」那笔），未上真端）：静默失败审计 §A——发布 / 订阅被拒要收场。** `./scripts/test.sh` 8 步全绿（129 例），macOS only，Windows 未编译。C ABI 导出面不变（33 个）。
+- `CallEngine::failLocally` 收帧数据：`room.publish` 被拒且在通话里 → 复用内部 `call_failed`（`CallMachine.cpp` 里通话中 / 接通中补发 `call.hangup`，时长改按 `connectedAtMs` 算）；否则 `publish_failed`；`room.subscribe` → `subscribe_failed`。
+- 已知差异：没有 `callStartedAtMs`，群通话中途被拉进来的人撞上这条时时长偏大（与 `synthesizeNetworkEnd` 同一既有限制）；结束帧走普通发送队列，不像三端 `forceEnd` 那样绕开在途请求直发。
+- 上一轮 `call.incoming.inviter` 已提交（`bb1ec1e`），下面那段写的「未提交」是旧话。
+
 **2026-09-16 协议新字段 `call.incoming.inviter`（本仓部分）已落地，未提交；macOS 编译 + 单测 + Demo 界面测试全绿，Windows 未编译未运行。**
 
 `inviter` = **这次邀请是谁发的**，与 `caller`（恒为发起人）分开：群里被别人 `invite_more` 拉进来时，
@@ -98,6 +103,7 @@ Kit 选人页（M2，桌面没有 Kit，本产品设计已注明不适用）。*
 
 ## 下一步
 
+0. **§A 发布被拒收场：用故障注入上真端走一遍**（先 `FAULT_INJECTION=1 ./scripts/dev.sh`）：通话接通后 `curl -X POST $B/v1/dev/faults -d '{"action":"reject","uid":"<本端uid>","frame_type":"room.publish","code":1302}'`，再开一次麦 / 摄像头 → 本端收场、结束原因 error、对端收到挂断。过了把 CLIENT_PARITY 那一行 🟡 转 ✅。代码已提交，真机验收后续再做（2026-09-16 用户定）。
 0. **宿主对接 M1/M8 收尾**：① Demo 没有做「按 call_id 加入」入口与群号/user_data 的界面展示——
    `EngineBridge`/`Smoke.cpp` 已经把新字段打到日志/信号里，UI 消费留给有余力时再做（`demo/MainWindow.cpp`
    560/600，加 UI 前先看体量；`capi/src/imrtc_c.cpp` 2026-09-15 已拆成三个文件，暂时不紧张，见下一步 7）。

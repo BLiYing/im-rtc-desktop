@@ -160,6 +160,72 @@ IMRTC_TEST(mediaCameraDeniedKeepsAudio, "MediaPlane —— 摄像头被拒只降
            "摄像头的错还是要报");
 }
 
+/*
+  静默失败审计 §A：这张回滚表原先只认 call.invite / room.join / room.leave，room.publish
+  被服务端拒掉后不回滚——那条轨道永远停在 publishing，publish.ok 不会来，pub offer 永不产出，
+  上行从未协商。界面显示已接通、计时器在走，对方全程听不见看不见，零提示。
+  2026-09-16 拍板：**通话里被拒就强制收场本端通话**（reason=error）；没有通话的会议房只摘掉那条。
+*/
+IMRTC_TEST(mediaPublishRejectedInCallForcesEnd,
+           "MediaPlane —— 通话中 room.publish 被拒：原错误码照报 + 发 call.hangup + callEnd 只一次"
+           "(reason=error) + 回 idle，迟到的 call.ended 不再抛（静默失败审计 §A）") {
+  Harness harness;
+  harness.enterRoom("audio");  // 只发一条 publish（麦克风），避开上行闸门的两条一起飞
+  CHECK_EQ(harness.engine->callState(), CallState::Connecting, "还没 media_ready，此刻是 connecting");
+  CHECK_EQ(imtest::field(harness.findSent(imrtc::frame::kRoomPublish), "cid"),
+           std::string("local-mic-1"), "确认这就是麦克风那条");
+
+  harness.reply(imrtc::frame::kError,
+                Json::parse("{\"code\":1302,\"name\":\"publish_denied\",\"msg\":\"publish "
+                            "denied\",\"for_type\":\"room.publish\",\"retryable\":false}"));
+
+  CHECK_TRUE(std::find(harness.recorder->log.begin(), harness.recorder->log.end(),
+                        std::string("error:1302/publish_denied")) != harness.recorder->log.end(),
+             "原错误码要照常先抛出");
+  CHECK_EQ(imtest::field(harness.findSent(imrtc::frame::kCallHangup), "call_id"),
+           std::string("call-1"), "对端还在等，要主动发 call.hangup");
+  CHECK_EQ(harness.recorder->log.back(), std::string("callEnd:error"),
+           "不能留在一通对方听不见的通话里，必须强制收场");
+  CHECK_EQ(harness.engine->callState(), CallState::Idle, "通话机归零");
+  CHECK_EQ(harness.engine->roomState(), imrtc::RoomState::Idle, "房间机跟着归零");
+
+  const std::size_t callEndsBefore = static_cast<std::size_t>(
+      std::count(harness.recorder->log.begin(), harness.recorder->log.end(),
+                std::string("callEnd:error")));
+  // 服务端随后迟到的 call.ended 不能再抛第二次：本地已经回 idle，迟到帧被静默丢弃。
+  harness.event(imrtc::frame::kCallEnded,
+                Json::parse("{\"call_id\":\"call-1\",\"reason\":\"hangup\",\"duration_sec\":3,"
+                            "\"ended_by\":\"bob\"}"));
+  const std::size_t callEndsAfter = static_cast<std::size_t>(
+      std::count(harness.recorder->log.begin(), harness.recorder->log.end(),
+                std::string("callEnd:error")));
+  CHECK_EQ(callEndsAfter, callEndsBefore, "迟到的 call.ended 不许再抛一次 onCallEnd");
+}
+
+IMRTC_TEST(mediaPublishRejectedInMeetingRoomOnlyDropsThatCid,
+           "MediaPlane —— 没有通话的会议房：publish 被拒只摘掉那条记账，不强制收场"
+           "（静默失败审计 §A）") {
+  Harness harness;
+  harness.login();
+  harness.engine->joinRoom("r-1", "tk");
+  harness.reply(imrtc::okType(imrtc::frame::kRoomJoin),
+                Json::parse("{\"room_id\":\"r-1\",\"room_kind\":\"meeting\","
+                            "\"participant_id\":\"p-1\",\"participants\":[],\"tracks\":[]}"));
+
+  CHECK_EQ(harness.engine->callState(), CallState::Idle, "没有通话，只是进了个会议房");
+  CHECK_EQ(imtest::field(harness.findSent(imrtc::frame::kRoomPublish), "cid"),
+           std::string("local-mic-1"), "进房自动采的麦克风那条");
+
+  harness.reply(imrtc::frame::kError,
+                Json::parse("{\"code\":1302,\"name\":\"publish_denied\",\"msg\":\"publish "
+                            "denied\",\"for_type\":\"room.publish\",\"retryable\":false}"));
+
+  CHECK_EQ(harness.engine->roomState(), imrtc::RoomState::Joined, "人还在房里，不许被这条踢出去");
+  CHECK_EQ(harness.recorder->log,
+           std::vector<std::string>({"roomJoined:r-1", "error:1302/publish_denied"}),
+           "只报错，不额外抛 callEnd / roomLeft（那条 publishing 记账被摘掉见 RoomFsmTest.cpp）");
+}
+
 IMRTC_TEST(mediaPubOfferCarriesRealSdp, "MediaPlane —— 状态机产出的空 SDP 被接管，pub offer 带真 SDP 且是请求") {
   Harness harness;
   harness.enterRoom("audio");

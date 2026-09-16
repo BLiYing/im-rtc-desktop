@@ -59,7 +59,11 @@ struct MachineInput {
 
   static MachineInput act(std::string op, Json args = Json::makeObject());
   static MachineInput recv(std::string type, Json data = Json::makeObject());
-  static MachineInput internal(std::string name);
+  /**
+   * internal 的 `args` 只有「哪一条被拒了」这类需要带标识的内部事件才用
+   * （`publish_failed` 的 cid、`subscribe_failed` 的 track_id）。
+   */
+  static MachineInput internal(std::string name, Json args = Json::makeObject());
 };
 
 /** str 从线路数据里安全取一个字符串字段；缺席或类型不符返回 ""。 */

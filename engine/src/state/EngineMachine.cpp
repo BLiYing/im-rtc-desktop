@@ -29,6 +29,16 @@ bool isRoomAct(const std::string& op) {
   return std::find(kOps.begin(), kOps.end(), op) != kOps.end();
 }
 
+/**
+ * ROOM_FAILURES 是 `CallEngine::failLocally` 把「房间帧没送到」翻译成的内部事件，
+ * 全归房间机（静默失败审计 §A 加了 publish_failed / subscribe_failed 两条）。
+ */
+bool isRoomFailure(const std::string& name) {
+  static const std::vector<std::string> kNames = {"join_failed", "leave_failed", "publish_failed",
+                                                   "subscribe_failed"};
+  return std::find(kNames.begin(), kNames.end(), name) != kNames.end();
+}
+
 bool hasEvent(const std::vector<EmittedEvent>& emit, const char* cb) {
   return std::any_of(emit.begin(), emit.end(),
                      [cb](const EmittedEvent& event) { return event.cb == cb; });
@@ -109,11 +119,12 @@ EngineOutput handleHelloOk(const EngineContext& ctx, const Json& data, std::int6
   return EngineOutput{std::move(next), std::move(send), std::move(emit)};
 }
 
-EngineOutput handleInternal(const EngineContext& ctx, const std::string& name,
+EngineOutput handleInternal(const EngineContext& ctx, const MachineInput& input,
                             std::int64_t nowMs) {
+  const std::string& name = input.name;
   if (name == "reset") {
     // 宿主主动 logout：房间直接清空，通话本地合成一条 onCallEnd（见 CallMachine 的注释）。
-    CallOutput call = reduceCall(ctx.call, MachineInput::internal(name), nowMs);
+    CallOutput call = reduceCall(ctx.call, input, nowMs);
     EngineContext next;
     next.room = clearedRoom(RoomState::Idle);
     next.call = std::move(call.state);
@@ -166,13 +177,15 @@ EngineOutput handleInternal(const EngineContext& ctx, const std::string& name,
   }
   if (name == "call_failed") {
     // 交给通话机回 idle；它抛的 onCallEnd 会顺带把房间也清掉（见 liftCall）。
-    return liftCall(ctx, reduceCall(ctx.call, MachineInput::internal(name), nowMs));
+    // call_failed 现在也被 room.publish 通话中被拒这条路复用（CallEngine::failLocally），
+    // 通话机会按此刻状态挑该发的结束帧（CallMachine.cpp 的注释）。
+    return liftCall(ctx, reduceCall(ctx.call, input, nowMs));
   }
-  if (name == "join_failed" || name == "leave_failed") {
-    return liftRoom(ctx, reduceRoom(ctx.room, MachineInput::internal(name)));
+  if (isRoomFailure(name)) {
+    return liftRoom(ctx, reduceRoom(ctx.room, input));
   }
   // 其余内部事件（media_ready）交给通话机。
-  return liftCall(ctx, reduceCall(ctx.call, MachineInput::internal(name), nowMs));
+  return liftCall(ctx, reduceCall(ctx.call, input, nowMs));
 }
 
 }  // namespace
@@ -182,7 +195,7 @@ EngineOutput reduceEngine(const EngineContext& ctx, const MachineInput& input,
   if (input.kind == MachineInput::Kind::Recv && input.name == frame::kHelloOk) {
     return handleHelloOk(ctx, input.payload, nowMs);
   }
-  if (input.kind == MachineInput::Kind::Internal) return handleInternal(ctx, input.name, nowMs);
+  if (input.kind == MachineInput::Kind::Internal) return handleInternal(ctx, input, nowMs);
 
   if (input.kind == MachineInput::Kind::Recv) {
     if (startsWith(input.name, "call.")) return liftCall(ctx, reduceCall(ctx.call, input, nowMs));

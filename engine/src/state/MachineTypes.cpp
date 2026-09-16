@@ -20,11 +20,11 @@ MachineInput MachineInput::recv(std::string type, Json data) {
   return input;
 }
 
-MachineInput MachineInput::internal(std::string name) {
+MachineInput MachineInput::internal(std::string name, Json args) {
   MachineInput input;
   input.kind = Kind::Internal;
   input.name = std::move(name);
-  input.payload = Json::makeObject();
+  input.payload = std::move(args);
   return input;
 }
 

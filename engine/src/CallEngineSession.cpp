@@ -33,7 +33,7 @@ void CallEngine::login(const std::string& token) {
     这一条守的是直接用 C++ 门面的那条路。
   */
   if (!deviceIdValid(options_.deviceId)) {
-    failLocally(frame::kHello, codeValue(ErrorCode::BadParams));
+    failLocally(frame::kHello, Json::makeObject(), codeValue(ErrorCode::BadParams));
     return;
   }
 

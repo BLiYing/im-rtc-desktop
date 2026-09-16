@@ -248,10 +248,12 @@ private:
   /**
    * onRequestFailed 处理一次请求的失败。
    * **断线导致的失败在这里被放过**——那不是「这件事失败了」，见 .cpp 的长注释。
+   * `data` 是那一帧原本要发的线路数据，`failLocally` 靠它取 `room.publish` 的 cid /
+   * `room.subscribe` 的 track_id（静默失败审计 §A）。
    */
-  void onRequestFailed(const std::string& type, const RequestResult& result);
+  void onRequestFailed(const std::string& type, const Json& data, const RequestResult& result);
   /** failLocally 把「这一帧确实没成」翻译成状态机认识的内部事件，并报给宿主。 */
-  void failLocally(const std::string& type, std::int32_t code);
+  void failLocally(const std::string& type, const Json& data, std::int32_t code);
   std::shared_ptr<CallEngineObserver> observer() const { return observer_.lock(); }
 
   CallEngineOptions options_;

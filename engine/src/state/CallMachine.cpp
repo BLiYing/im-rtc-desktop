@@ -186,10 +186,26 @@ CallOutput reduceInternal(const CallContext& ctx, const std::string& name,
   if (name == "reset") return synthesizeNetworkEnd(ctx, nowMs);
 
   if (name == "call_failed" && ctx.state != CallState::Idle) {
-    return callOut(CallContext{}, {},
+    /*
+      call_failed 有两条来路：
+      - `call.invite` 被服务端拒了——此刻 state 恒为 inviting，没有 call_id 可发任何
+        结束帧，duration 恒为 0（connectedAtMs 还是 0）。
+      - `room.publish` 通话中被拒（静默失败审计 §A，`CallEngine::failLocally` 复用这条
+        内部事件强制收场整通电话）：此刻可能是 connecting / connected，call_id 已经拿到，
+        这时必须真的把 `call.hangup` 发出去，否则对面还在等我们挂断，界面却已经撤了。
+        与 Web 端 `state/forceEnd.ts` 的 `endFrames()` 同一形状（只是这里只会撞见
+        connecting/connected 两种，会议房不走这条路，通话里 publish 才要）。
+    */
+    std::vector<OutgoingFrame> frames;
+    if ((ctx.state == CallState::Connecting || ctx.state == CallState::Connected) &&
+        !ctx.callId.empty()) {
+      frames.push_back(frameOf(frame::kCallHangup, obj({{"call_id", Json::make(ctx.callId)}})));
+    }
+    const std::int64_t durationSec = callDurationSec(ctx.connectedAtMs, nowMs);
+    return callOut(CallContext{}, std::move(frames),
                    {eventOf("onCallEnd", obj({{"call_id", Json::make(ctx.callId)},
                                               {"reason", Json::make(reason::kError)},
-                                              {"duration_sec", Json::make(std::int64_t{0})},
+                                              {"duration_sec", Json::make(durationSec)},
                                               {"ended_by", Json::make("")}}))});
   }
   return callOut(ctx);

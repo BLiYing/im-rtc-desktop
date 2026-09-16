@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "imrtc/Errors.h"
+#include "imrtc/Log.h"
 #include "imrtc/MachineTypes.h"
 #include "imrtc/Registry.h"
 
@@ -51,9 +52,9 @@ CallEngine::CallEngine(CallEngineOptions options) : options_(std::move(options))
     if (type == frame::kRoomOffer && str(data, "pc") == "pub") {
       const std::string offerType = type;
       return connection_->request(offerType, data, now,
-                                  [this, offerType](const RequestResult& result) {
+                                  [this, offerType, data](const RequestResult& result) {
                                     if (!result.ok) {
-                                      onRequestFailed(offerType, result);
+                                      onRequestFailed(offerType, data, result);
                                       return;
                                     }
                                     handleIncoming(result.envelope.type, "", result.data);
@@ -363,7 +364,7 @@ void CallEngine::sendOne(const OutgoingFrame& frame, const std::string& replyReq
       早先这里是 `if (!connection_) return;`，静默吞掉。ABI 冒烟测试
       「没登录就拨号」把它抓了出来。
     */
-    failLocally(frame.type, codeValue(ErrorCode::NotLoggedIn));
+    failLocally(frame.type, frame.data, codeValue(ErrorCode::NotLoggedIn));
     return;
   }
   const std::int64_t now = options_.clock();
@@ -380,9 +381,9 @@ void CallEngine::sendOne(const OutgoingFrame& frame, const std::string& replyReq
 
   const std::string type = frame.type;
   const bool sent = connection_->request(
-      type, frame.data, now, [this, type](const RequestResult& result) {
+      type, frame.data, now, [this, type, data = frame.data](const RequestResult& result) {
         if (!result.ok) {
-          onRequestFailed(type, result);
+          onRequestFailed(type, data, result);
           return;
         }
         /*
@@ -401,11 +402,12 @@ void CallEngine::sendOne(const OutgoingFrame& frame, const std::string& replyReq
     // 连接不可用时 request 不会回调，但状态机已经把状态推过去了。这一帧**根本没上线路**，
     // 所以必须当作彻底失败：否则通话会永远停在 inviting，之后每次挂断都发向一个
     // 不存在的 call（换回 1401，永远退不出去）。
-    failLocally(type, codeValue(ErrorCode::NetworkUnreachable));
+    failLocally(type, frame.data, codeValue(ErrorCode::NetworkUnreachable));
   }
 }
 
-void CallEngine::onRequestFailed(const std::string& type, const RequestResult& result) {
+void CallEngine::onRequestFailed(const std::string& type, const Json& data,
+                                 const RequestResult& result) {
   /*
     **先放上行协商的闸，再谈要不要报错。**
 
@@ -429,10 +431,10 @@ void CallEngine::onRequestFailed(const std::string& type, const RequestResult& r
   */
   if (result.errorCode == codeValue(ErrorCode::NetworkUnreachable)) return;
 
-  failLocally(type, result.errorCode);
+  failLocally(type, data, result.errorCode);
 }
 
-void CallEngine::failLocally(const std::string& type, std::int32_t code) {
+void CallEngine::failLocally(const std::string& type, const Json& data, std::int32_t code) {
   /*
     走 emitOrDefer 而不是直接调 observer：failLocally 几乎总是在**某一层的发帧循环里**
     被调到（帧没发出去才叫失败）。直接抛的话，这条错误会跑到「它所属的那次状态转移」
@@ -462,6 +464,19 @@ void CallEngine::failLocally(const std::string& type, std::int32_t code) {
 
     其余帧的失败只报错：它们不改变「有没有一通电话 / 在不在房里」。
     **请求超时（2004）走的也是这条路**——十秒没应答，那通电话确实没建起来。
+
+    这条推理漏了一维——**有没有在推流**（静默失败审计 §A）：`room.publish` /
+    `room.subscribe` 被拒（或没送到）原先谁都不认，那条轨道永远停在 publishing /
+    subscribing：`.ok` 不会来，上行从未协商、下行订阅永久悬空，界面显示已接通、
+    对方全程听不见看不见，零提示。
+    - `room.publish` 通话里（`call.state != idle`）被拒：直接强制收场整通电话，
+      reason=error——留在通话里只报错也救不回来，服务端会拒的几种情形（房间没了、
+      重复发布、请求超时）重试也没用。复用 `call_failed` 的合成路径（CallMachine.cpp
+      按此刻状态挑该发的结束帧，含 call.hangup）。
+      没有通话（会议房）时只摘掉那条 publishing 记账，不收场、不额外抛回调。
+    - `room.subscribe` 被拒只摘记账，不收场：最常见的 1301 是订阅与对方停推赛跑输了，
+      通话本身没事——留着不摘的话不变量 R3 会把之后每次重订都当成换层，
+      再也发不出 room.subscribe。
   */
   if (type == frame::kCallInvite) {
     apply(MachineInput::internal("call_failed"), "");
@@ -469,6 +484,18 @@ void CallEngine::failLocally(const std::string& type, std::int32_t code) {
     apply(MachineInput::internal("join_failed"), "");
   } else if (type == frame::kRoomLeave) {
     apply(MachineInput::internal("leave_failed"), "");
+  } else if (type == frame::kRoomPublish) {
+    if (context_.call.state != CallState::Idle) {
+      log(LogLevel::Warn, "发布被拒，结束本端通话", {{logfield::kCallId, context_.call.callId}});
+      apply(MachineInput::internal("call_failed"), "");
+    } else {
+      apply(MachineInput::internal("publish_failed", obj({{"cid", Json::make(str(data, "cid"))}})),
+           "");
+    }
+  } else if (type == frame::kRoomSubscribe) {
+    apply(MachineInput::internal("subscribe_failed",
+                                 obj({{"track_id", Json::make(str(data, "track_id"))}})),
+         "");
   }
 }
 

@@ -276,6 +276,92 @@ IMRTC_TEST(roomLeaveRejectedStillSettles,
   CHECK_EQ(ignored.emit.size(), std::size_t{0}, "也不该凭空抛 onRoomLeft");
 }
 
+IMRTC_TEST(roomPublishFailedDropsOnlyThatCid,
+           "房间机 —— publish_failed 只摘掉那条 publishing，已发布的不碰，之后能重新 publish"
+           "（静默失败审计 §A）") {
+  /*
+    **通话里走不到这里**——`CallEngine::failLocally` 一看 `call.state != idle` 就直接
+    把整通电话强制收场了（复用 `call_failed`），这条只管没有通话的会议房。
+  */
+  imrtc::RoomContext ctx;
+  ctx.state = imrtc::RoomState::Joined;
+  ctx.roomId = "r-1";
+  ctx.publish["c-live"] = "published";  // 已经在推流的，不该被这条碰到
+
+  const imrtc::RoomOutput publishing = imrtc::reduceRoomAct(
+      ctx, "publish",
+      imrtc::obj({{"cid", Json::make("c-9")},
+                  {"kind", Json::make("audio")},
+                  {"source", Json::make("microphone")},
+                  {"simulcast", Json::make(false)}}));
+  CHECK_EQ(publishing.state.publish.at("c-9"), std::string("publishing"), "先记成 publishing");
+
+  const imrtc::RoomOutput rolled = imrtc::reduceRoom(
+      publishing.state,
+      imrtc::MachineInput::internal("publish_failed", imrtc::obj({{"cid", Json::make("c-9")}})));
+  CHECK_TRUE(rolled.state.publish.find("c-9") == rolled.state.publish.end(),
+             "不摘的话 publish.ok 永远不会来，pub offer 永远不产出");
+  CHECK_EQ(rolled.state.publish.at("c-live"), std::string("published"), "已发布的那条不该被碰");
+  CHECK_EQ(rolled.emit.size(), std::size_t{0}, "不额外抛回调——错误早在 failLocally 里抛过了");
+
+  // 之后再发布同一条 cid：必须还能发出 room.publish，证明记账真的清干净了。
+  const imrtc::RoomOutput retried = imrtc::reduceRoomAct(
+      rolled.state, "publish",
+      imrtc::obj({{"cid", Json::make("c-9")},
+                  {"kind", Json::make("audio")},
+                  {"source", Json::make("microphone")},
+                  {"simulcast", Json::make(false)}}));
+  CHECK_EQ(retried.send.size(), std::size_t{1}, "要发一帧");
+  CHECK_EQ(retried.send[0].type, std::string(imrtc::frame::kRoomPublish), "是发布请求");
+
+  // 不在 publishing 时是空操作——与 join_failed 只认 joining 同一个道理。
+  const imrtc::RoomOutput ignored = imrtc::reduceRoom(
+      rolled.state, imrtc::MachineInput::internal("publish_failed",
+                                                   imrtc::obj({{"cid", Json::make("c-live")}})));
+  CHECK_EQ(ignored.state.publish.at("c-live"), std::string("published"),
+           "已发布的那条不该被 publish_failed 摘掉");
+}
+
+IMRTC_TEST(roomSubscribeFailedDropsSubscribingAndLayer,
+           "房间机 —— subscribe_failed 摘掉 subscribing 与层记账，重订能重新发 room.subscribe"
+           "（静默失败审计 §A）") {
+  imrtc::RoomContext ctx;
+  ctx.state = imrtc::RoomState::Joined;
+  ctx.roomId = "r-1";
+  ctx.remoteTracks["t-9"] = imrtc::RemoteTrack{"bob", "video", "p-1"};
+  ctx.remoteTracks["t-1"] = imrtc::RemoteTrack{"carol", "video", "p-2"};
+  ctx.subscribe["t-1"] = "subscribed";  // 已订阅的，不该被这条碰到
+
+  const imrtc::RoomOutput subscribing = imrtc::reduceRoomAct(
+      ctx, "subscribe",
+      imrtc::obj({{"track_id", Json::make("t-9")}, {"max_layer", Json::make("h")}}));
+  CHECK_EQ(subscribing.state.subscribe.at("t-9"), std::string("subscribing"), "先记成 subscribing");
+  CHECK_EQ(subscribing.state.layers.at("t-9"), std::string("h"), "层记账也先记下");
+
+  const imrtc::RoomOutput rolled = imrtc::reduceRoom(
+      subscribing.state, imrtc::MachineInput::internal(
+                             "subscribe_failed", imrtc::obj({{"track_id", Json::make("t-9")}})));
+  CHECK_TRUE(rolled.state.subscribe.find("t-9") == rolled.state.subscribe.end(),
+             "不摘的话不变量 R3 会把重订当成换层，再也发不出 room.subscribe");
+  CHECK_TRUE(rolled.state.layers.find("t-9") == rolled.state.layers.end(), "层记账要一起摘");
+  CHECK_EQ(rolled.state.subscribe.at("t-1"), std::string("subscribed"), "已订阅的那条不该被碰");
+  CHECK_EQ(rolled.emit.size(), std::size_t{0}, "不额外抛回调");
+
+  // 重订：必须重新发 room.subscribe，不是被 R3 当成换层发 room.update_layer。
+  const imrtc::RoomOutput retried = imrtc::reduceRoomAct(
+      rolled.state, "subscribe",
+      imrtc::obj({{"track_id", Json::make("t-9")}, {"max_layer", Json::make("h")}}));
+  CHECK_EQ(retried.send.size(), std::size_t{1}, "要发一帧");
+  CHECK_EQ(retried.send[0].type, std::string(imrtc::frame::kRoomSubscribe), "是订阅，不是换层");
+
+  // 不在 subscribing 时是空操作。
+  const imrtc::RoomOutput ignored = imrtc::reduceRoom(
+      rolled.state, imrtc::MachineInput::internal(
+                        "subscribe_failed", imrtc::obj({{"track_id", Json::make("t-1")}})));
+  CHECK_EQ(ignored.state.subscribe.at("t-1"), std::string("subscribed"),
+           "已订阅的那条不该被 subscribe_failed 摘掉");
+}
+
 IMRTC_TEST(roomFsmStates, "room_fsm.json —— C++ 侧的房间状态集合与向量一致") {
   const Json vector = imtest::loadVector("room_fsm.json");
   std::vector<std::string> allowed;
