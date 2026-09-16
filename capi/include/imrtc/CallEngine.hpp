@@ -146,6 +146,8 @@ public:
 
   virtual void onUserEnter(const std::string& uid) { (void)uid; }
   virtual void onUserLeave(const std::string& uid) { (void)uid; }
+  /** 某人的设备开始响铃，通话里的人都收到（2026-09-17 增）。见 imrtc_c.h 的 on_user_ringing。 */
+  virtual void onUserRinging(const std::string& uid) { (void)uid; }
   virtual void onUserAccept(const std::string& uid) { (void)uid; }
   virtual void onUserReject(const std::string& uid) { (void)uid; }
   virtual void onUserNoResponse(const std::string& uid) { (void)uid; }
@@ -223,6 +225,7 @@ public:
     table.on_room_joined = &Engine::cbRoomJoined;
     table.on_room_left = &Engine::cbRoomLeft;
     table.on_room_closed = &Engine::cbRoomClosed;
+    table.on_user_ringing = &Engine::cbUserRinging;
     return call(imrtc_v1_engine_set_observer(handle_, &table));
   }
 
@@ -396,6 +399,9 @@ private:
   }
   static void cbUserLeave(void* u, const char* uid) {
     if (Observer* o = self(u)) o->onUserLeave(text(uid));
+  }
+  static void cbUserRinging(void* u, const char* uid) {
+    if (Observer* o = self(u)) o->onUserRinging(text(uid));
   }
   static void cbUserAccept(void* u, const char* uid) {
     if (Observer* o = self(u)) o->onUserAccept(text(uid));

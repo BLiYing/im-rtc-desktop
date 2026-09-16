@@ -40,6 +40,7 @@ public:
   void onCallNoAnswer(const std::string& uid) override;
   void onUserEnter(const std::string& uid) override;
   void onUserLeave(const std::string& uid) override;
+  void onUserRinging(const std::string& uid) override;
   void onUserAccept(const std::string& uid) override;
   void onUserReject(const std::string& uid) override;
   void onUserNoResponse(const std::string& uid) override;

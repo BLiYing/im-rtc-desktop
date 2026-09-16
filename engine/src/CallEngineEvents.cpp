@@ -109,6 +109,8 @@ bool dispatchObserverEvent(CallEngineObserver& out, const EmittedEvent& event) {
     target->onUserEnter(str(args, "uid"));
   } else if (cb == "onUserLeave") {
     target->onUserLeave(str(args, "uid"));
+  } else if (cb == "onUserRinging") {
+    target->onUserRinging(str(args, "uid"));
   } else if (cb == "onUserAccept") {
     target->onUserAccept(str(args, "uid"));
   } else if (cb == "onUserReject") {

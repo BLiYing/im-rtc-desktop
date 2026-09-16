@@ -168,6 +168,12 @@ public:
   virtual void onUserEnter(const std::string& uid) { (void)uid; }
   /** 有人离房。 */
   virtual void onUserLeave(const std::string& uid) { (void)uid; }
+  /**
+   * 某人的设备开始响铃（协议 `call.ringing`）。**通话里的人都收到**，不含正在响铃的人自己——
+   * 群通话里别人加了人，你也能给他摆「呼叫中」占位格，随后由 onUserAccept / onUserReject /
+   * onUserNoResponse 收掉。1v1 主叫也会收到。2026-09-17 增。
+   */
+  virtual void onUserRinging(const std::string& uid) { (void)uid; }
   /** 群通话里某人接听了（其余人都收到）。 */
   virtual void onUserAccept(const std::string& uid) { (void)uid; }
   /** 群通话里某人拒接了。 */

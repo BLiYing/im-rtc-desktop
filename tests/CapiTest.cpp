@@ -224,6 +224,13 @@ IMRTC_TEST(capiObserverBackwardCompatWithoutDisconnectedEx,
   CHECK_EQ(imrtc_v1_engine_set_observer(engine, &legacy), std::int32_t{IMRTC_V1_OK},
            "旧宿主的 struct_size（不含新字段）应当被接受");
 
+  // 2026-09-15 ~ 09-17 之间编译的宿主：有 on_disconnected_ex、没有 on_user_ringing。
+  imrtc_v1_observer beforeRinging{};
+  beforeRinging.struct_size = static_cast<std::uint32_t>(offsetof(imrtc_v1_observer, on_user_ringing));
+  beforeRinging.user_data = &counters;
+  CHECK_EQ(imrtc_v1_engine_set_observer(engine, &beforeRinging), std::int32_t{IMRTC_V1_OK},
+           "不含 on_user_ringing 的 struct_size 也应当被接受");
+
   imrtc_v1_engine_destroy(engine);
 }
 

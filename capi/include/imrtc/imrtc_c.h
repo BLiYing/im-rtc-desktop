@@ -329,6 +329,14 @@ typedef struct imrtc_v1_observer {
    * on_disconnected**（同一次断开只报一次）；引擎拿不到这两样信息时不会调用它。
    */
   void (*on_disconnected_ex)(void* user_data, int32_t code, imrtc_v1_bool will_reconnect);
+
+  /* 以下 2026-09-17 追加，规矩同上：旧宿主的 struct_size 不含它，引擎当它是 NULL。 */
+  /**
+   * 某人的设备开始响铃（协议 call.ringing）。通话里的人都收到，不含正在响铃的人自己——
+   * 群通话里别人加了人，你也能给他摆「呼叫中」占位格，随后由 on_user_accept /
+   * on_user_reject / on_user_no_response 收掉。
+   */
+  void (*on_user_ringing)(void* user_data, const char* uid);
 } imrtc_v1_observer;
 
 /** 构造参数。**填 struct_size**。 */

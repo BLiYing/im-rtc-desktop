@@ -93,6 +93,7 @@ void CObserver::onCallBusy(const std::string& uid) { one(table_.on_call_busy, ui
 void CObserver::onCallNoAnswer(const std::string& uid) { one(table_.on_call_no_answer, uid); }
 void CObserver::onUserEnter(const std::string& uid) { one(table_.on_user_enter, uid); }
 void CObserver::onUserLeave(const std::string& uid) { one(table_.on_user_leave, uid); }
+void CObserver::onUserRinging(const std::string& uid) { one(table_.on_user_ringing, uid); }
 void CObserver::onUserAccept(const std::string& uid) { one(table_.on_user_accept, uid); }
 void CObserver::onUserReject(const std::string& uid) { one(table_.on_user_reject, uid); }
 void CObserver::onUserNoResponse(const std::string& uid) { one(table_.on_user_no_response, uid); }
