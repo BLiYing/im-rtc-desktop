@@ -6,17 +6,16 @@
 
 ## 当前焦点
 
-**2026-09-17：SDK 1.0.0 已公网发布（GitHub Release，只 macOS），手上没有在做的改动**（main 已推、工作区干净）。
-- Release `1.0.0` + `imrtc-desktop-1.0.0-macos.zip`（universal dylib + `imrtc_c.h` / `CallEngine.hpp` + `imrtcConfig.cmake` + LICENSE，SHA-256 `af4ec8c4…`）；第三方 `find_package(imrtc)` + `imrtc::capi`。Demo `IMRTC_SDK=source|local|public`，公网档 09-17 真下载验过。
-- 最近提交：§A 发布被拒收场 `d2fcdec`（单测过；Demo 没接媒体发不出 `room.publish`，停 🟡）· `inviter` `bb1ec1e` · API 命名对齐 `2463354` · 宿主对接 `imrtc_v1_call_ex` `6697868`。
-- **整体状态**：P5 C ABI + Qt Demo 已交付（`test.sh` 八步，129 例，导出 33 个 `imrtc_v1_*`）。**媒体推迟、纯信令模式**：能拨号、进房、收全部状态回调，没有声音和画面。**Windows 一次都没编译过**。
+**2026-09-17 夜：补了两件（本地已提交、未推送），`test.sh` 全绿（135 例），Demo 没接。** SDK 1.0.0 已公网发布（GitHub Release，只 macOS），这些进下一个版本。
+- `0397c97` **`forceEnd`**：C++ `CallEngine::forceEnd()` + C ABI `imrtc_v1_force_end`（导出 33→34）；idle 下迟到 `invite.ok` / `connected` 补发 cancel / hangup、迟到 `room.join.ok` 补发 leave（原先会被搭成 joined）；时长从本端 onCallBegin 算。
+- `c57b492` 收 `call.ringing` 抛 `onUserRinging`，`imrtc_v1_observer` 尾部追加 `on_user_ringing`（旧 struct_size 照旧可用）。
+- **整体状态**：P5 C ABI + Qt Demo 已交付。**媒体推迟、纯信令模式**：能拨号、进房、收全部状态回调，没有声音和画面。**Windows 一次都没编译过**。
 
 ## 下一步
 
 1. **Windows 过一遍**：编译 + 手点；`install()` / `imrtcConfig.cmake` / `find_package`（`.lib` 进 ARCHIVE、`.dll` 进 RUNTIME 只是照惯例写的）；`imrtc_v1_call_ex` 与结构体尾部追加字段 `dumpbin /exports` + 联调。等机器 / 集成方。
-2. **C ABI 与三端的两处不对等**：① 没有 `forceEnd`（加了导出面 33→34，`check-abi.sh` 阈值是 ≥20 不用改）；② observer 没有「票快到期」回调（得先在 engine 造到期计时器，形状没定）。补完同步 server `/guide/desktop`、`/guide/api`。
+2. **C ABI 与三端余下一处不对等**：observer 没有「票快到期」回调（得先在 engine 造到期计时器，形状没定）。`forceEnd` 已补（`0397c97`），Demo 红键还没接看门狗。
 3. **宿主对接 M1/M8 收尾**：Demo 没有「按 call_id 加入」入口与群号 / user_data 展示。
-4. **下个版本（协议批次，server 下一步 0）**：`call.ringing` 发给在场全员，engine 侧消费。
 5. 静默失败清单（P0×2 / P1×4 / P2×6）：`../im-rtc-server/docs/ops/silent-failure/desktop.md`。第一条界面层没接（`MainWindow` 没按 `will_reconnect` 分情况展示），第二条没动。
 6. 异步口子的形状（一次定完）：渲染路径 B 原始帧回调 + `probeMicrophone` / `startLocalPreview` 出 C ABI。
 7. `WebRTCAdapter`（推迟，等 Apple Silicon 或 Windows 机器）。
