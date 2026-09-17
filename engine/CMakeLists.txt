@@ -27,6 +27,7 @@ add_library(im_rtc_engine STATIC
   src/state/CallMachine.cpp
   src/state/CallRecv.cpp
   src/state/RoomMachine.cpp
+  src/state/RoomPaging.cpp
   src/state/RoomRecv.cpp
   src/state/EngineMachine.cpp
   src/state/ForceEnd.cpp

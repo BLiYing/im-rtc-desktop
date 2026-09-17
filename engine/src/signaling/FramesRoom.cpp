@@ -39,11 +39,13 @@ const FrameFields& trackFields() {
 }
 
 const FrameFields& joinFields() {
-  // **注意 auto_subscribe / publish_audio 默认是 true**：直接用零值对象发这一帧，
-  // 线路上会变成 false，人进了房却收不到任何流。发送侧一律用 newFrameData()。
+  // **注意 auto_subscribe 默认 "all"、publish_audio 默认 true**：直接用零值对象发这一帧，
+  // 线路上会变成空串 / false，人进了房却收不到任何流。发送侧一律用 newFrameData()。
   static const FrameFields kFields = {
-      stringField("room_id"),        stringField("room_token"),
-      boolField("auto_subscribe", true), boolField("publish_audio", true),
+      stringField("room_id"),
+      stringField("room_token"),
+      enumField("auto_subscribe", autoSubscribeModes(), "all", "all"),
+      boolField("publish_audio", true),
       boolField("publish_video", false),
   };
   return kFields;

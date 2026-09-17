@@ -95,9 +95,9 @@ IMRTC_TEST(connHandshake, "Connection —— 握手发 sys.hello，收 hello.ok 
   CHECK_EQ(imtest::field(hello, "token"), std::string("tk-1"), "带上 token");
   CHECK_EQ(imtest::field(hello, "device_id"), std::string("mac-8f3a"), "带上 device_id");
   CHECK_EQ(imtest::field(hello, "session_id"), std::string(""), "首次连接 session_id 为空");
-  // 从「已填好默认值的实例」起手：protocol_version 默认 1，从零值起手会发出 0。
-  CHECK_EQ(hello.find("data")->find("protocol_version")->asInt(), std::int64_t{1},
-           "protocol_version 必须是 1");
+  // 从「已填好默认值的实例」起手：protocol_version 默认 2（2.0.0 起），从零值起手会发出 0。
+  CHECK_EQ(hello.find("data")->find("protocol_version")->asInt(), std::int64_t{2},
+           "protocol_version 必须是 2");
   CHECK_TRUE(!imtest::field(hello, "req_id").empty(), "请求必须带非空 req_id");
 
   const std::string reqId = imtest::field(hello, "req_id");

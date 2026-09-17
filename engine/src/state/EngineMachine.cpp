@@ -30,12 +30,18 @@ bool isRoomAct(const std::string& op) {
 }
 
 /**
- * ROOM_FAILURES 是 `CallEngine::failLocally` 把「房间帧没送到」翻译成的内部事件，
- * 全归房间机（静默失败审计 §A 加了 publish_failed / subscribe_failed 两条）。
+ * isRoomInternal 认出**只归房间机**的内部事件。
+ *
+ * 前四条是 `CallEngine::failLocally` 把「房间帧没送到」翻译过来的回滚
+ * （静默失败审计 §A 加了 publish_failed / subscribe_failed 两条）；
+ * 最后一条是会议房翻页退订的五秒迟滞到点（RoomPaging.h）。
+ * **不显式路由的话它们会落到通话机去，被静默丢掉**——症状分别是
+ * 「房间永远停在 joining」和「翻走的人五秒后没退订，订阅位一直占着」。
  */
-bool isRoomFailure(const std::string& name) {
+bool isRoomInternal(const std::string& name) {
   static const std::vector<std::string> kNames = {"join_failed", "leave_failed", "publish_failed",
-                                                   "subscribe_failed"};
+                                                  "subscribe_failed",
+                                                  "unsubscribe_hysteresis_elapsed"};
   return std::find(kNames.begin(), kNames.end(), name) != kNames.end();
 }
 
@@ -184,7 +190,7 @@ EngineOutput handleInternal(const EngineContext& ctx, const MachineInput& input,
     // 通话机会按此刻状态挑该发的结束帧（CallMachine.cpp 的注释）。
     return liftCall(ctx, reduceCall(ctx.call, input, nowMs));
   }
-  if (isRoomFailure(name)) {
+  if (isRoomInternal(name)) {
     return liftRoom(ctx, reduceRoom(ctx.room, input));
   }
   // 其余内部事件（media_ready）交给通话机。

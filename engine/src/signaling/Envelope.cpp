@@ -19,10 +19,10 @@ const char* const kOkSuffix = ".ok";
 std::string okType(const std::string& requestType) { return requestType + kOkSuffix; }
 
 Envelope decodeEnvelope(const std::string& raw) {
-  if (raw.size() > kMaxFrameBytes) {
+  if (raw.size() > kMaxReceivedFrameBytes) {
     throw RtcError(ErrorCode::FrameTooLarge,
-                   "帧 " + std::to_string(raw.size()) + " 字节 > 上限 " +
-                       std::to_string(kMaxFrameBytes));
+                   "帧 " + std::to_string(raw.size()) + " 字节 > 收帧上限 " +
+                       std::to_string(kMaxReceivedFrameBytes));
   }
 
   const Json parsed = Json::parse(raw);

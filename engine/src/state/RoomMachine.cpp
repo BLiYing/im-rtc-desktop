@@ -5,6 +5,7 @@
 
 #include "imrtc/Errors.h"
 #include "imrtc/Registry.h"
+#include "imrtc/RoomPaging.h"
 
 namespace imrtc {
 namespace {
@@ -19,11 +20,11 @@ RoomOutput localReject(const RoomContext& ctx) {
 
 RoomOutput joinRoom(const RoomContext& ctx, const Json& args) {
   if (ctx.state != RoomState::Idle) return localReject(ctx);
-  // auto_subscribe 默认 true——直接读 args 会把「没写」当成 false，
-  // 那正是协议 §2.4 点名的发送侧陷阱。
+  // auto_subscribe 默认 "all"——直接读 args 会把「没写」当成空串，
+  // 那正是协议 §2.4 点名的发送侧陷阱。集合外的值按 §2.4 规则 6 兜底成 "all"。
   const Json* autoSubscribeArg = args.find("auto_subscribe");
-  const bool autoSubscribe =
-      autoSubscribeArg == nullptr ? true : boolean(args, "auto_subscribe");
+  const std::string autoSubscribe =
+      autoSubscribeArg == nullptr ? "all" : coerceAutoSubscribe(str(args, "auto_subscribe"));
   const std::string roomId = str(args, "room_id");
   const std::string roomToken = str(args, "room_token");
 
@@ -107,13 +108,25 @@ RoomOutput unsubscribeTrack(const RoomContext& ctx, const Json& args) {
   if (next.subscribe.find(trackId) != next.subscribe.end()) {
     next.subscribe[trackId] = "unsubscribing";
   }
+  // 已经手动退了，排着的那次迟滞退订就不必再来一遍。
+  dropPending(next, {trackId});
   return roomOut(next, {frameOf(frame::kRoomUnsubscribe,
                                 obj({{"track_id", Json::make(trackId)}}))});
 }
 
+/**
+ * updateLayer 报某条流的层上界。
+ *
+ * **会议房里它同时是订阅意图**：视频不由服务端自动订，所以「看得见」= 订阅、
+ * 「看不见」= 五秒后退订（RoomPaging.h）。通话房照旧只换层。
+ */
 RoomOutput updateLayer(const RoomContext& ctx, const Json& args) {
   const std::string trackId = str(args, "track_id");
   const std::string maxLayer = layerOf(args);
+  const auto known = ctx.remoteTracks.find(trackId);
+  if (usesPagedVideo(ctx) && known != ctx.remoteTracks.end() && known->second.kind == "video") {
+    return pagedUpdateLayer(ctx, trackId, maxLayer);
+  }
   RoomContext next = ctx;
   next.layers[trackId] = maxLayer;
   return roomOut(next, {frameOf(frame::kRoomUpdateLayer,
@@ -219,6 +232,11 @@ RoomOutput reduceRoomInternal(const RoomContext& ctx, const std::string& name, c
   }
   if (name == "publish_failed") return dropFailedPublish(ctx, str(args, "cid"));
   if (name == "subscribe_failed") return dropFailedSubscribe(ctx, str(args, "track_id"));
+  if (name == "unsubscribe_hysteresis_elapsed") {
+    // 翻页退订的五秒到了。带 track_id 就只退那一条（tick 按 track 记截止时刻），
+    // 不带就把排着的一次清掉（一致性向量用的是这一种）。
+    return flushHysteresis(ctx, str(args, "track_id"));
+  }
   return roomOut(ctx);
 }
 

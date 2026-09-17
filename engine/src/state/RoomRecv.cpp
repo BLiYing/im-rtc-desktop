@@ -4,6 +4,7 @@
 #include "imrtc/Envelope.h"
 #include "imrtc/Registry.h"
 #include "imrtc/RoomMachine.h"
+#include "imrtc/RoomPaging.h"
 
 namespace imrtc {
 namespace {
@@ -63,7 +64,8 @@ RoomOutput handleJoinOk(const RoomContext& ctx, const Json& data) {
           RemoteTrack{str(track, "uid"), kind, str(track, "participant_id")};
       emit.push_back(availabilityEvent(kind, str(track, "uid"), !boolean(track, "muted")));
       // 自动订阅是**服务端**做的，客户端这边只记账，等 sub offer 来把它们坐实。
-      if (ctx.autoSubscribe) next.subscribe[trackId] = "subscribing";
+      // 会议房（`audio` 档）只有音频落这一路，视频由客户端按页订——桌面端本期不做按页订阅。
+      if (autoSubscribeCovers(ctx.autoSubscribe, kind)) next.subscribe[trackId] = "subscribing";
     }
   }
 
@@ -98,14 +100,17 @@ RoomOutput handleParticipantLeft(const RoomContext& ctx, const Json& data) {
   const std::string participantId = str(data, "participant_id");
   RoomContext next = ctx;
   next.remoteTracks.clear();
+  std::vector<std::string> gone;
   for (const auto& entry : ctx.remoteTracks) {
     if (entry.second.participantId == participantId) {
       // 人走了，他的 Track 与我们对它的订阅一起清掉——不清的话重连时会重放一个死订阅。
       next.subscribe.erase(entry.first);
+      gone.push_back(entry.first);
       continue;
     }
     next.remoteTracks[entry.first] = entry.second;
   }
+  dropPending(next, gone);
   return roomOut(next, {}, {eventOf("onUserLeave", obj({{"uid", Json::make(str(data, "uid"))}}))});
 }
 
@@ -116,7 +121,7 @@ RoomOutput handleTrackPublished(const RoomContext& ctx, const Json& data) {
 
   RoomContext next = ctx;
   next.remoteTracks[trackId] = RemoteTrack{uid, kind, str(data, "participant_id")};
-  if (ctx.autoSubscribe) next.subscribe[trackId] = "subscribing";
+  if (autoSubscribeCovers(ctx.autoSubscribe, kind)) next.subscribe[trackId] = "subscribing";
 
   return roomOut(next, {}, {availabilityEvent(kind, uid, !boolean(data, "muted"))});
 }
@@ -133,6 +138,7 @@ RoomOutput handleTrackUnpublished(const RoomContext& ctx, const Json& data) {
   }
   next.remoteTracks.erase(trackId);
   next.subscribe.erase(trackId);
+  dropPending(next, {trackId});
   return roomOut(next, {}, std::move(emit));
 }
 

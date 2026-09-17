@@ -54,7 +54,14 @@ struct RoomContext {
   std::string roomId;
   std::string roomToken;
   std::string participantId;
-  bool autoSubscribe = true;
+  /**
+   * 进房时声明的自动订阅档位（协议 §3.1，2.0.0 起是三档字符串）：
+   * `all` 全订 / `audio` 只自动订音频、视频由客户端按页订 / `none` 都不订。
+   *
+   * 桌面端本期只做「原样带上线路并按它记账」：会议分页画廊（`audio` 档下的按页订阅）
+   * 跟随桌面 UI 一起排期（MEETING_ROOM_DESIGN §6 的表尾）。
+   */
+  std::string autoSubscribe = "all";
   /** cid → 发布状态（publishing / published / unpublishing）。发请求时还没有 track_id。 */
   std::map<std::string, std::string> publish;
   /** cid → 服务端分配的 track_id。 */
@@ -67,6 +74,13 @@ struct RoomContext {
   std::map<std::string, std::string> layers;
   /** joining / reconnecting 期间缓存的用户意图（不变量 R2）。 */
   std::vector<BufferedIntent> buffered;
+  /**
+   * 翻页翻走、等五秒迟滞到点才退订的 track_id，**最早翻走的排在前面**（RoomPaging.h）。
+   *
+   * 顺序有用：订满 16 路要提前腾位置时，退的就是最早翻走的那一个。
+   * 不进一致性向量——向量只断言 room / publish / subscribe 三个键。
+   */
+  std::vector<std::string> pendingUnsubscribe;
 };
 
 using RoomOutput = MachineOutput<RoomContext>;

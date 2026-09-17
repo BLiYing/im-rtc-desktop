@@ -1,5 +1,7 @@
 #include "imrtc/Enums.h"
 
+#include <algorithm>
+
 namespace imrtc {
 
 const EnumValues& mediaTypes() {
@@ -18,6 +20,21 @@ const EnumValues& reasonValues() {
 const EnumValues& layers() {
   static const EnumValues kValues = {"none", "l", "m", "h"};
   return kValues;
+}
+
+const EnumValues& autoSubscribeModes() {
+  static const EnumValues kValues = {"all", "audio", "none"};
+  return kValues;
+}
+
+bool autoSubscribeCovers(const std::string& mode, const std::string& kind) {
+  if (mode == "all") return true;
+  return mode == "audio" && kind == "audio";
+}
+
+std::string coerceAutoSubscribe(const std::string& mode) {
+  const EnumValues& modes = autoSubscribeModes();
+  return std::find(modes.begin(), modes.end(), mode) == modes.end() ? "all" : mode;
 }
 
 const EnumValues& trackKinds() {

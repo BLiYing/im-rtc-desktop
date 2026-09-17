@@ -6,6 +6,14 @@
 
 ## 当前焦点
 
+**2026-09-18 凌晨：会议房 M2 的协议那一份已做完并提交（server `docs/design/MEETING_ROOM_DESIGN.md` §6 表里「desktop 跟协议版本、`auto_subscribe`、收帧上限」那一行）。`test.sh` 八步全绿（152 例），只 macOS。**
+- 协议 2：`sys.hello` 的 `protocol_version` 默认值 1 → 2；收帧上限拆成两个数（发仍 `kMaxFrameBytes` 64 KiB，收按 `kMaxReceivedFrameBytes` 256 KiB）。
+- `room.join.auto_subscribe` 布尔 → 三档字符串 `all | audio | none`（`autoSubscribeModes()`，兜底 `all`）；`RoomContext::autoSubscribe` 跟着从 `bool` 变 `std::string`。
+- **比原计划多做了一件**：`engine/src/state/RoomPaging.cpp` 的按页订阅翻译。桌面端本期没有会议界面，但这套翻译在引擎里必须有——五端跑同一份 `room_fsm.json`，新增的 `meeting_audio_auto_video_by_page` 那一组不实现就红；而且少了它，`audio` 档的房间里 `setRemoteLayer` 会对一条根本没订阅的流发换层帧，服务端回 1301、画面永远不来。
+- 五秒迟滞按**桌面的做法**走：`CallEngine` 记截止时刻，`tick()` 到点喂内部事件（与 `Heartbeat` 同一套「不持有定时器」）。
+- 新测 `tests/RoomPagingTest.cpp` 6 例（16 路上限、翻回来撤迟滞、通话房护栏都在里面）。
+- **没做**：会议分页画廊的界面（跟随桌面 UI 排期）；Windows 侧照旧一次都没编译过。
+
 **2026-09-17 夜：「调用结果回给调用方」（server `docs/design/ACTION_RESULT_DESIGN.md` → 2.0.0）已改完，未提交，等 code-review。** `test.sh` 八步全绿（146 例，ASan 同绿），只 macOS。
 - C ABI 按 D4 **原地改** 11 个发起类函数签名，末尾 `imrtc_v1_result_cb cb, void* user_data`（cb 为 NULL 失败退回 `on_error`）；导出仍 34 个。C++ 包装加 `std::function<void(Result<T>)> done`。
 - 引擎：状态机本地拒绝改成输出里的 `reject`；发帧 / 结算 / 回滚 / 本地收场挪到 `engine/src/CallEngineRequests.cpp`；补上 accept / join 被拒回 idle。

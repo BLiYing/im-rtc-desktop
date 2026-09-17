@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
 #include <utility>
@@ -266,6 +267,10 @@ public:
 
 private:
   void apply(const MachineInput& input, const std::string& replyReqId);
+  /** fireExpiredUnsubscribes 把到点的翻页退订喂回状态机（RoomPaging.h）。 */
+  void fireExpiredUnsubscribes();
+  /** syncUnsubscribeDeadlines 让截止时刻表与待退订清单一致。 */
+  void syncUnsubscribeDeadlines();
   /**
    * request 把一次**宿主调用**喂进状态机，并把结果交回 `done`（见类注释「调用结果回给调用方」）。
    * `valueKey` 是成功时从应答 data 里取值的键（`call` 取 `call_id`），空串表示没有成功值。
@@ -362,6 +367,15 @@ private:
   int sendDepth_ = 0;
   /** deferredEmits_ 是重入期间攒下的事件，按产生顺序排队。 */
   std::vector<EmittedEvent> deferredEmits_;
+  /**
+   * 翻页退订的五秒迟滞：track_id → 到点时刻（`tick()` 到点时喂内部事件，RoomPaging.h）。
+   *
+   * **桌面端没有自己的定时器**，一切由外面 `tick()` 驱动（与 `Heartbeat` 同一套做法），
+   * 所以这里记的是截止时刻而不是句柄。每轮状态推进后按
+   * `RoomContext::pendingUnsubscribe` **整体对账**：清单里有而没记的排上，
+   * 有记而清单里没有的抹掉——翻回来撤销、人走了清空、订满时提前退，来路再多也不用改这里。
+   */
+  std::map<std::string, std::int64_t> unsubscribeDeadlines_;
   /**
    * 正在执行 `logout()`。这期间连接层抛上来的东西**一概不往外传**——
    * 是宿主自己要拆的，见 logout() 里的注释。

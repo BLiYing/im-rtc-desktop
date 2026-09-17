@@ -10,6 +10,7 @@
 #include "imrtc/Log.h"
 #include "imrtc/MachineTypes.h"
 #include "imrtc/Reasons.h"
+#include "imrtc/RoomPaging.h"
 #include "imrtc/Registry.h"
 
 namespace imrtc {
@@ -226,6 +227,43 @@ void CallEngine::notifyMediaReady() { apply(MachineInput::internal("media_ready"
 void CallEngine::tick() {
   if (media_) media_->poll();
   if (connection_) connection_->tick(options_.clock());
+  fireExpiredUnsubscribes();
+}
+
+/**
+ * fireExpiredUnsubscribes 把到点的翻页退订喂回状态机（RoomPaging.h）。
+ *
+ * **先收集再喂**：`apply()` 会整个换掉 `context_`，而那一轮又会回来对账
+ * `unsubscribeDeadlines_`——边遍历边改是未定义行为。
+ */
+void CallEngine::fireExpiredUnsubscribes() {
+  if (unsubscribeDeadlines_.empty()) return;
+  const std::int64_t now = options_.clock();
+
+  std::vector<std::string> due;
+  for (const auto& entry : unsubscribeDeadlines_) {
+    if (entry.second <= now) due.push_back(entry.first);
+  }
+  for (const std::string& trackId : due) {
+    unsubscribeDeadlines_.erase(trackId);
+    Json args = Json::makeObject();
+    args.set("track_id", Json::make(trackId));
+    apply(MachineInput::internal("unsubscribe_hysteresis_elapsed", args), "");
+  }
+}
+
+/** syncUnsubscribeDeadlines 让截止时刻表与待退订清单一致。每轮状态推进后调一次。 */
+void CallEngine::syncUnsubscribeDeadlines() {
+  const std::vector<std::string>& pending = context_.room.pendingUnsubscribe;
+  for (auto it = unsubscribeDeadlines_.begin(); it != unsubscribeDeadlines_.end();) {
+    it = std::find(pending.begin(), pending.end(), it->first) == pending.end()
+             ? unsubscribeDeadlines_.erase(it)
+             : std::next(it);
+  }
+  const std::int64_t deadline = options_.clock() + kUnsubscribeHysteresisMs;
+  for (const std::string& trackId : pending) {
+    unsubscribeDeadlines_.emplace(trackId, deadline);
+  }
 }
 
 void CallEngine::probeMicrophone(VoidCompletion done) {
@@ -351,6 +389,8 @@ void CallEngine::apply(const MachineInput& input, const std::string& replyReqId)
 void CallEngine::dispatchOutput(EngineOutput output, const std::string& replyReqId,
                                 const std::shared_ptr<Settlement>& settlement) {
   context_ = std::move(output.state);
+  // 翻页退订的截止时刻**每轮对账一次**，不在各条来路上各记各删（见 syncUnsubscribeDeadlines）。
+  syncUnsubscribeDeadlines();
 
   ++sendDepth_;
   for (const OutgoingFrame& frame : output.send) sendOne(frame, replyReqId, settlement);
