@@ -4,8 +4,10 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
+#include "imrtc/ActionResult.h"
 #include "imrtc/CallEngineObserver.h"
 #include "imrtc/Connection.h"
 #include "imrtc/EngineMachine.h"
@@ -67,7 +69,7 @@ struct CallEngineOptions {
  *
  * 三个字段原样进 `call.invite`；本地先拦 `chatGroupId` 超 64 字节/含空白/换行、
  * `userData` 超 4096 字节——与「callee_ids 里有自己」同一个出口：
- * `onError(1004)` + `onCallEnd(error)`，不上线路。
+ * 结果回 `1004`（for_type `call.invite`）+ `onCallEnd(error)`，不上线路。
  */
 struct CallOptions {
   /** 宿主自己的群号，opaque，≤64 字节，禁止空白与换行，可空。通话期间不可改。 */
@@ -103,6 +105,16 @@ bool dispatchObserverEvent(CallEngineObserver& observer, const EmittedEvent& eve
  * 就都跑起来了。**engine 不自己起线程**——宿主的事件循环长什么样我们不知道，
  * 而多起一条线程就等于把「回调在哪个线程」的问题甩给宿主（CONVENTIONS §6）。
  *
+ * # 调用结果回给调用方（2.0.0）
+ *
+ * 发请求的方法（`login` / `call` / `accept` / `reject` / `cancel` / `hangup` / `inviteMore` /
+ * `joinCall` / `joinRoom` / `leaveRoom`）末尾带一个可选的 `ActionCompletion`：本地拒绝、服务端拒绝、
+ * 超时、没连接、等应答期间断线都**只**从它回来，不再发 `onError`；成功只管这次调用直接发出的那一帧。
+ * 引擎随后自动发的连锁帧失败找不到调用方，才走 `onError`（带 for_type）。**不传回调时失败退回
+ * `onError`**。通话 / 房间因此收场时 `onCallEnd(error)` / `onRoomLeft` 照发，并排在结果回调之前；
+ * 退出类（reject / cancel / hangup / leaveRoom）失败时本地照样收场，错误只供日志。
+ * 引擎析构时还没回来的结果一律回 `2005`。规则全文见 server `docs/design/ACTION_RESULT_DESIGN.md`。
+ *
  * # 线程
  *
  * **不是线程安全的**：所有方法（含 `tick`）必须在同一个线程上调用。
@@ -116,6 +128,9 @@ public:
   CallEngine(const CallEngine&) = delete;
   CallEngine& operator=(const CallEngine&) = delete;
 
+  /** Settlement 是一次宿主调用的结算记账（定义在 CallEngineRequests.cpp）。 */
+  struct Settlement;
+
   /**
    * setObserver 注册回调表。
    *
@@ -124,8 +139,14 @@ public:
    */
   void setObserver(std::weak_ptr<CallEngineObserver> observer);
 
-  /** login 用一枚票建立信令连接。断线会自动重连（§1.4）。 */
-  void login(const std::string& token);
+  /**
+   * login 用一枚票建立信令连接。断线会自动重连（§1.4）。
+   *
+   * 结果：首次握手成功回 `value = session_id`；握手被拒回那个码、握手前连接就断了回 2003、
+   * 还没连上就 logout / 再次 login 回 2005。**失败之后连接层仍按既有退避策略重试**（能不能好由码决定），
+   * 之后真连上了照样抛 `onConnected`。
+   */
+  void login(const std::string& token, ActionCompletion done = {});
   /** logout 主动断开，**不会**重连。 */
   void logout();
   /**
@@ -134,19 +155,23 @@ public:
    */
   void updateToken(const std::string& token);
 
-  /** call 发起通话。1v1 恰好 1 个被叫；群 ≤8。 */
-  void call(const std::vector<std::string>& calleeIds, const std::string& mediaType, bool isGroup);
+  /**
+   * call 发起通话。1v1 恰好 1 个被叫；群 ≤8。成功回 `value = call_id`（取自 `call.invite.ok`）。
+   * 名单里有自己时本地拒掉：先抛 `onCallEnd(error)`，再回 1004。
+   */
+  void call(const std::vector<std::string>& calleeIds, const std::string& mediaType, bool isGroup,
+           ActionCompletion done = {});
   /** call 的带选项重载：群号 / user_data / 振铃超时（HOST_INTEGRATION_DESIGN §3.3）。 */
   void call(const std::vector<std::string>& calleeIds, const std::string& mediaType, bool isGroup,
-           const CallOptions& options);
+           const CallOptions& options, ActionCompletion done = {});
   /** accept 接听。第二次调用会被**本地**拒绝（2005），不发上去。 */
-  void accept();
-  /** reject 拒接。状态由随后的 `call.ended` 推进——服务端才是裁决方。 */
-  void reject();
-  /** cancel 取消呼出（仅接通前）。 */
-  void cancel();
-  /** hangup 挂断（接通中或接通后）。 */
-  void hangup();
+  void accept(ActionCompletion done = {});
+  /** reject 拒接。状态由随后的 `call.ended` 推进；帧失败时本地照样收场。 */
+  void reject(ActionCompletion done = {});
+  /** cancel 取消呼出（仅接通前）。帧失败时本地照样收场。 */
+  void cancel(ActionCompletion done = {});
+  /** hangup 挂断（接通中或接通后）。帧失败时本地照样收场。 */
+  void hangup(ActionCompletion done = {});
   /**
    * forceEnd 强制结束当前这一场：**结束帧立刻发出，本地立刻收场，不等服务端。**
    *
@@ -161,14 +186,18 @@ public:
    */
   void forceEnd();
   /** inviteMore 群通话中途加人，通话里的任何人都能发（不在通话里回 1407）。 */
-  void inviteMore(const std::vector<std::string>& calleeIds);
-  /** joinCall 主动加入一通进行中的群通话。「怎么知道它在进行」是宿主的事。 */
-  void joinCall(const std::string& callId);
+  void inviteMore(const std::vector<std::string>& calleeIds, ActionCompletion done = {});
+  /**
+   * joinCall 主动加入一通进行中的群通话。「怎么知道它在进行」是宿主的事。
+   * 被拒（1401 / 1402 / 1202 / 1408 / 1409）时回那个码，同时照发 `onCallEnd(error)`。
+   */
+  void joinCall(const std::string& callId, ActionCompletion done = {});
 
   /** joinRoom 直接进一个会议房（不走振铃）。 */
-  void joinRoom(const std::string& roomId, const std::string& roomToken);
-  /** leaveRoom 离房。 */
-  void leaveRoom();
+  void joinRoom(const std::string& roomId, const std::string& roomToken,
+                ActionCompletion done = {});
+  /** leaveRoom 离房。帧失败时本地照样收场（`onRoomLeft` 照发）。 */
+  void leaveRoom(ActionCompletion done = {});
 
   /**
    * setRemoteLayer 报某人画面的**层上界**（协议 §3.5：`room.update_layer`）。
@@ -180,6 +209,8 @@ public:
    * 所以调完不保证立刻变——它还要等目标层的关键帧。**不触发重协商**。
    *
    * 这条**不依赖媒体适配器**：它是一条纯信令帧，`WebRTCAdapter` 没落地时也照发。
+   *
+   * 提示类：**没有结果**，失败走 `onError`。
    *
    * **那个人的视频轨还没发布时这次调用会被丢掉**（不报错）。宿主在 `onUserEnter`
    * 就把格子建好是最自然的写法，而轨道可能几百毫秒后才到——所以**要在
@@ -236,6 +267,27 @@ public:
 private:
   void apply(const MachineInput& input, const std::string& replyReqId);
   /**
+   * request 把一次**宿主调用**喂进状态机，并把结果交回 `done`（见类注释「调用结果回给调用方」）。
+   * `valueKey` 是成功时从应答 data 里取值的键（`call` 取 `call_id`），空串表示没有成功值。
+   */
+  void request(const MachineInput& input, ActionCompletion done, const std::string& valueKey = "");
+  /** rejectLocally 在上线路之前就拒掉一次调用（1004，参数不合规）。 */
+  void rejectLocally(ActionCompletion done, const std::string& forType);
+  /** settleFailure 把一帧的失败交给调用方；没有调用方 / 没传回调 / 已经交过一个失败时发 onError。 */
+  void settleFailure(const std::shared_ptr<Settlement>& settlement, const ActionResult& result);
+  /** settleSuccess 在直接帧都收到 .ok 之后回成功。 */
+  void settleSuccess(const std::shared_ptr<Settlement>& settlement);
+  /** deliverOrDefer 交出结果；正处在发帧循环里时排到这一轮事件之后。 */
+  void deliverOrDefer(const std::shared_ptr<Settlement>& settlement, ActionResult result);
+  /** emitError 抛一条找不到调用方的 onError。 */
+  void emitError(std::int32_t code, const std::string& forType);
+  /** endLocally 按此刻状态本地收场（forceEnd 的收场计算，不发帧）。 */
+  void endLocally();
+  /** beginLogin 记下一次还在等首次握手的 login。 */
+  void beginLogin(ActionCompletion done);
+  /** settleLogin 结算还在等的 login。 */
+  void settleLogin(const ActionResult& result);
+  /**
    * handleIncoming 是**所有下行帧的唯一入口**：先给媒体面看一眼，再喂状态机。
    *
    * 「唯一」很重要——下行帧从两条路进来（服务端主动事件、我们请求的应答），
@@ -244,7 +296,8 @@ private:
    * 而且不报错。
    */
   void handleIncoming(const std::string& type, const std::string& reqId, const Json& data);
-  void dispatchOutput(EngineOutput output, const std::string& replyReqId);
+  void dispatchOutput(EngineOutput output, const std::string& replyReqId,
+                      const std::shared_ptr<Settlement>& settlement = nullptr);
   void emitEvent(const EmittedEvent& event);
   /** emitAll 抛一批事件给宿主，再让媒体面跟着这批事件动。 */
   void emitAll(const std::vector<EmittedEvent>& events);
@@ -257,16 +310,21 @@ private:
   void reactToEvents(const std::vector<EmittedEvent>& events);
   /** videoTrackOf 找某个 uid 的远端视频轨道；没有则空串。 */
   std::string videoTrackOf(const std::string& uid) const;
-  void sendOne(const OutgoingFrame& frame, const std::string& replyReqId);
+  void sendOne(const OutgoingFrame& frame, const std::string& replyReqId,
+               const std::shared_ptr<Settlement>& settlement);
   /**
    * onRequestFailed 处理一次请求的失败。
-   * **断线导致的失败在这里被放过**——那不是「这件事失败了」，见 .cpp 的长注释。
-   * `data` 是那一帧原本要发的线路数据，`failLocally` 靠它取 `room.publish` 的 cid /
+   * **断线导致的失败不回滚**——那不是「这件事失败了」，见 .cpp 的长注释；但结果照样交给调用方。
+   * `data` 是那一帧原本要发的线路数据，`rollback` 靠它取 `room.publish` 的 cid /
    * `room.subscribe` 的 track_id（静默失败审计 §A）。
    */
-  void onRequestFailed(const std::string& type, const Json& data, const RequestResult& result);
-  /** failLocally 把「这一帧确实没成」翻译成状态机认识的内部事件，并报给宿主。 */
-  void failLocally(const std::string& type, const Json& data, std::int32_t code);
+  void onRequestFailed(const std::string& type, const Json& data, const RequestResult& result,
+                       const std::shared_ptr<Settlement>& settlement);
+  /** failLocally 把「这一帧确实没成」交给调用方（或报 onError），并让状态机收场。 */
+  void failLocally(const std::string& type, const Json& data, std::int32_t code,
+                   const std::shared_ptr<Settlement>& settlement = nullptr);
+  /** rollback 把「这一帧没成」翻译成状态机认识的内部事件。 */
+  void rollback(const std::string& type, const Json& data);
   std::shared_ptr<CallEngineObserver> observer() const { return observer_.lock(); }
 
   CallEngineOptions options_;
@@ -311,6 +369,14 @@ private:
   bool tearingDown_ = false;
   /** 本端抛 onCallBegin 的本地时刻，0 = 不在通话里。forceEnd 的时长从这里算。 */
   std::int64_t callStartedAtMs_ = 0;
+  /** 重入期间攒下的调用结果，排在 deferredEmits_ 之后放（状态事件先于结果）。 */
+  std::vector<std::pair<std::shared_ptr<Settlement>, ActionResult>> deferredResults_;
+  /** 还没交出结果的调用。析构时一律回 2005（R5：每次被受理的调用恰好回一次）。 */
+  std::vector<std::shared_ptr<Settlement>> openSettlements_;
+  /** 还在等首次握手的 login。 */
+  std::shared_ptr<Settlement> loginSettlement_;
+  /** 当前登录的 uid（取自 sys.hello.ok），`call` / `inviteMore` 拦「名单里有自己」用。 */
+  std::string uid_;
 };
 
 }  // namespace imrtc

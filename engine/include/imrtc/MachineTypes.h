@@ -34,12 +34,27 @@ struct EmittedEvent {
   Json args;
 };
 
+/**
+ * LocalReject 是「状态机就地拒掉了这次调用」（一致性向量里 `act` 步骤的 `result`）。
+ *
+ * **不是事件**：它只回给发起这次调用的人，不经 `onError` 广播——一次失败只从一个出口报
+ * （server `docs/design/ACTION_RESULT_DESIGN.md` R3）。`code == 0` 表示没有拒绝。
+ */
+struct LocalReject {
+  std::int32_t code = 0;
+  std::string name;
+
+  bool rejected() const { return code != 0; }
+};
+
 /** MachineOutput 是一次状态转移的产物。 */
 template <typename Ctx>
 struct MachineOutput {
   Ctx state;
   std::vector<OutgoingFrame> send;
   std::vector<EmittedEvent> emit;
+  /** 只有 `act` 输入会带：这次调用被本地拒掉了。 */
+  LocalReject reject;
 };
 
 /** MachineInput 是驱动状态机的三种输入之一（与向量的 act / recv / internal 一一对应）。 */

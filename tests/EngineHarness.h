@@ -36,9 +36,12 @@ public:
     // 原因一起记：合并成一句「被踢」正是这一条要防的事。
     log.push_back(std::string("kickedOut:") + imrtc::kickedReasonName(reason));
   }
-  void onError(std::int32_t code, const std::string& name, const std::string&) override {
+  void onError(std::int32_t code, const std::string& name, const std::string& forType) override {
     log.push_back("error:" + std::to_string(code) + "/" + name);
+    errorForTypes.push_back(forType);
   }
+  /** 每条 onError 的 for_type，与 log 里的 error 条目同序。 */
+  std::vector<std::string> errorForTypes;
   void onCallReceived(const imrtc::CallInvite& invite) override {
     log.push_back("callReceived:" + invite.callId + "/" + invite.caller + "/" + invite.mediaType);
   }

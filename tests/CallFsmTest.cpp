@@ -78,6 +78,18 @@ Json actualEmit(const std::vector<imrtc::EmittedEvent>& events) {
   return out;
 }
 
+/**
+ * expectResult 比对向量的 `result`（act 被本地拒绝时回给调用方的结果）。
+ * **省略即断言没有本地拒绝**；本地拒绝也不许再同时 emit 一条 onError——那由 emit 比对抓。
+ */
+void expectResult(const imrtc::LocalReject& actual, const Json& step, const std::string& label) {
+  const Json* want = step.find("result");
+  const std::int64_t wantCode = want == nullptr ? 0 : want->find("code")->asInt();
+  const std::string wantName = want == nullptr ? "" : want->find("name")->asString();
+  CHECK_EQ(static_cast<std::int64_t>(actual.code), wantCode, label + " 的 result.code");
+  CHECK_EQ(actual.name, wantName, label + " 的 result.name");
+}
+
 /** wanted 取出向量里的期望；**省略即断言为空**——这条是向量的价值所在。 */
 Json wanted(const Json& step, const std::string& key) {
   const Json* found = step.find(key);
@@ -97,6 +109,7 @@ void runCase(const Json& testCase) {
 
     imtest::expectSubset(actualSend(result.send), wanted(step, "send"), label + " 的 send");
     imtest::expectSubset(actualEmit(result.emit), wanted(step, "emit"), label + " 的 emit");
+    expectResult(result.reject, step, label);
 
     if (const Json* wantState = step.find("state")) {
       CHECK_EQ(std::string(imrtc::callStateName(ctx.state)), wantState->asString(),
@@ -166,13 +179,13 @@ void expectLocallyRejected(const Json& args, const std::string& label) {
   const CallOutput result = imrtc::reduceCall(ctx, MachineInput::act("call", args));
 
   CHECK_TRUE(result.send.empty(), label + "：不许上线路");
-  CHECK_EQ(result.emit.size(), std::size_t{2}, label + "：onError + onCallEnd 两条");
-  if (result.emit.size() == 2) {
-    CHECK_EQ(result.emit[0].cb, std::string("onError"), label + " 第一条回调名");
-    CHECK_EQ(imrtc::num(result.emit[0].args, "code"), std::int64_t{1004}, label + " 错误码");
-    CHECK_EQ(result.emit[1].cb, std::string("onCallEnd"), label + " 第二条回调名");
-    CHECK_EQ(text(result.emit[1].args, "reason"), std::string("error"), label + " reason");
-    CHECK_EQ(imrtc::num(result.emit[1].args, "duration_sec"), std::int64_t{0}, label + " 时长");
+  // 1004 只回给调用方（ACTION_RESULT_DESIGN R3），界面收场靠唯一一条 onCallEnd(error)。
+  CHECK_EQ(static_cast<std::int64_t>(result.reject.code), std::int64_t{1004}, label + " 本地拒绝码");
+  CHECK_EQ(result.emit.size(), std::size_t{1}, label + "：只抛一条 onCallEnd，不再有 onError");
+  if (result.emit.size() == 1) {
+    CHECK_EQ(result.emit[0].cb, std::string("onCallEnd"), label + " 回调名");
+    CHECK_EQ(text(result.emit[0].args, "reason"), std::string("error"), label + " reason");
+    CHECK_EQ(imrtc::num(result.emit[0].args, "duration_sec"), std::int64_t{0}, label + " 时长");
   }
   CHECK_TRUE(result.state.state == CallState::Idle, label + "：不该转移状态");
 }
@@ -180,7 +193,7 @@ void expectLocallyRejected(const Json& args, const std::string& label) {
 }  // namespace
 
 IMRTC_TEST(callLocalRejectsOversizedChatGroupId,
-           "call() —— chat_group_id 超 64 字节本地先拦：onError(1004)+onCallEnd(error)，"
+           "call() —— chat_group_id 超 64 字节本地先拦：结果 1004 + onCallEnd(error)，"
            "不上线路（HOST_INTEGRATION_DESIGN §3.3）") {
   expectLocallyRejected(callArgs(std::string(65, 'g'), ""), "超长 chat_group_id");
 }

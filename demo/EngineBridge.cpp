@@ -34,6 +34,27 @@ std::vector<std::string> stdStrings(const QStringList& values) {
 
 }  // namespace
 
+/**
+ * reportFailure / logFailure 是发起类动作的结果回调（2.0.0：失败只从结果回来，不再经 onError）。
+ *
+ * 结果在 tick 所在线程（就是 GUI 线程）回调。非退出类的失败照旧弹 toast（走 engineError 那条信号，
+ * forType 位置放动作名）；退出类（拒接 / 取消 / 挂断 / 离房）失败时引擎已经本地收场，只记日志。
+ */
+std::function<void(imrtc::capi::Result<>)> EngineBridge::reportFailure(const char* action) {
+  return [this, action](imrtc::capi::Result<> result) {
+    if (result.ok()) return;
+    qCWarning(lcBridge, "%s 失败 %d %s", action, result.code, result.name.c_str());
+    emit engineError(result.code, qs(result.name), QString::fromLatin1(action));
+  };
+}
+
+std::function<void(imrtc::capi::Result<>)> EngineBridge::logFailure(const char* action) {
+  return [action](imrtc::capi::Result<> result) {
+    if (result.ok()) return;
+    qCInfo(lcBridge, "%s 失败 %d %s（引擎已本地收场）", action, result.code, result.name.c_str());
+  };
+}
+
 EngineBridge::EngineBridge(QObject* parent) : QObject(parent) {
   http_ = new QNetworkAccessManager(this);
 
@@ -399,30 +420,43 @@ void EngineBridge::onRoomClosed(const std::string& roomId, const std::string& re
 qint32 EngineBridge::startCall(const QStringList& calleeIds, const QString& mediaType,
                                bool isGroup) {
   if (!engine_) return IMRTC_V1_ERR_INVALID_STATE;
-  return engine_->call(stdStrings(calleeIds), mediaType.toStdString(), isGroup).code();
+  return engine_
+      ->call(stdStrings(calleeIds), mediaType.toStdString(), isGroup,
+             [this](imrtc::capi::Result<std::string> result) {
+               if (result.ok()) {
+                 qCInfo(lcBridge, "call.invite 受理 call=%s", result.value.c_str());
+                 return;
+               }
+               // 界面收起靠随后已经抛过的 onCallEnd(error)，这里只出提示。
+               qCWarning(lcBridge, "拨号失败 %d %s", result.code, result.name.c_str());
+               emit engineError(result.code, qs(result.name), QStringLiteral("call"));
+             })
+      .code();
 }
 
 qint32 EngineBridge::accept() {
-  return engine_ ? engine_->accept().code() : IMRTC_V1_ERR_INVALID_STATE;
+  return engine_ ? engine_->accept(reportFailure("accept")).code() : IMRTC_V1_ERR_INVALID_STATE;
 }
 qint32 EngineBridge::reject() {
-  return engine_ ? engine_->reject().code() : IMRTC_V1_ERR_INVALID_STATE;
+  return engine_ ? engine_->reject(logFailure("reject")).code() : IMRTC_V1_ERR_INVALID_STATE;
 }
 qint32 EngineBridge::cancel() {
-  return engine_ ? engine_->cancel().code() : IMRTC_V1_ERR_INVALID_STATE;
+  return engine_ ? engine_->cancel(logFailure("cancel")).code() : IMRTC_V1_ERR_INVALID_STATE;
 }
 qint32 EngineBridge::hangup() {
-  return engine_ ? engine_->hangup().code() : IMRTC_V1_ERR_INVALID_STATE;
+  return engine_ ? engine_->hangup(logFailure("hangup")).code() : IMRTC_V1_ERR_INVALID_STATE;
 }
 qint32 EngineBridge::inviteMore(const QStringList& calleeIds) {
-  return engine_ ? engine_->inviteMore(stdStrings(calleeIds)).code() : IMRTC_V1_ERR_INVALID_STATE;
+  return engine_ ? engine_->inviteMore(stdStrings(calleeIds), reportFailure("inviteMore")).code()
+                 : IMRTC_V1_ERR_INVALID_STATE;
 }
 qint32 EngineBridge::joinRoom(const QString& roomId, const QString& roomToken) {
-  return engine_ ? engine_->joinRoom(roomId.toStdString(), roomToken.toStdString()).code()
+  return engine_ ? engine_->joinRoom(roomId.toStdString(), roomToken.toStdString(),
+                                     reportFailure("joinRoom")).code()
                  : IMRTC_V1_ERR_INVALID_STATE;
 }
 qint32 EngineBridge::leaveRoom() {
-  return engine_ ? engine_->leaveRoom().code() : IMRTC_V1_ERR_INVALID_STATE;
+  return engine_ ? engine_->leaveRoom(logFailure("leaveRoom")).code() : IMRTC_V1_ERR_INVALID_STATE;
 }
 qint32 EngineBridge::attachView(const QString& uid, void* nativeHandle) {
   if (!engine_) return IMRTC_V1_ERR_INVALID_STATE;

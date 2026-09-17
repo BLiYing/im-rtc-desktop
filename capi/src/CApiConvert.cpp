@@ -17,6 +17,13 @@ bool isValidLayer(const std::string& layer) {
   return std::find(allowed.begin(), allowed.end(), layer) != allowed.end();
 }
 
+imrtc::ActionCompletion toCompletion(imrtc_v1_result_cb cb, void* userData) {
+  if (cb == nullptr) return {};
+  return [cb, userData](const imrtc::ActionResult& result) {
+    cb(userData, result.code, result.name.c_str(), result.value.c_str());
+  };
+}
+
 std::vector<std::string> toStrings(const char* const* items, std::uint32_t count) {
   std::vector<std::string> out;
   if (items == nullptr) return out;

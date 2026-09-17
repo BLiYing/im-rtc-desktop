@@ -23,6 +23,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -47,6 +48,25 @@ private:
   std::int32_t code_ = IMRTC_V1_OK;
 };
 
+/**
+ * Result 是一次发起类调用的结果，对应 `imrtc_v1_result_cb`（2.0.0）。`ok()` 为真时 `value` 是成功值
+ * （`call` / `callEx` 是 callId，`login` 是 sessionId）。失败的码**不会**再经 `Observer::onError` 抛一遍。
+ */
+template <typename T = void>
+struct Result {
+  std::int32_t code = IMRTC_V1_OK;
+  std::string name;
+  T value{};
+  bool ok() const { return code == IMRTC_V1_OK; }
+};
+
+template <>
+struct Result<void> {
+  std::int32_t code = IMRTC_V1_OK;
+  std::string name;
+  bool ok() const { return code == IMRTC_V1_OK; }
+};
+
 /** 一个正在说话的人，对应 `imrtc_v1_speaker`。volume 0~100。 */
 struct Speaker {
   std::string uid;
@@ -65,8 +85,8 @@ struct Quality {
  * `call()` 的可选参数，对应 `imrtc_v1_call_options`（HOST_INTEGRATION_DESIGN §3.3）。
  *
  * 群号 / user_data 本地校验不过时（chatGroupId 超 64 字节/含空白换行、userData 超
- * 4096 字节），`callEx` 的返回值仍是成功——**错误从回调出**（`onError(1004)` +
- * `onCallEnd(error)`），不上线路。跟 `imrtc_v1_call` 的「登录状态错误也从回调出」
+ * 4096 字节），`callEx` 的返回值仍是成功——**错误从结果回调出**（先 `onCallEnd(error)`，
+ * 再 `done` 收到 1004），不上线路。跟 `imrtc_v1_call` 的「登录状态错误也从回调出」
  * 是同一条约定：C ABI 的返回值只报「这次调用本身合不合法」（空指针、struct_size），
  * 不报「这条业务规则通不通过」。
  */
@@ -229,24 +249,36 @@ public:
     return call(imrtc_v1_engine_set_observer(handle_, &table));
   }
 
-  Error login(const std::string& token) { return call(imrtc_v1_login(handle_, token.c_str())); }
+  /*
+    发起类方法的 `done`（2.0.0）：结果恰好回一次，排在这次调用引起的状态回调之后；**可以不传**，
+    不传时失败退回 `Observer::onError`。返回值只表示「根本没受理」（空句柄 / 参数非法）——
+    那种情况下 `done` 也会就地收到同一个码，不会悬着。规则见 imrtc_c.h 的 `imrtc_v1_result_cb`。
+  */
+  Error login(const std::string& token, std::function<void(Result<std::string>)> done = {}) {
+    return submit(std::move(done), [&](imrtc_v1_result_cb cb, void* ud) {
+      return imrtc_v1_login(handle_, token.c_str(), cb, ud);
+    });
+  }
   Error logout() { return call(imrtc_v1_logout(handle_)); }
   Error updateToken(const std::string& token) {
     return call(imrtc_v1_update_token(handle_, token.c_str()));
   }
 
   Error call(const std::vector<std::string>& calleeIds, const std::string& mediaType,
-             bool isGroup) {
+             bool isGroup, std::function<void(Result<std::string>)> done = {}) {
     std::vector<const char*> ids = raw(calleeIds);
-    return call(imrtc_v1_call(handle_, ids.data(), static_cast<std::uint32_t>(ids.size()),
-                              mediaType.c_str(), isGroup ? 1 : 0));
+    return submit(std::move(done), [&](imrtc_v1_result_cb cb, void* ud) {
+      return imrtc_v1_call(handle_, ids.data(), static_cast<std::uint32_t>(ids.size()),
+                           mediaType.c_str(), isGroup ? 1 : 0, cb, ud);
+    });
   }
   /**
    * callEx 带选项发起通话：群号 / user_data / 振铃超时（HOST_INTEGRATION_DESIGN §3.3）。
-   * 返回值只报「这次调用本身合不合法」，`options` 里的业务校验错误从 `onError` 回调出。
+   * 返回值只报「这次调用本身合不合法」，`options` 里的业务校验错误从 `done` 回来（1004）。
    */
   Error callEx(const std::vector<std::string>& calleeIds, const std::string& mediaType,
-              bool isGroup, const CallOptions& options) {
+              bool isGroup, const CallOptions& options,
+              std::function<void(Result<std::string>)> done = {}) {
     std::vector<const char*> ids = raw(calleeIds);
     imrtc_v1_call_options table{};
     table.struct_size = sizeof(table);
@@ -254,26 +286,46 @@ public:
     table.chat_group_id = options.chatGroupId.c_str();
     table.user_data = options.userData.c_str();
     table.timeout_sec = options.timeoutSec;
-    return call(imrtc_v1_call_ex(handle_, ids.data(), static_cast<std::uint32_t>(ids.size()),
-                                 mediaType.c_str(), &table));
+    return submit(std::move(done), [&](imrtc_v1_result_cb cb, void* ud) {
+      return imrtc_v1_call_ex(handle_, ids.data(), static_cast<std::uint32_t>(ids.size()),
+                              mediaType.c_str(), &table, cb, ud);
+    });
   }
-  Error accept() { return call(imrtc_v1_accept(handle_)); }
-  Error reject() { return call(imrtc_v1_reject(handle_)); }
-  Error cancel() { return call(imrtc_v1_cancel(handle_)); }
-  Error hangup() { return call(imrtc_v1_hangup(handle_)); }
+  Error accept(std::function<void(Result<>)> done = {}) {
+    return submit(std::move(done), [&](imrtc_v1_result_cb cb, void* ud) { return imrtc_v1_accept(handle_, cb, ud); });
+  }
+  /** 退出类（reject / cancel / hangup / leaveRoom）失败时本地照样收场，结果只供日志。 */
+  Error reject(std::function<void(Result<>)> done = {}) {
+    return submit(std::move(done), [&](imrtc_v1_result_cb cb, void* ud) { return imrtc_v1_reject(handle_, cb, ud); });
+  }
+  Error cancel(std::function<void(Result<>)> done = {}) {
+    return submit(std::move(done), [&](imrtc_v1_result_cb cb, void* ud) { return imrtc_v1_cancel(handle_, cb, ud); });
+  }
+  Error hangup(std::function<void(Result<>)> done = {}) {
+    return submit(std::move(done), [&](imrtc_v1_result_cb cb, void* ud) { return imrtc_v1_hangup(handle_, cb, ud); });
+  }
   /** forceEnd 强制收场，不等服务端。见 `imrtc_v1_force_end`。 */
   Error forceEnd() { return call(imrtc_v1_force_end(handle_)); }
-  Error inviteMore(const std::vector<std::string>& calleeIds) {
+  Error inviteMore(const std::vector<std::string>& calleeIds, std::function<void(Result<>)> done = {}) {
     std::vector<const char*> ids = raw(calleeIds);
-    return call(imrtc_v1_invite_more(handle_, ids.data(), static_cast<std::uint32_t>(ids.size())));
+    return submit(std::move(done), [&](imrtc_v1_result_cb cb, void* ud) {
+      return imrtc_v1_invite_more(handle_, ids.data(), static_cast<std::uint32_t>(ids.size()), cb, ud);
+    });
   }
-  Error joinCall(const std::string& callId) {
-    return call(imrtc_v1_join_call(handle_, callId.c_str()));
+  Error joinCall(const std::string& callId, std::function<void(Result<>)> done = {}) {
+    return submit(std::move(done), [&](imrtc_v1_result_cb cb, void* ud) {
+      return imrtc_v1_join_call(handle_, callId.c_str(), cb, ud);
+    });
   }
-  Error joinRoom(const std::string& roomId, const std::string& roomToken) {
-    return call(imrtc_v1_join_room(handle_, roomId.c_str(), roomToken.c_str()));
+  Error joinRoom(const std::string& roomId, const std::string& roomToken,
+                 std::function<void(Result<>)> done = {}) {
+    return submit(std::move(done), [&](imrtc_v1_result_cb cb, void* ud) {
+      return imrtc_v1_join_room(handle_, roomId.c_str(), roomToken.c_str(), cb, ud);
+    });
   }
-  Error leaveRoom() { return call(imrtc_v1_leave_room(handle_)); }
+  Error leaveRoom(std::function<void(Result<>)> done = {}) {
+    return submit(std::move(done), [&](imrtc_v1_result_cb cb, void* ud) { return imrtc_v1_leave_room(handle_, cb, ud); });
+  }
   /**
    * setRemoteLayer 报某人画面的层上界（`"none"|"l"|"m"|"h"`，协议 §3.5）。
    * 九宫格报 `"l"`、放大那一格报 `"h"`。轨道还没发布时这次会被丢掉且返回 0——
@@ -317,6 +369,41 @@ private:
   Error call(std::int32_t code) {
     lastError_ = Error(code);
     return lastError_;
+  }
+
+  /** PendingResult 是交给 C 那层的 user_data：结果回来时自己删掉自己（恰好一次）。 */
+  struct PendingResult { std::function<void(std::int32_t code, const char* name, const char* value)> fn; };
+
+  static void cbResult(void* u, std::int32_t code, const char* name, const char* value) {
+    std::unique_ptr<PendingResult> pending(static_cast<PendingResult*>(u));
+    if (pending && pending->fn) pending->fn(code, name, value);
+  }
+
+  static void fillValue(Result<>&, const char*) {}
+  static void fillValue(Result<std::string>& result, const char* value) { result.value = text(value); }
+
+  /**
+   * submit 把 `done` 接到 C 结果回调上。`done` 为空时传 NULL（失败退回 onError）；
+   * 没受理（返回非 0）时 C 那层不会回调，这里就地把同一个码交给 `done`，免得它悬着。
+   */
+  template <typename T, typename Invoke>
+  Error submit(std::function<void(Result<T>)> done, Invoke&& invoke) {
+    if (!done) return call(invoke(nullptr, nullptr));
+    std::unique_ptr<PendingResult> pending(new PendingResult{
+        [done](std::int32_t code, const char* name, const char* value) {
+          Result<T> result;
+          result.code = code;
+          result.name = text(name);
+          fillValue(result, value);
+          done(result);
+        }});
+    const std::int32_t code = invoke(&Engine::cbResult, pending.get());
+    if (code == IMRTC_V1_OK) {
+      static_cast<void>(pending.release());  // 所有权交给 C 那层，cbResult 里删
+    } else {
+      pending->fn(code, imrtc_v1_error_name(code), "");
+    }
+    return call(code);
   }
 
   static std::vector<const char*> raw(const std::vector<std::string>& values) {

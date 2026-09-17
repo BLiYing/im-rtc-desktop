@@ -110,6 +110,27 @@ typedef struct imrtc_v1_log_field {
 typedef void (*imrtc_v1_log_sink)(void* user_data, imrtc_v1_log_level level, const char* message,
                                   const imrtc_v1_log_field* fields, uint32_t field_count);
 
+/**
+ * 一次**发起类调用**的结果（2.0.0，server `docs/design/ACTION_RESULT_DESIGN.md`）。
+ *
+ * - `code == 0` 为成功，`value` 放成功值：`imrtc_v1_call` / `imrtc_v1_call_ex` 是 call_id，
+ *   `imrtc_v1_login` 是 session_id，其余是空串；
+ * - 失败时 `code` 是错误码（本地拒绝 2005 / 1004、服务端拒绝、2004 超时、2003 等应答期间断线、
+ *   2007 没登录），`name` 是机读名，`value` 是空串。**这个错误不会再经 on_error 抛一遍。**
+ *
+ * **恰好调一次**，在调 Engine 的那个线程上（`imrtc_v1_engine_tick` 里，或本地就地拒绝时
+ * **在发起函数返回之前**），并且排在这次调用引起的状态回调（on_call_end / on_room_left）之后。
+ * 成功只管这次调用**直接发出的那一帧**收到 `.ok`；引擎随后自动发的帧（接听之后的进房等）
+ * 失败找不到调用方，走 on_error（带 for_type）。`imrtc_v1_engine_destroy` 时还没回来的结果
+ * 在 destroy 返回之前回 2005。
+ *
+ * 发起函数的**返回值只表示「根本没受理」**（NULL 句柄 / 参数非法）——返回非 0 时不会再调 cb。
+ * **cb 可以传 NULL**：此时失败退回 on_error，免得静默丢失。
+ * 字符串只在该次回调期间有效。
+ */
+typedef void (*imrtc_v1_result_cb)(void* user_data, int32_t code, const char* name,
+                                   const char* value);
+
 typedef enum imrtc_v1_kicked_reason {
   /** 同账号同设备号在别处登录，或宿主吊销。**回登录页。** */
   IMRTC_V1_KICKED_TAKEN_OVER = 0,
@@ -356,9 +377,8 @@ typedef struct imrtc_v1_options {
  * `imrtc_v1_call_ex` 的可选参数。**填 struct_size**（版本闸，规矩同 imrtc_v1_options）。
  *
  * 三个字段原样进 call.invite；`chat_group_id` 超 64 字节/含空白换行、`user_data`
- * 超 4096 字节时**不上线路**，但 `imrtc_v1_call_ex` 本身仍返回成功——错误从回调出
- * （`on_error` 报 1004 + 随后一条 `on_call_end`），与「未登录就拨号」同一条约定
- * （HOST_INTEGRATION_DESIGN §3.3）。
+ * 超 4096 字节时**不上线路**，但 `imrtc_v1_call_ex` 本身仍返回成功——先抛一条 `on_call_end(error)`，
+ * 再从结果回调回 1004，与「未登录就拨号」同一条约定（HOST_INTEGRATION_DESIGN §3.3）。
  */
 typedef struct imrtc_v1_call_options {
   uint32_t struct_size;
@@ -423,17 +443,22 @@ IMRTC_API int32_t imrtc_v1_engine_tick(imrtc_v1_engine* engine);
 
 /* ---- 连接 ---- */
 
-IMRTC_API int32_t imrtc_v1_login(imrtc_v1_engine* engine, const char* token);
+/** 登录。结果：首次握手成功回 session_id；握手被拒回那个码（之后连接层按码决定要不要继续重试）。 */
+IMRTC_API int32_t imrtc_v1_login(imrtc_v1_engine* engine, const char* token, imrtc_v1_result_cb cb,
+                                 void* user_data);
 IMRTC_API int32_t imrtc_v1_logout(imrtc_v1_engine* engine);
 /** 换票。**下次重连生效，不打断当前连接**。 */
 IMRTC_API int32_t imrtc_v1_update_token(imrtc_v1_engine* engine, const char* token);
 
 /* ---- 通话 ---- */
 
-/** 发起通话。1v1 恰好 1 个被叫；群 ≤8。 */
+/**
+ * 发起通话。1v1 恰好 1 个被叫；群 ≤8。成功值是 call_id。
+ * 名单里有自己时本地拒掉：先 on_call_end(error)，再回 1004。
+ */
 IMRTC_API int32_t imrtc_v1_call(imrtc_v1_engine* engine, const char* const* callee_ids,
                                 uint32_t callee_count, const char* media_type,
-                                imrtc_v1_bool is_group);
+                                imrtc_v1_bool is_group, imrtc_v1_result_cb cb, void* user_data);
 /**
  * 带选项发起通话（HOST_INTEGRATION_DESIGN §3.3）：群号 / user_data / 振铃超时。
  * `options` 传 NULL 等价于 `imrtc_v1_call`（`is_group` 按 false 处理）。
@@ -441,11 +466,16 @@ IMRTC_API int32_t imrtc_v1_call(imrtc_v1_engine* engine, const char* const* call
  */
 IMRTC_API int32_t imrtc_v1_call_ex(imrtc_v1_engine* engine, const char* const* callee_ids,
                                    uint32_t callee_count, const char* media_type,
-                                   const imrtc_v1_call_options* options);
-IMRTC_API int32_t imrtc_v1_accept(imrtc_v1_engine* engine);
-IMRTC_API int32_t imrtc_v1_reject(imrtc_v1_engine* engine);
-IMRTC_API int32_t imrtc_v1_cancel(imrtc_v1_engine* engine);
-IMRTC_API int32_t imrtc_v1_hangup(imrtc_v1_engine* engine);
+                                   const imrtc_v1_call_options* options, imrtc_v1_result_cb cb,
+                                   void* user_data);
+IMRTC_API int32_t imrtc_v1_accept(imrtc_v1_engine* engine, imrtc_v1_result_cb cb, void* user_data);
+/**
+ * 退出类（reject / cancel / hangup / leave_room）：结束帧被拒或没发出去时**本地照样收场**
+ * （on_call_end / on_room_left 照发），结果里的错误码只供日志。
+ */
+IMRTC_API int32_t imrtc_v1_reject(imrtc_v1_engine* engine, imrtc_v1_result_cb cb, void* user_data);
+IMRTC_API int32_t imrtc_v1_cancel(imrtc_v1_engine* engine, imrtc_v1_result_cb cb, void* user_data);
+IMRTC_API int32_t imrtc_v1_hangup(imrtc_v1_engine* engine, imrtc_v1_result_cb cb, void* user_data);
 /**
  * 强制结束当前这一场：结束帧立刻发出、本地立刻收场，不等服务端（红键按下去等不到 on_call_end 时用）。
  * 通话抛 on_call_end（reason 按此刻状态：hangup / reject / cancel），会议抛 on_room_left；
@@ -454,15 +484,22 @@ IMRTC_API int32_t imrtc_v1_hangup(imrtc_v1_engine* engine);
 IMRTC_API int32_t imrtc_v1_force_end(imrtc_v1_engine* engine);
 /** 群通话中途加人，通话里的任何人都能发（不在通话里回 1407）。 */
 IMRTC_API int32_t imrtc_v1_invite_more(imrtc_v1_engine* engine, const char* const* callee_ids,
-                                       uint32_t callee_count);
-/** 主动加入一通进行中的群通话。 */
-IMRTC_API int32_t imrtc_v1_join_call(imrtc_v1_engine* engine, const char* call_id);
+                                       uint32_t callee_count, imrtc_v1_result_cb cb,
+                                       void* user_data);
+/**
+ * 主动加入一通进行中的群通话。被拒（1401 / 1402 / 1202 / 1408 / 1409）时结果回那个码，
+ * 同时照发 on_call_end(error)。
+ */
+IMRTC_API int32_t imrtc_v1_join_call(imrtc_v1_engine* engine, const char* call_id,
+                                     imrtc_v1_result_cb cb, void* user_data);
 
 /* ---- 房间 ---- */
 
 IMRTC_API int32_t imrtc_v1_join_room(imrtc_v1_engine* engine, const char* room_id,
-                                     const char* room_token);
-IMRTC_API int32_t imrtc_v1_leave_room(imrtc_v1_engine* engine);
+                                     const char* room_token, imrtc_v1_result_cb cb,
+                                     void* user_data);
+IMRTC_API int32_t imrtc_v1_leave_room(imrtc_v1_engine* engine, imrtc_v1_result_cb cb,
+                                      void* user_data);
 
 /**
  * 报某个 uid 的画面**层上界**（协议 §3.5，线路上是 `room.update_layer`）。
@@ -492,6 +529,8 @@ IMRTC_API int32_t imrtc_v1_leave_room(imrtc_v1_engine* engine);
  *      所以**要在 `on_user_video_available` 里再报一次**。
  *
  * 这条**不需要媒体实现**：纯信令，`WebRTCAdapter` 没落地时也照发。
+ *
+ * 提示类：**没有结果回调**，线路上被拒走 on_error。
  */
 IMRTC_API int32_t imrtc_v1_set_remote_layer(imrtc_v1_engine* engine, const char* uid,
                                             const char* layer);

@@ -117,7 +117,8 @@ IMRTC_TEST(engineEmitOrderOnSendFailure,
 IMRTC_TEST(engineInviteFailure, "CallEngine —— invite 被拒要回 idle 并抛 onCallEnd，否则界面永远收不了场") {
   Harness harness;
   harness.login();
-  harness.engine->call({"bob", "alice"}, "audio", true);
+  // 不传回调：失败退回 onError（ACTION_RESULT_DESIGN R7），顺序同 2.0.0 之前。
+  harness.engine->call({"bob", "carol"}, "audio", true);
   CHECK_EQ(harness.engine->callState(), CallState::Inviting, "先进 inviting");
 
   // 服务端回 1004（比如群呼把主叫自己也放进了 callee_ids）。

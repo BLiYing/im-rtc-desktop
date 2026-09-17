@@ -36,6 +36,7 @@ add_library(im_rtc_engine STATIC
   src/CallEngineEvents.cpp
   src/CallEngineSession.cpp
   src/CallEngineForceEnd.cpp
+  src/CallEngineRequests.cpp
 )
 
 target_include_directories(im_rtc_engine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)

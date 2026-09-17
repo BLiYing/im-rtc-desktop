@@ -1220,3 +1220,12 @@ Kit 选人页（M2，桌面没有 Kit，本产品设计已注明不适用）。*
   cmake --preset macos-clang && cmake --build --preset macos-clang
   cmake -S . -B build/asan -G Ninja -DIMRTC_ASAN=ON && cmake --build build/asan   # ASan/UBSan
   ```
+
+## 2026-09-17 夜（调用结果改造时移出活快照）：「当前焦点」
+
+> 原文照录，正文未改。
+
+**2026-09-17 夜：补了两件（本地已提交、未推送），`test.sh` 全绿（135 例），Demo 没接。** SDK 1.0.0 已公网发布（GitHub Release，只 macOS），这些进下一个版本。
+- `0397c97` **`forceEnd`**：C++ `CallEngine::forceEnd()` + C ABI `imrtc_v1_force_end`（导出 33→34）；idle 下迟到 `invite.ok` / `connected` 补发 cancel / hangup、迟到 `room.join.ok` 补发 leave（原先会被搭成 joined）；时长从本端 onCallBegin 算。
+- `c57b492` 收 `call.ringing` 抛 `onUserRinging`，`imrtc_v1_observer` 尾部追加 `on_user_ringing`（旧 struct_size 照旧可用）。
+- **整体状态**：P5 C ABI + Qt Demo 已交付。**媒体推迟、纯信令模式**：能拨号、进房、收全部状态回调，没有声音和画面。**Windows 一次都没编译过**。

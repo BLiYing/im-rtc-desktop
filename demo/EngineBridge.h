@@ -184,6 +184,10 @@ signals:
   void roomClosed(const QString& roomId, const QString& reason);
 
 private:
+  /** 发起类动作的结果回调：失败弹提示 / 只记日志（见 .cpp）。 */
+  std::function<void(imrtc::capi::Result<>)> reportFailure(const char* action);
+  std::function<void(imrtc::capi::Result<>)> logFailure(const char* action);
+
   /* ---- imrtc::capi::Observer。全部只做「翻译成信号」这一件事。 ---- */
   void onConnected(const std::string& sessionId, bool resumed) override;
   void onDisconnected(std::int32_t code, bool willReconnect) override;

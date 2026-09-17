@@ -36,6 +36,7 @@ using imrtc::capi_detail::cstr;
 using imrtc::capi_detail::fromLogLevel;
 using imrtc::capi_detail::isValidLayer;
 using imrtc::capi_detail::toBool;
+using imrtc::capi_detail::toCompletion;
 using imrtc::capi_detail::toLogLevel;
 using imrtc::capi_detail::toStrings;
 
@@ -164,9 +165,10 @@ std::int32_t imrtc_v1_engine_tick(imrtc_v1_engine* engine) {
   return guard(engine, [](CallEngine& target) { target.tick(); });
 }
 
-std::int32_t imrtc_v1_login(imrtc_v1_engine* engine, const char* token) {
+std::int32_t imrtc_v1_login(imrtc_v1_engine* engine, const char* token, imrtc_v1_result_cb cb,
+                            void* user_data) {
   if (token == nullptr) return IMRTC_V1_ERR_BAD_PARAMS;
-  return guard(engine, [token](CallEngine& target) { target.login(cstr(token)); });
+  return guard(engine, [=](CallEngine& target) { target.login(cstr(token), toCompletion(cb, user_data)); });
 }
 
 std::int32_t imrtc_v1_logout(imrtc_v1_engine* engine) {
@@ -180,16 +182,18 @@ std::int32_t imrtc_v1_update_token(imrtc_v1_engine* engine, const char* token) {
 
 std::int32_t imrtc_v1_call(imrtc_v1_engine* engine, const char* const* callee_ids,
                            std::uint32_t callee_count, const char* media_type,
-                           imrtc_v1_bool is_group) {
+                           imrtc_v1_bool is_group, imrtc_v1_result_cb cb, void* user_data) {
   if (callee_ids == nullptr || callee_count == 0) return IMRTC_V1_ERR_BAD_PARAMS;
   return guard(engine, [=](CallEngine& target) {
-    target.call(toStrings(callee_ids, callee_count), cstr(media_type), toBool(is_group));
+    target.call(toStrings(callee_ids, callee_count), cstr(media_type), toBool(is_group),
+                toCompletion(cb, user_data));
   });
 }
 
 std::int32_t imrtc_v1_call_ex(imrtc_v1_engine* engine, const char* const* callee_ids,
                               std::uint32_t callee_count, const char* media_type,
-                              const imrtc_v1_call_options* options) {
+                              const imrtc_v1_call_options* options, imrtc_v1_result_cb cb,
+                              void* user_data) {
   if (callee_ids == nullptr || callee_count == 0) return IMRTC_V1_ERR_BAD_PARAMS;
   imrtc::CallOptions callOptions;
   if (options != nullptr) {
@@ -202,47 +206,54 @@ std::int32_t imrtc_v1_call_ex(imrtc_v1_engine* engine, const char* const* callee
   }
   const bool isGroup = options != nullptr && toBool(options->is_group);
   return guard(engine, [=](CallEngine& target) {
-    target.call(toStrings(callee_ids, callee_count), cstr(media_type), isGroup, callOptions);
+    target.call(toStrings(callee_ids, callee_count), cstr(media_type), isGroup, callOptions,
+                toCompletion(cb, user_data));
   });
 }
 
-std::int32_t imrtc_v1_accept(imrtc_v1_engine* engine) {
-  return guard(engine, [](CallEngine& target) { target.accept(); });
+std::int32_t imrtc_v1_accept(imrtc_v1_engine* engine, imrtc_v1_result_cb cb, void* user_data) {
+  return guard(engine, [=](CallEngine& target) { target.accept(toCompletion(cb, user_data)); });
 }
-std::int32_t imrtc_v1_reject(imrtc_v1_engine* engine) {
-  return guard(engine, [](CallEngine& target) { target.reject(); });
+std::int32_t imrtc_v1_reject(imrtc_v1_engine* engine, imrtc_v1_result_cb cb, void* user_data) {
+  return guard(engine, [=](CallEngine& target) { target.reject(toCompletion(cb, user_data)); });
 }
-std::int32_t imrtc_v1_cancel(imrtc_v1_engine* engine) {
-  return guard(engine, [](CallEngine& target) { target.cancel(); });
+std::int32_t imrtc_v1_cancel(imrtc_v1_engine* engine, imrtc_v1_result_cb cb, void* user_data) {
+  return guard(engine, [=](CallEngine& target) { target.cancel(toCompletion(cb, user_data)); });
 }
-std::int32_t imrtc_v1_hangup(imrtc_v1_engine* engine) {
-  return guard(engine, [](CallEngine& target) { target.hangup(); });
+std::int32_t imrtc_v1_hangup(imrtc_v1_engine* engine, imrtc_v1_result_cb cb, void* user_data) {
+  return guard(engine, [=](CallEngine& target) { target.hangup(toCompletion(cb, user_data)); });
 }
 std::int32_t imrtc_v1_force_end(imrtc_v1_engine* engine) {
   return guard(engine, [](CallEngine& target) { target.forceEnd(); });
 }
 
 std::int32_t imrtc_v1_invite_more(imrtc_v1_engine* engine, const char* const* callee_ids,
-                                  std::uint32_t callee_count) {
+                                  std::uint32_t callee_count, imrtc_v1_result_cb cb,
+                                  void* user_data) {
   if (callee_ids == nullptr || callee_count == 0) return IMRTC_V1_ERR_BAD_PARAMS;
   return guard(engine, [=](CallEngine& target) {
-    target.inviteMore(toStrings(callee_ids, callee_count));
+    target.inviteMore(toStrings(callee_ids, callee_count), toCompletion(cb, user_data));
   });
 }
 
-std::int32_t imrtc_v1_join_call(imrtc_v1_engine* engine, const char* call_id) {
+std::int32_t imrtc_v1_join_call(imrtc_v1_engine* engine, const char* call_id, imrtc_v1_result_cb cb,
+                                void* user_data) {
   if (call_id == nullptr) return IMRTC_V1_ERR_BAD_PARAMS;
-  return guard(engine, [call_id](CallEngine& target) { target.joinCall(cstr(call_id)); });
+  return guard(engine, [=](CallEngine& target) {
+    target.joinCall(cstr(call_id), toCompletion(cb, user_data));
+  });
 }
 
 std::int32_t imrtc_v1_join_room(imrtc_v1_engine* engine, const char* room_id,
-                                const char* room_token) {
+                                const char* room_token, imrtc_v1_result_cb cb, void* user_data) {
   if (room_id == nullptr || room_token == nullptr) return IMRTC_V1_ERR_BAD_PARAMS;
-  return guard(engine, [=](CallEngine& target) { target.joinRoom(cstr(room_id), cstr(room_token)); });
+  return guard(engine, [=](CallEngine& target) {
+    target.joinRoom(cstr(room_id), cstr(room_token), toCompletion(cb, user_data));
+  });
 }
 
-std::int32_t imrtc_v1_leave_room(imrtc_v1_engine* engine) {
-  return guard(engine, [](CallEngine& target) { target.leaveRoom(); });
+std::int32_t imrtc_v1_leave_room(imrtc_v1_engine* engine, imrtc_v1_result_cb cb, void* user_data) {
+  return guard(engine, [=](CallEngine& target) { target.leaveRoom(toCompletion(cb, user_data)); });
 }
 
 std::int32_t imrtc_v1_set_remote_layer(imrtc_v1_engine* engine, const char* uid,

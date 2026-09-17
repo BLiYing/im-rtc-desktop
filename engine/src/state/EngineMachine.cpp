@@ -47,7 +47,8 @@ bool hasEvent(const std::vector<EmittedEvent>& emit, const char* cb) {
 EngineOutput liftRoom(const EngineContext& ctx, RoomOutput result) {
   EngineContext next = ctx;
   next.room = std::move(result.state);
-  return EngineOutput{std::move(next), std::move(result.send), std::move(result.emit)};
+  return EngineOutput{std::move(next), std::move(result.send), std::move(result.emit),
+                      std::move(result.reject)};
 }
 
 /**
@@ -88,7 +89,8 @@ EngineOutput liftCall(const EngineContext& ctx, CallOutput result) {
   EngineContext next;
   next.room = std::move(room);
   next.call = std::move(result.state);
-  return EngineOutput{std::move(next), std::move(send), std::move(emit)};
+  // 本地拒绝原样带到 engine 层——漏带的话调用方拿不到结果。
+  return EngineOutput{std::move(next), std::move(send), std::move(emit), std::move(result.reject)};
 }
 
 /**
@@ -116,7 +118,7 @@ EngineOutput handleHelloOk(const EngineContext& ctx, const Json& data, std::int6
   EngineContext next;
   next.room = std::move(room.state);
   next.call = std::move(call);
-  return EngineOutput{std::move(next), std::move(send), std::move(emit)};
+  return EngineOutput{std::move(next), std::move(send), std::move(emit), LocalReject{}};
 }
 
 EngineOutput handleInternal(const EngineContext& ctx, const MachineInput& input,
@@ -128,7 +130,7 @@ EngineOutput handleInternal(const EngineContext& ctx, const MachineInput& input,
     EngineContext next;
     next.room = clearedRoom(RoomState::Idle);
     next.call = std::move(call.state);
-    return EngineOutput{std::move(next), {}, std::move(call.emit)};
+    return EngineOutput{std::move(next), {}, std::move(call.emit), LocalReject{}};
   }
 
   /*
@@ -155,7 +157,7 @@ EngineOutput handleInternal(const EngineContext& ctx, const MachineInput& input,
     EngineContext next;
     next.room = std::move(room.state);
     next.call = std::move(call);
-    return EngineOutput{std::move(next), std::move(room.send), std::move(emit)};
+    return EngineOutput{std::move(next), std::move(room.send), std::move(emit), LocalReject{}};
   }
   if (name == "ws_closed_4403") {
     // 被踢：什么都不留。重连没有意义——那等于跟另一台设备打架。
@@ -165,7 +167,8 @@ EngineOutput handleInternal(const EngineContext& ctx, const MachineInput& input,
     return EngineOutput{std::move(next),
                         {},
                         {eventOf("onKickedOut", Json::makeObject()),
-                         eventOf("onDisconnected", Json::makeObject())}};
+                         eventOf("onDisconnected", Json::makeObject())},
+                        LocalReject{}};
   }
   if (name == "disconnected") {
     RoomOutput room = reduceRoom(ctx.room, MachineInput::internal(name));
@@ -173,7 +176,7 @@ EngineOutput handleInternal(const EngineContext& ctx, const MachineInput& input,
     emit.insert(emit.end(), room.emit.begin(), room.emit.end());
     EngineContext next = ctx;
     next.room = std::move(room.state);
-    return EngineOutput{std::move(next), {}, std::move(emit)};
+    return EngineOutput{std::move(next), {}, std::move(emit), LocalReject{}};
   }
   if (name == "call_failed") {
     // 交给通话机回 idle；它抛的 onCallEnd 会顺带把房间也清掉（见 liftCall）。
@@ -200,7 +203,7 @@ EngineOutput reduceEngine(const EngineContext& ctx, const MachineInput& input,
   if (input.kind == MachineInput::Kind::Recv) {
     if (startsWith(input.name, "call.")) return liftCall(ctx, reduceCall(ctx.call, input, nowMs));
     if (startsWith(input.name, "room.")) return liftRoom(ctx, reduceRoom(ctx.room, input));
-    return EngineOutput{ctx, {}, {}};
+    return EngineOutput{ctx, {}, {}, LocalReject{}};
   }
 
   if (isCallAct(input.name)) return liftCall(ctx, reduceCall(ctx.call, input, nowMs));
@@ -213,7 +216,7 @@ EngineOutput reduceEngine(const EngineContext& ctx, const MachineInput& input,
     留一条 warn，让下一个人一眼看见，而不是去单步状态机。
   */
   log(LogLevel::Warn, "未知动作，已本地丢弃", {{"op", input.name}});
-  return EngineOutput{ctx, {}, {}};
+  return EngineOutput{ctx, {}, {}, LocalReject{}};
 }
 
 }  // namespace imrtc

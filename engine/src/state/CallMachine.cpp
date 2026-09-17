@@ -30,20 +30,20 @@ bool userDataValid(const std::string& value) { return value.size() <= kUserDataM
 /**
  * localCallRejected 是 `call()` 参数本地不合规时的统一出口。
  *
- * **与「callee_ids 里有自己」将来落地时该走的同一个出口**（HOST_INTEGRATION_DESIGN
- * §3.3）：onError(1004) + onCallEnd(error)，不转移状态、不发生任何帧——这通电话
- * 从未上过线路，state 原地不动（本仓目前没有「有自己」那条本地校验，这条新加的
- * chat_group_id / user_data 校验先按这个约定的出口做）。
+ * **与「callee_ids 里有自己」同一个出口**（HOST_INTEGRATION_DESIGN §3.3，那条在门面
+ * `CallEngine::call` 里拦）：本地拒绝 1004 回给调用方 + `onCallEnd(error)` 给界面一个收场信号，
+ * 不转移状态、不发生任何帧——这通电话从未上过线路，state 原地不动。
+ * 1004 **不再**经 onError 广播（ACTION_RESULT_DESIGN R3）。
  */
 CallOutput localCallRejected(const CallContext& ctx) {
   const std::int32_t code = codeValue(ErrorCode::BadParams);
-  return callOut(ctx, {},
-                 {eventOf("onError", obj({{"code", Json::make(static_cast<std::int64_t>(code))},
-                                          {"name", Json::make(errorName(code))}})),
-                  eventOf("onCallEnd", obj({{"call_id", Json::make(ctx.callId)},
-                                            {"reason", Json::make(reason::kError)},
-                                            {"duration_sec", Json::make(std::int64_t{0})},
-                                            {"ended_by", Json::make(std::string())}}))});
+  CallOutput out = callOut(ctx, {},
+                           {eventOf("onCallEnd", obj({{"call_id", Json::make(ctx.callId)},
+                                                      {"reason", Json::make(reason::kError)},
+                                                      {"duration_sec", Json::make(std::int64_t{0})},
+                                                      {"ended_by", Json::make(std::string())}}))});
+  out.reject = LocalReject{code, errorName(code)};
+  return out;
 }
 
 CallOutput startCall(const CallContext& ctx, const Json& args) {
@@ -239,14 +239,14 @@ bool parseCallState(const std::string& text, CallState& out) {
 
 CallOutput callOut(CallContext state, std::vector<OutgoingFrame> send,
                    std::vector<EmittedEvent> emit) {
-  return CallOutput{std::move(state), std::move(send), std::move(emit)};
+  return CallOutput{std::move(state), std::move(send), std::move(emit), LocalReject{}};
 }
 
 CallOutput invalidCallState(const CallContext& ctx) {
   const std::int32_t code = codeValue(ErrorCode::InvalidState);
-  return callOut(ctx, {},
-                 {eventOf("onError", obj({{"code", Json::make(static_cast<std::int64_t>(code))},
-                                          {"name", Json::make(errorName(code))}}))});
+  CallOutput out = callOut(ctx);
+  out.reject = LocalReject{code, errorName(code)};
+  return out;
 }
 
 CallOutput reduceCall(const CallContext& ctx, const MachineInput& input,

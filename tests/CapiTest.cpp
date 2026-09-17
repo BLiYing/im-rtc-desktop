@@ -47,6 +47,22 @@ void onErrorCb(void* userData, std::int32_t code, const char* name, const char*)
 
 void onDisconnectedCb(void* userData) { ++static_cast<Counters*>(userData)->disconnects; }
 
+/** Results 记下结果回调（2.0.0 的 imrtc_v1_result_cb）。 */
+struct Results {
+  int calls = 0;
+  std::int32_t lastCode = -1;
+  std::string lastName;
+  std::string lastValue;
+};
+
+void onResultCb(void* userData, std::int32_t code, const char* name, const char* value) {
+  Results* results = static_cast<Results*>(userData);
+  ++results->calls;
+  results->lastCode = code;
+  results->lastName = name == nullptr ? "" : name;
+  results->lastValue = value == nullptr ? "" : value;
+}
+
 }  // namespace
 
 IMRTC_TEST(capiCreateRejectsBadParams, "C ABI —— 参数校验：空指针与对不上的 struct_size 一律拒") {
@@ -75,8 +91,13 @@ IMRTC_TEST(capiCreateRejectsBadParams, "C ABI —— 参数校验：空指针与
 }
 
 IMRTC_TEST(capiNullHandleIsSafe, "C ABI —— 对空句柄调任何方法都返回错误码，不崩") {
-  CHECK_EQ(imrtc_v1_login(nullptr, "tk"), std::int32_t{IMRTC_V1_ERR_BAD_PARAMS}, "login");
-  CHECK_EQ(imrtc_v1_hangup(nullptr), std::int32_t{IMRTC_V1_ERR_BAD_PARAMS}, "hangup");
+  // 返回非 0 = 根本没受理，结果回调**不许**再被调（imrtc_v1_result_cb 的约定）。
+  Results results;
+  CHECK_EQ(imrtc_v1_login(nullptr, "tk", &onResultCb, &results), std::int32_t{IMRTC_V1_ERR_BAD_PARAMS},
+           "login");
+  CHECK_EQ(imrtc_v1_hangup(nullptr, &onResultCb, &results), std::int32_t{IMRTC_V1_ERR_BAD_PARAMS},
+           "hangup");
+  CHECK_EQ(results.calls, 0, "没受理就不回调");
   CHECK_EQ(imrtc_v1_force_end(nullptr), std::int32_t{IMRTC_V1_ERR_BAD_PARAMS}, "force_end");
   CHECK_EQ(imrtc_v1_engine_tick(nullptr), std::int32_t{IMRTC_V1_ERR_BAD_PARAMS}, "tick");
   CHECK_EQ(imrtc_v1_attach_view(nullptr, "bob", nullptr), std::int32_t{IMRTC_V1_ERR_BAD_PARAMS},
@@ -175,7 +196,8 @@ IMRTC_TEST(capiLifecycle, "C ABI —— create → set_observer → 调用 → d
     界面「正在呼叫…」转个不停，之后每次挂断都发向一个不存在的 call。
   */
   const char* callees[] = {"bob"};
-  CHECK_EQ(imrtc_v1_call(engine, callees, 1, "audio", 0), std::int32_t{IMRTC_V1_OK},
+  // 结果回调传 NULL：失败退回 on_error（ACTION_RESULT_DESIGN R7）。
+  CHECK_EQ(imrtc_v1_call(engine, callees, 1, "audio", 0, nullptr, nullptr), std::int32_t{IMRTC_V1_OK},
            "调用本身是成功的（错误从回调出）");
   CHECK_EQ(counters.lastCode, std::int32_t{2007}, "该报 not_logged_in");
   CHECK_EQ(imrtc_v1_get_call_state(engine, &state), std::int32_t{IMRTC_V1_OK}, "再查状态");
@@ -312,10 +334,12 @@ IMRTC_TEST(capiCallExStructSizeIsVersionGate,
   const char* callees[] = {"bob"};
   imrtc_v1_call_options stale{};
   stale.struct_size = 4;
-  CHECK_EQ(imrtc_v1_call_ex(engine, callees, 1, "audio", &stale),
+  Results results;
+  CHECK_EQ(imrtc_v1_call_ex(engine, callees, 1, "audio", &stale, &onResultCb, &results),
            std::int32_t{IMRTC_V1_ERR_BAD_PARAMS}, "options 太旧要拒");
-  CHECK_EQ(imrtc_v1_call_ex(engine, nullptr, 0, "audio", nullptr),
+  CHECK_EQ(imrtc_v1_call_ex(engine, nullptr, 0, "audio", nullptr, &onResultCb, &results),
            std::int32_t{IMRTC_V1_ERR_BAD_PARAMS}, "callee_ids 为空");
+  CHECK_EQ(results.calls, 0, "没受理就不回调");
 
   imrtc_v1_engine_destroy(engine);
 }
@@ -336,9 +360,19 @@ IMRTC_TEST(capiCallExOptionsNullEquivalentToPlainCall,
 
   // 没登录就拨号：走的是与 imrtc_v1_call 同一条状态机路径，该报 not_logged_in（2007）。
   const char* callees[] = {"bob"};
-  CHECK_EQ(imrtc_v1_call_ex(engine, callees, 1, "audio", nullptr), std::int32_t{IMRTC_V1_OK},
-           "调用本身是成功的（错误从回调出）");
+  CHECK_EQ(imrtc_v1_call_ex(engine, callees, 1, "audio", nullptr, nullptr, nullptr),
+           std::int32_t{IMRTC_V1_OK}, "调用本身是成功的（错误从回调出）");
   CHECK_EQ(counters.lastCode, std::int32_t{2007}, "该报 not_logged_in");
+
+  // 传了结果回调：2007 只从结果回来，on_error 不再多报一次。
+  const int errorsBefore = counters.errors;
+  Results results;
+  CHECK_EQ(imrtc_v1_call_ex(engine, callees, 1, "audio", nullptr, &onResultCb, &results),
+           std::int32_t{IMRTC_V1_OK}, "带回调也受理");
+  CHECK_EQ(results.calls, 1, "结果恰好回一次");
+  CHECK_EQ(results.lastCode, std::int32_t{2007}, "结果是 not_logged_in");
+  CHECK_EQ(results.lastName, std::string("not_logged_in"), "机读名");
+  CHECK_EQ(counters.errors, errorsBefore, "失败时没有多发 on_error");
 
   imrtc_v1_engine_destroy(engine);
 }
@@ -364,9 +398,12 @@ IMRTC_TEST(capiCallExRejectsOversizedChatGroupIdLocally,
   callOptions.chat_group_id = tooLong.c_str();
   const char* callees[] = {"bob"};
   // 返回值仍是「调用本身合法」——错误从回调出，跟「未登录就拨号」同一条约定。
-  CHECK_EQ(imrtc_v1_call_ex(engine, callees, 1, "audio", &callOptions), std::int32_t{IMRTC_V1_OK},
-           "调用本身是成功的（1004 从回调出）");
-  CHECK_EQ(counters.lastCode, std::int32_t{1004}, "该报 bad_params，不是 not_logged_in");
+  Results results;
+  CHECK_EQ(imrtc_v1_call_ex(engine, callees, 1, "audio", &callOptions, &onResultCb, &results),
+           std::int32_t{IMRTC_V1_OK}, "调用本身是成功的（1004 从结果回调出）");
+  CHECK_EQ(results.calls, 1, "结果恰好回一次");
+  CHECK_EQ(results.lastCode, std::int32_t{1004}, "该回 bad_params，不是 not_logged_in");
+  CHECK_EQ(counters.errors, 0, "1004 不再经 on_error 抛");
 
   std::int32_t state = -1;
   CHECK_EQ(imrtc_v1_get_call_state(engine, &state), std::int32_t{IMRTC_V1_OK}, "查状态");
@@ -391,8 +428,30 @@ IMRTC_TEST(capiCppWrapperCallEx,
   imrtc::capi::CallOptions options;
   options.chatGroupId = std::string(65, 'g');
   engine.callEx({"bob"}, "audio", true, options);
-  CHECK_EQ(observer.lastCode, std::int32_t{1004}, "超限 chat_group_id 该报 bad_params");
+  CHECK_EQ(observer.lastCode, std::int32_t{1004}, "不传 done：超限 chat_group_id 退回 onError");
   CHECK_EQ(static_cast<int>(engine.callState()), int{IMRTC_V1_CALL_IDLE}, "本地拒绝不改状态");
+
+  int doneCalls = 0;
+  std::int32_t doneCode = 0;
+  const int errorsBefore = observer.errors;
+  engine.callEx({"bob"}, "audio", true, options, [&](imrtc::capi::Result<std::string> result) {
+    ++doneCalls;
+    doneCode = result.code;
+  });
+  CHECK_EQ(doneCalls, 1, "done 恰好回一次");
+  CHECK_EQ(doneCode, std::int32_t{1004}, "done 拿到 1004");
+  CHECK_EQ(observer.errors, errorsBefore, "传了 done 就不再多发 onError");
+
+  // 没受理（名单为空）：C 层不会回调，包装层就地把同一个码交给 done，不许悬着。
+  doneCalls = 0;
+  const imrtc::capi::Error rejected =
+      engine.inviteMore({}, [&](imrtc::capi::Result<> result) {
+        ++doneCalls;
+        doneCode = result.code;
+      });
+  CHECK_EQ(rejected.code(), std::int32_t{IMRTC_V1_ERR_BAD_PARAMS}, "返回值报没受理");
+  CHECK_EQ(doneCalls, 1, "done 仍然恰好回一次");
+  CHECK_EQ(doneCode, std::int32_t{IMRTC_V1_ERR_BAD_PARAMS}, "同一个码");
 
   engine.setObserver(nullptr);
 }

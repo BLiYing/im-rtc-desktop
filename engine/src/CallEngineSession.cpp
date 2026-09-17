@@ -20,7 +20,10 @@ namespace imrtc {
  * 那属于状态机；这里只负责接线。
  */
 
-void CallEngine::login(const std::string& token) {
+void CallEngine::login(const std::string& token, ActionCompletion done) {
+  // 上一次 login 还没等到握手就又来一次：那一次的结果回 2005，不许悬着（R5）。
+  settleLogin(ActionResult{codeValue(ErrorCode::InvalidState), errorName(codeValue(ErrorCode::InvalidState)),
+                           frame::kHello, ""});
   /*
     `device_id` 在**开 socket 之前**校验（协议 §2.5）。
 
@@ -33,9 +36,10 @@ void CallEngine::login(const std::string& token) {
     这一条守的是直接用 C++ 门面的那条路。
   */
   if (!deviceIdValid(options_.deviceId)) {
-    failLocally(frame::kHello, Json::makeObject(), codeValue(ErrorCode::BadParams));
+    rejectLocally(std::move(done), frame::kHello);
     return;
   }
+  beginLogin(std::move(done));
 
   ConnectionOptions connectionOptions;
   connectionOptions.url = options_.url;
@@ -60,7 +64,9 @@ void CallEngine::login(const std::string& token) {
     data.set("device_id", Json::make(hello.deviceId));
     data.set("session_id", Json::make(hello.sessionId));
     data.set("resumed", Json::make(hello.resumed));
+    uid_ = hello.uid;
     apply(MachineInput::recv(frame::kHelloOk, data), "");
+    settleLogin(ActionResult{0, "", "", hello.sessionId});
 
     /*
       **恢复成功之后补一次上行协商**（协议 §1.4）。
@@ -87,6 +93,9 @@ void CallEngine::login(const std::string& token) {
     // 供 emitEvent 在派发 onDisconnected 前补进 args（状态机那条 emit 不知道这两样）。
     lastDisconnectCode_ = code;
     lastDisconnectWillReconnect_ = willReconnect;
+    // 首次握手之前连接就断了：login 回 2003（握手被拒的那条已经在 onError 里结算过）。
+    settleLogin(ActionResult{codeValue(ErrorCode::NetworkUnreachable),
+                             errorName(codeValue(ErrorCode::NetworkUnreachable)), frame::kHello, ""});
     // ws_closed_4403 会抛 onKickedOut + onDisconnected 并把一切清空；
     // 普通断开只进 reconnecting，通话要保持在 connected 并展示「正在重连…」（§1.4）。
     apply(MachineInput::internal(kicked ? "ws_closed_4403" : "disconnected"), "");
@@ -96,6 +105,11 @@ void CallEngine::login(const std::string& token) {
   };
   events.onError = [this](std::int32_t code, const std::string& name, const std::string& forType) {
     if (tearingDown_) return;
+    // 首次握手被拒：这是 login 这次调用的结果，交给调用方（没传回调时 settleLogin 退回 onError）。
+    if (loginSettlement_ && forType == frame::kHello) {
+      settleLogin(ActionResult{code, name, forType, ""});
+      return;
+    }
     if (const std::shared_ptr<CallEngineObserver> target = observer()) {
       target->onError(code, name, forType);
     }
@@ -119,6 +133,9 @@ void CallEngine::logout() {
     三条，而宿主只想要一条通话终局。
   */
   tearingDown_ = true;
+  // 还在等握手就 logout：login 回 2005。
+  settleLogin(ActionResult{codeValue(ErrorCode::InvalidState), errorName(codeValue(ErrorCode::InvalidState)),
+                           frame::kHello, ""});
   if (connection_) {
     connection_->close();
     /*

@@ -1,5 +1,6 @@
 #include "imrtc/CallEngine.h"
 
+#include <algorithm>
 #include <chrono>
 #include <string>
 #include <utility>
@@ -8,6 +9,7 @@
 #include "imrtc/Errors.h"
 #include "imrtc/Log.h"
 #include "imrtc/MachineTypes.h"
+#include "imrtc/Reasons.h"
 #include "imrtc/Registry.h"
 
 namespace imrtc {
@@ -15,6 +17,19 @@ namespace {
 
 /** kEmptyString 给 sessionId() 在没有连接时返回。 */
 const std::string kEmptyString;
+
+/** containsSelf：`uid` 已知且出现在名单里。没登录（uid 为空）时不拦，交给没连接那条路。 */
+bool containsSelf(const std::string& uid, const std::vector<std::string>& calleeIds) {
+  return !uid.empty() && std::find(calleeIds.begin(), calleeIds.end(), uid) != calleeIds.end();
+}
+
+/** locallyRejectedCallEnd 是「call() 上线路之前就被拒」给界面的收场信号，同 CallMachine 的 localCallRejected。 */
+EmittedEvent locallyRejectedCallEnd() {
+  return eventOf("onCallEnd", obj({{"call_id", Json::make(std::string())},
+                                   {"reason", Json::make(reason::kError)},
+                                   {"duration_sec", Json::make(std::int64_t{0})},
+                                   {"ended_by", Json::make(std::string())}}));
+}
 
 /** stringArray 把 vector<string> 装成线路形状的 Json 数组。 */
 Json stringArray(const std::vector<std::string>& values) {
@@ -54,7 +69,7 @@ CallEngine::CallEngine(CallEngineOptions options) : options_(std::move(options))
       return connection_->request(offerType, data, now,
                                   [this, offerType, data](const RequestResult& result) {
                                     if (!result.ok) {
-                                      onRequestFailed(offerType, data, result);
+                                      onRequestFailed(offerType, data, result, nullptr);
                                       return;
                                     }
                                     handleIncoming(result.envelope.type, "", result.data);
@@ -99,19 +114,37 @@ CallEngine::CallEngine(CallEngineOptions options) : options_(std::move(options))
   media_.reset(new MediaPlane(options_.mediaAdapter, std::move(deps)));
 }
 
-CallEngine::~CallEngine() = default;
+// 析构在 CallEngineRequests.cpp：它要结算还没交出的调用结果，得看得见 Settlement 的定义。
 
 void CallEngine::setObserver(std::weak_ptr<CallEngineObserver> observer) {
   observer_ = std::move(observer);
 }
 
 void CallEngine::call(const std::vector<std::string>& calleeIds, const std::string& mediaType,
-                      bool isGroup) {
-  call(calleeIds, mediaType, isGroup, CallOptions{});
+                      bool isGroup, ActionCompletion done) {
+  call(calleeIds, mediaType, isGroup, CallOptions{}, std::move(done));
 }
 
 void CallEngine::call(const std::vector<std::string>& calleeIds, const std::string& mediaType,
-                      bool isGroup, const CallOptions& options) {
+                      bool isGroup, const CallOptions& options, ActionCompletion done) {
+  /*
+    **这道本地关卡只在 `Idle` 时抢在状态机前面拦**：`onCallEnd(error)` 假定界面刚乐观地进了
+    「正在呼叫…」。不是 `Idle`（这通 `call()` 其实是在另一通电话进行中时误调的，比如名单里
+    误含自己）时抢先拒掉只会给**正在进行的**那通电话发一条假的 `onCallEnd`，把它错杀——
+    让状态机去拒，按 `CallMachine::startCall` 正常收成 `2005`，不碰当前那通。
+  */
+  if (context_.call.state == CallState::Idle && containsSelf(uid_, calleeIds)) {
+    /*
+      **名单里不能有自己**（HOST_INTEGRATION_DESIGN §3.3，Web `callGuards.ts` 的 `rejectsSelf`）。
+      服务端会回 1004，但界面这时已经乐观地进了「正在呼叫…」，那条 1004 没头没尾。
+      出口与群号 / user_data 超限同一个：先 `onCallEnd(error)` 给界面收场，再把 1004 交给调用方。
+    */
+    log(LogLevel::Warn, "呼叫名单里含自己，已就地拒掉", {{logfield::kUid, uid_}});
+    EngineOutput ended{context_, {}, {locallyRejectedCallEnd()}, LocalReject{}};
+    dispatchOutput(std::move(ended), "");
+    rejectLocally(std::move(done), frame::kCallInvite);
+    return;
+  }
   Json args = Json::makeObject();
   args.set("callee_ids", stringArray(calleeIds));
   args.set("media_type", Json::make(mediaType));
@@ -120,34 +153,45 @@ void CallEngine::call(const std::vector<std::string>& calleeIds, const std::stri
   if (!options.chatGroupId.empty()) args.set("chat_group_id", Json::make(options.chatGroupId));
   if (!options.userData.empty()) args.set("user_data", Json::make(options.userData));
   if (options.timeoutSec > 0) args.set("timeout_sec", Json::make(options.timeoutSec));
-  apply(MachineInput::act("call", args), "");
+  request(MachineInput::act("call", args), std::move(done), "call_id");
 }
 
-void CallEngine::accept() { apply(MachineInput::act("accept"), ""); }
-void CallEngine::reject() { apply(MachineInput::act("reject"), ""); }
-void CallEngine::cancel() { apply(MachineInput::act("cancel"), ""); }
-void CallEngine::hangup() { apply(MachineInput::act("hangup"), ""); }
+void CallEngine::accept(ActionCompletion done) { request(MachineInput::act("accept"), std::move(done)); }
+void CallEngine::reject(ActionCompletion done) { request(MachineInput::act("reject"), std::move(done)); }
+void CallEngine::cancel(ActionCompletion done) { request(MachineInput::act("cancel"), std::move(done)); }
+void CallEngine::hangup(ActionCompletion done) { request(MachineInput::act("hangup"), std::move(done)); }
 
-void CallEngine::inviteMore(const std::vector<std::string>& calleeIds) {
+void CallEngine::inviteMore(const std::vector<std::string>& calleeIds, ActionCompletion done) {
+  // 同 call()：本地关卡只在「状态机本来就会受理这次 inviteMore」（Connected/Connecting）时
+  // 抢在前面拦，不然不在通话里调 inviteMore 时名单含自己会被误判成 1004，
+  // 盖过更准确的 2005（不在通话中）。加人不动通话，所以不抛 onCallEnd。
+  const bool inCall = context_.call.state == CallState::Connected ||
+                       context_.call.state == CallState::Connecting;
+  if (inCall && containsSelf(uid_, calleeIds)) {
+    log(LogLevel::Warn, "加人名单里含自己，已就地拒掉", {{logfield::kUid, uid_}});
+    rejectLocally(std::move(done), frame::kCallInviteMore);
+    return;
+  }
   Json args = Json::makeObject();
   args.set("callee_ids", stringArray(calleeIds));
-  apply(MachineInput::act("invite_more", args), "");
+  request(MachineInput::act("invite_more", args), std::move(done));
 }
 
-void CallEngine::joinCall(const std::string& callId) {
+void CallEngine::joinCall(const std::string& callId, ActionCompletion done) {
   Json args = Json::makeObject();
   args.set("call_id", Json::make(callId));
-  apply(MachineInput::act("join_call", args), "");
+  request(MachineInput::act("join_call", args), std::move(done));
 }
 
-void CallEngine::joinRoom(const std::string& roomId, const std::string& roomToken) {
+void CallEngine::joinRoom(const std::string& roomId, const std::string& roomToken,
+                          ActionCompletion done) {
   Json args = Json::makeObject();
   args.set("room_id", Json::make(roomId));
   args.set("room_token", Json::make(roomToken));
-  apply(MachineInput::act("join", args), "");
+  request(MachineInput::act("join", args), std::move(done));
 }
 
-void CallEngine::leaveRoom() { apply(MachineInput::act("leave"), ""); }
+void CallEngine::leaveRoom(ActionCompletion done) { request(MachineInput::act("leave"), std::move(done)); }
 
 void CallEngine::setRemoteLayer(const std::string& uid, const std::string& layer) {
   /*
@@ -172,7 +216,8 @@ void CallEngine::setRemoteLayer(const std::string& uid, const std::string& layer
     Json args = Json::makeObject();
     args.set("track_id", Json::make(trackId));
     args.set("max_layer", Json::make(layer));
-    apply(MachineInput::act("update_layer", args), "");
+    // 提示类没有结果：不传回调，失败（含本地拒绝）退回 onError（ACTION_RESULT_DESIGN D3）。
+    request(MachineInput::act("update_layer", args), ActionCompletion{});
   }
 }
 
@@ -303,11 +348,12 @@ void CallEngine::apply(const MachineInput& input, const std::string& replyReqId)
  * **宿主在回调里回调进来不受影响**：那时 `sendDepth_` 已经归零，是一次新的最外层
  * 派发，事件照常就地抛出——它本来就该是同步可见的。
  */
-void CallEngine::dispatchOutput(EngineOutput output, const std::string& replyReqId) {
+void CallEngine::dispatchOutput(EngineOutput output, const std::string& replyReqId,
+                                const std::shared_ptr<Settlement>& settlement) {
   context_ = std::move(output.state);
 
   ++sendDepth_;
-  for (const OutgoingFrame& frame : output.send) sendOne(frame, replyReqId);
+  for (const OutgoingFrame& frame : output.send) sendOne(frame, replyReqId, settlement);
   --sendDepth_;
 
   if (sendDepth_ > 0) {
@@ -321,11 +367,20 @@ void CallEngine::dispatchOutput(EngineOutput output, const std::string& replyReq
     再放重入期间攒下的。每一批都先搬到局部再抛：抛的过程中宿主可能回调进来，
     而那条路上的失败会往 deferredEmits_ 里继续追加——直接迭代成员容器会边遍历边扩容。
     循环到空为止，保证一条都不会漏在队列里过夜。
+
+    **调用结果排在事件之后**（ACTION_RESULT_DESIGN：状态事件先于结果）：宿主在结果回调里
+    看到的状态已经是收场之后的。
   */
-  while (!deferredEmits_.empty()) {
-    std::vector<EmittedEvent> batch;
-    batch.swap(deferredEmits_);
-    emitAll(batch);
+  while (!deferredEmits_.empty() || !deferredResults_.empty()) {
+    if (!deferredEmits_.empty()) {
+      std::vector<EmittedEvent> batch;
+      batch.swap(deferredEmits_);
+      emitAll(batch);
+      continue;
+    }
+    std::vector<std::pair<std::shared_ptr<Settlement>, ActionResult>> results;
+    results.swap(deferredResults_);
+    for (auto& entry : results) deliverOrDefer(entry.first, std::move(entry.second));
   }
 }
 
@@ -345,164 +400,6 @@ void CallEngine::emitOrDefer(EmittedEvent event) {
     return;
   }
   emitEvent(event);
-}
-
-/**
- * isOutgoingRequest 判断一帧该按「请求」发还是按「应答」发。
- *
- * 大多数帧看 type 就够了，**SDP 那两帧不行**：`room.offer` / `room.answer` 是双向的，
- * 谁是请求方由 `pc` 决定（§3.3——pub 由客户端 offer、sub 由服务端 offer）。
- * 所以 pub 侧的 offer 是**我们发起的请求**（它的应答是 `room.answer`，没有 `.ok`），
- * 而 sub 侧的 answer 是**服务端那个 offer 的应答**，要回显对方的 req_id。
- */
-bool isOutgoingRequest(const OutgoingFrame& frame) {
-  if (isRequestType(frame.type)) return true;
-  return frame.type == frame::kRoomOffer && str(frame.data, "pc") == "pub";
-}
-
-void CallEngine::sendOne(const OutgoingFrame& frame, const std::string& replyReqId) {
-  if (!connection_) {
-    /*
-      还没 login 就调了业务方法。状态机已经把状态推过去了（比如进了 inviting），
-      而这一帧根本没地方发——**必须补一次失败**，否则通话永远停在 inviting，
-      界面「正在呼叫…」转个不停，之后每次挂断都发向一个不存在的 call。
-
-      早先这里是 `if (!connection_) return;`，静默吞掉。ABI 冒烟测试
-      「没登录就拨号」把它抓了出来。
-    */
-    failLocally(frame.type, frame.data, codeValue(ErrorCode::NotLoggedIn));
-    return;
-  }
-  const std::int64_t now = options_.clock();
-
-  // 状态机产出的 SDP 帧里 sdp 是空串——它不认识 libwebrtc。媒体面把它接管过去，
-  // 异步拿到真正的 SDP 再发（见 MediaPlane::fillSdp）。
-  if (media_ && media_->fillSdp(frame.type, replyReqId, frame.data)) return;
-
-  if (!isOutgoingRequest(frame)) {
-    // 不是请求就是「别人请求的应答」（当前只有 sub 侧的 room.answer），回显对方的 req_id。
-    connection_->sendFrame(frame.type, replyReqId, frame.data, now);
-    return;
-  }
-
-  const std::string type = frame.type;
-  const bool sent = connection_->request(
-      type, frame.data, now, [this, type, data = frame.data](const RequestResult& result) {
-        if (!result.ok) {
-          onRequestFailed(type, data, result);
-          return;
-        }
-        /*
-          **成功的应答也要喂回状态机**。漏了这一步，`room.join.ok` 就没人接：
-          房间机永远停在 joining，界面卡在「接通中」，之后每次 publish 都被 R1
-          本地拒成 2005。同一条路上的还有 `call.invite.ok`（拿 call_id）、
-          `room.publish.ok`（拿 track_id 并发 pub offer）、以及 pub offer 的
-          应答 `room.answer`（把发布状态坐实）。
-
-          replyReqId 传空串：这是**我们自己请求的应答**，状态机若因此再发帧，
-          那是一次新的请求，不该回显我们自己的 req_id。
-        */
-        handleIncoming(result.envelope.type, "", result.data);
-      });
-  if (!sent) {
-    // 连接不可用时 request 不会回调，但状态机已经把状态推过去了。这一帧**根本没上线路**，
-    // 所以必须当作彻底失败：否则通话会永远停在 inviting，之后每次挂断都发向一个
-    // 不存在的 call（换回 1401，永远退不出去）。
-    failLocally(type, frame.data, codeValue(ErrorCode::NetworkUnreachable));
-  }
-}
-
-void CallEngine::onRequestFailed(const std::string& type, const Json& data,
-                                 const RequestResult& result) {
-  /*
-    **先放上行协商的闸，再谈要不要报错。**
-
-    这一条在 tearingDown_ 与 2003 两个 return 之前：那两条 return 说的是
-    「这次失败不该打扰宿主」，而闸门是引擎自己的记账——offer 失败了 answer 就不会
-    再来，不放闸的话上行从此协商不出去，而且没有任何症状可查。
-  */
-  if (media_ && type == frame::kRoomOffer) media_->releasePubOffer();
-
-  // 拆除期间的失败是我们自己造成的，不往外传（见 logout() 的注释）。
-  if (tearingDown_) return;
-  /*
-    **断线导致的失败不算「这件事失败了」**。协议 §1.4 规定断开期间通话要保持在
-    connected 并展示「正在重连…」，成不成由随后的 `sys.hello.ok` 的 resumed 裁决：
-    resumed=true 就接着打，false 才合成 onCallEnd(network)（不变量 I8）。
-
-    在这里把在途的 call.invite / room.join 当成失败，会在**断线的瞬间**就把通话
-    拆掉——onDisconnected 之前先冒出一条 onCallEnd(error)，界面直接收场，
-    而重连成功后那通电话其实还在。onDisconnected 已经是断线的信号，
-    这里再报一条 2003 只是噪声。
-  */
-  if (result.errorCode == codeValue(ErrorCode::NetworkUnreachable)) return;
-
-  failLocally(type, data, result.errorCode);
-}
-
-void CallEngine::failLocally(const std::string& type, const Json& data, std::int32_t code) {
-  /*
-    走 emitOrDefer 而不是直接调 observer：failLocally 几乎总是在**某一层的发帧循环里**
-    被调到（帧没发出去才叫失败）。直接抛的话，这条错误会跑到「它所属的那次状态转移」
-    自己的事件前面去——宿主先看见 onError，才看见 onCallBegin。见 dispatchOutput。
-  */
-  Json args = Json::makeObject();
-  args.set("code", Json::make(static_cast<std::int64_t>(code)));
-  args.set("name", Json::make(errorName(code)));
-  // for_type 让宿主知道是哪一帧没成。状态机产出的 onError 不带它，取不到就是空串。
-  args.set("for_type", Json::make(type));
-  emitOrDefer(EmittedEvent{"onError", args});
-
-  /*
-    两个帧的失败必须让状态机退回 idle，否则界面永远收不了场：
-
-    - call.invite 失败 → 通话机停在 inviting，界面「正在呼叫…」转个不停，
-      而那通电话服务端根本没建；之后每次挂断都换回 1401，**永远退不出去**。
-      （Web 端实测：群呼把主叫自己也放进了 callee_ids，服务端回 1004，
-      然后连点五次挂断全是 1401。）
-    - room.join 失败 → 房间机停在 joining，之后每次 publish 都被 R1 拒成 2005，
-      界面停在「正在进入会议…」。
-
-    - room.leave 失败 → 房间机停在 leaving，**媒体停不掉**（摄像头与前台资源一直开着），
-      之后 leave 被 R1 拒成 2005、join 因为「不在 idle」也被拒——除非 logout，
-      这台 Engine 再也进不了任何房间。而服务端回 1203 的语义恰恰是
-      **我们已经不在房里了**，正是最该收场的时刻。
-
-    其余帧的失败只报错：它们不改变「有没有一通电话 / 在不在房里」。
-    **请求超时（2004）走的也是这条路**——十秒没应答，那通电话确实没建起来。
-
-    这条推理漏了一维——**有没有在推流**（静默失败审计 §A）：`room.publish` /
-    `room.subscribe` 被拒（或没送到）原先谁都不认，那条轨道永远停在 publishing /
-    subscribing：`.ok` 不会来，上行从未协商、下行订阅永久悬空，界面显示已接通、
-    对方全程听不见看不见，零提示。
-    - `room.publish` 通话里（`call.state != idle`）被拒：直接强制收场整通电话，
-      reason=error——留在通话里只报错也救不回来，服务端会拒的几种情形（房间没了、
-      重复发布、请求超时）重试也没用。复用 `call_failed` 的合成路径（CallMachine.cpp
-      按此刻状态挑该发的结束帧，含 call.hangup）。
-      没有通话（会议房）时只摘掉那条 publishing 记账，不收场、不额外抛回调。
-    - `room.subscribe` 被拒只摘记账，不收场：最常见的 1301 是订阅与对方停推赛跑输了，
-      通话本身没事——留着不摘的话不变量 R3 会把之后每次重订都当成换层，
-      再也发不出 room.subscribe。
-  */
-  if (type == frame::kCallInvite) {
-    apply(MachineInput::internal("call_failed"), "");
-  } else if (type == frame::kRoomJoin) {
-    apply(MachineInput::internal("join_failed"), "");
-  } else if (type == frame::kRoomLeave) {
-    apply(MachineInput::internal("leave_failed"), "");
-  } else if (type == frame::kRoomPublish) {
-    if (context_.call.state != CallState::Idle) {
-      log(LogLevel::Warn, "发布被拒，结束本端通话", {{logfield::kCallId, context_.call.callId}});
-      apply(MachineInput::internal("call_failed"), "");
-    } else {
-      apply(MachineInput::internal("publish_failed", obj({{"cid", Json::make(str(data, "cid"))}})),
-           "");
-    }
-  } else if (type == frame::kRoomSubscribe) {
-    apply(MachineInput::internal("subscribe_failed",
-                                 obj({{"track_id", Json::make(str(data, "track_id"))}})),
-         "");
-  }
 }
 
 }  // namespace imrtc

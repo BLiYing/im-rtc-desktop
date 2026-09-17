@@ -6,21 +6,23 @@
 
 ## 当前焦点
 
-**2026-09-17 夜：补了两件（本地已提交、未推送），`test.sh` 全绿（135 例），Demo 没接。** SDK 1.0.0 已公网发布（GitHub Release，只 macOS），这些进下一个版本。
-- `0397c97` **`forceEnd`**：C++ `CallEngine::forceEnd()` + C ABI `imrtc_v1_force_end`（导出 33→34）；idle 下迟到 `invite.ok` / `connected` 补发 cancel / hangup、迟到 `room.join.ok` 补发 leave（原先会被搭成 joined）；时长从本端 onCallBegin 算。
-- `c57b492` 收 `call.ringing` 抛 `onUserRinging`，`imrtc_v1_observer` 尾部追加 `on_user_ringing`（旧 struct_size 照旧可用）。
-- **整体状态**：P5 C ABI + Qt Demo 已交付。**媒体推迟、纯信令模式**：能拨号、进房、收全部状态回调，没有声音和画面。**Windows 一次都没编译过**。
+**2026-09-17 夜：「调用结果回给调用方」（server `docs/design/ACTION_RESULT_DESIGN.md` → 2.0.0）已改完，未提交，等 code-review。** `test.sh` 八步全绿（146 例，ASan 同绿），只 macOS。
+- C ABI 按 D4 **原地改** 11 个发起类函数签名，末尾 `imrtc_v1_result_cb cb, void* user_data`（cb 为 NULL 失败退回 `on_error`）；导出仍 34 个。C++ 包装加 `std::function<void(Result<T>)> done`。
+- 引擎：状态机本地拒绝改成输出里的 `reject`；发帧 / 结算 / 回滚 / 本地收场挪到 `engine/src/CallEngineRequests.cpp`；补上 accept / join 被拒回 idle。
+- 与 Web 的出入（记在 CLIENT_PARITY `[^actionresult]`）：等应答时断线只回 2003、不回滚发起类；destroy 后调用是未定义行为，改为 destroy 时悬着的结果回 2005。
+- 整体状态不变：**媒体推迟、纯信令模式**；**Windows 一次都没编译过**。`forceEnd` / `onUserRinging`（`0397c97` / `c57b492`）已推送。
 
 ## 下一步
 
 1. **Windows 过一遍**：编译 + 手点；`install()` / `imrtcConfig.cmake` / `find_package`（`.lib` 进 ARCHIVE、`.dll` 进 RUNTIME 只是照惯例写的）；`imrtc_v1_call_ex` 与结构体尾部追加字段 `dumpbin /exports` + 联调。等机器 / 集成方。
 2. **C ABI 与三端余下一处不对等**：observer 没有「票快到期」回调（得先在 engine 造到期计时器，形状没定）。`forceEnd` 已补（`0397c97`），Demo 红键还没接看门狗。
 3. **宿主对接 M1/M8 收尾**：Demo 没有「按 call_id 加入」入口与群号 / user_data 展示。
+4. **2.0.0**：code-review 通过后等用户通知发版（改 `Version.h` → tag → `package.sh` → release）；Demo 的 login 没接结果回调（失败退回 `on_error`）。
 5. 静默失败清单（P0×2 / P1×4 / P2×6）：`../im-rtc-server/docs/ops/silent-failure/desktop.md`。第一条界面层没接（`MainWindow` 没按 `will_reconnect` 分情况展示），第二条没动。
 6. 异步口子的形状（一次定完）：渲染路径 B 原始帧回调 + `probeMicrophone` / `startLocalPreview` 出 C ABI。
 7. `WebRTCAdapter`（推迟，等 Apple Silicon 或 Windows 机器）。
 8. 零碎：后台来电提醒四条 + 设置页详细日志（archive 09-11）；`Shots` 设置页截图（高度 680）没重新生成；UX_FLOWS §07 关窗语义 / 托盘常驻没排期；日志环形缓冲 + `exportDiagnostics()`；按需 C# / P/Invoke 绑定；README 状态 / 依赖 / 开发几节的数字是旧的。
-9. **体量**（阈值 600，预警 480）：`demo/MainWindow.cpp` 563、`imrtc_c.h` 535、`CallEngine.hpp` 503、`engine/src/CallEngine.cpp` 502。
+9. **体量**（阈值 600，预警 480）：**`CallEngine.hpp` 598、`imrtc_c.h` 588 贴线，再往里加东西先拆**；`demo/MainWindow.cpp` 563。
 
 ## 已知坑 / 限制
 

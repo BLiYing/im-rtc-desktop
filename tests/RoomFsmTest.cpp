@@ -110,6 +110,18 @@ Json actualEmit(const std::vector<imrtc::EmittedEvent>& events) {
   return out;
 }
 
+/**
+ * expectResult 比对向量的 `result`（act 被本地拒绝时回给调用方的结果）。
+ * **省略即断言没有本地拒绝**；本地拒绝也不许再同时 emit 一条 onError——那由 emit 比对抓。
+ */
+void expectResult(const imrtc::LocalReject& actual, const Json& step, const std::string& label) {
+  const Json* want = step.find("result");
+  const std::int64_t wantCode = want == nullptr ? 0 : want->find("code")->asInt();
+  const std::string wantName = want == nullptr ? "" : want->find("name")->asString();
+  CHECK_EQ(static_cast<std::int64_t>(actual.code), wantCode, label + " 的 result.code");
+  CHECK_EQ(actual.name, wantName, label + " 的 result.name");
+}
+
 Json wanted(const Json& step, const std::string& key) {
   const Json* found = step.find(key);
   return found == nullptr ? Json::makeArray() : *found;
@@ -166,6 +178,7 @@ void runCase(const Json& testCase) {
 
     imtest::expectSubset(actualSend(result.send), wanted(step, "send"), label + " 的 send");
     imtest::expectSubset(actualEmit(result.emit), wanted(step, "emit"), label + " 的 emit");
+    expectResult(result.reject, step, label);
 
     if (const Json* wantState = step.find("state")) assertState(ctx, *wantState, label);
   }

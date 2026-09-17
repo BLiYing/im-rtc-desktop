@@ -60,9 +60,10 @@ EngineOutput forceEnd(const EngineContext& ctx, std::int64_t nowMs, std::int64_t
                  obj({{"call_id", Json::make(ctx.call.callId)},
                       {"reason", Json::make(reason)},
                       {"duration_sec", Json::make(callDurationSec(since, nowMs))},
-                      {"ended_by", Json::make("")}}))}};
+                      {"ended_by", Json::make("")}}))},
+        LocalReject{}};
   }
-  if (ctx.room.state == RoomState::Idle) return EngineOutput{ctx, {}, {}};
+  if (ctx.room.state == RoomState::Idle) return EngineOutput{ctx, {}, {}, LocalReject{}};
 
   // 没有通话却在房里：会议。结束动作是离房。
   std::vector<OutgoingFrame> send;
@@ -73,7 +74,8 @@ EngineOutput forceEnd(const EngineContext& ctx, std::int64_t nowMs, std::int64_t
   next.room = clearedRoom(RoomState::Idle);
   return EngineOutput{std::move(next),
                       std::move(send),
-                      {eventOf("onRoomLeft", obj({{"room_id", Json::make(ctx.room.roomId)}}))}};
+                      {eventOf("onRoomLeft", obj({{"room_id", Json::make(ctx.room.roomId)}}))},
+                      LocalReject{}};
 }
 
 }  // namespace imrtc

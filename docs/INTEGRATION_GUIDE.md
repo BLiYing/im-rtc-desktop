@@ -62,6 +62,7 @@ engine.tick();
 纯 C 的接法见 `capi/include/imrtc/imrtc_c.h` 的注释，形状是一样的：
 `imrtc_v1_engine_create` → 填一张 `imrtc_v1_observer` 函数指针表 →
 `imrtc_v1_login` → 循环 `imrtc_v1_engine_tick` → `imrtc_v1_engine_destroy`。
+发起类函数最后两个参数是结果回调与它的 `user_data`（可以传 NULL，见 §5）。
 
 **token 从哪来**：你自己的服务端调 `/v1/tokens` 换。Demo 走的是服务端内置的
 免密登录（`-demo-login`），**那只在开发构建里有**，不要照抄进生产。
@@ -170,6 +171,22 @@ create ──► set_observer ──► login ──► [tick tick tick …] ─
 ---
 
 ## 5. 错误码 → 你自己的文案
+
+**先分清错误从哪个出口来（2.0.0 起）**：
+
+- **你调的方法失败了，结果回给你自己**：`imrtc_v1_login` / `call` / `call_ex` / `accept` / `reject` /
+  `cancel` / `hangup` / `invite_more` / `join_call` / `join_room` / `leave_room` 末尾都带
+  `imrtc_v1_result_cb cb, void* user_data`（C++ 包装是可选的 `done`）。本地拒绝（2005 / 1004）、
+  服务端拒绝、2004 超时、2003 等应答期间断线、2007 没登录都**只**从这里回来，**不再**经 `on_error` 抛一遍。
+  回调恰好一次，排在这次调用引起的 `on_call_end` / `on_room_left` 之后；**界面收起仍靠这两个事件**，
+  结果回调里只挑提示文案。`call` 的成功值是 `call_id`。
+- **`on_error` 只剩「找不到调用方」的错误**：服务端主动推的 `sys.error`、引擎随后自动发的帧失败
+  （接听之后的进房等，`for_type` 告诉你是哪一帧）、媒体层自发故障。
+- **cb 传 NULL 时失败退回 `on_error`**——1.x 的写法照样能收到错误，只是分不清是哪次调用的。
+- 发起函数的**返回值只表示「根本没受理」**（空句柄 / 参数非法），此时不会再调 cb。
+- 拒接 / 取消 / 挂断 / 离房失败时**引擎本地照样收场**，你不用为它们做任何界面处理。
+
+规则全文见 `im-rtc-server/docs/design/ACTION_RESULT_DESIGN.md`。
 
 **我们只给码和机读名，不给给用户看的文案。** 跨 ABI 传本地化字符串是个坑
 （编码、生命周期、谁负责翻译都说不清），所以多语言完全在你这边：

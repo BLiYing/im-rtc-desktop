@@ -38,6 +38,12 @@ bool isValidLayer(const std::string& layer);
 /** toStrings 把 C 的指针数组摊成 vector<string>。items 为 NULL 时返回空。 */
 std::vector<std::string> toStrings(const char* const* items, std::uint32_t count);
 
+/**
+ * toCompletion 把 C 的结果回调包成引擎的 ActionCompletion。**cb 为 NULL 时返回空函数**——
+ * 引擎据此把失败退回 on_error（ACTION_RESULT_DESIGN R7）。
+ */
+imrtc::ActionCompletion toCompletion(imrtc_v1_result_cb cb, void* userData);
+
 /** toLogLevel / fromLogLevel 在两套枚举之间互转。数值同序，但不许靠这个偷懒。 */
 imrtc_v1_log_level toLogLevel(imrtc::LogLevel level);
 imrtc::LogLevel fromLogLevel(imrtc_v1_log_level level);

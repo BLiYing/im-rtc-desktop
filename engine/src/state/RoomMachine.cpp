@@ -12,9 +12,9 @@ namespace {
 /** localReject 是不变量 R1 的落点：错误状态下的调用**本地拒绝**，不发上去。 */
 RoomOutput localReject(const RoomContext& ctx) {
   const std::int32_t code = codeValue(ErrorCode::InvalidState);
-  return roomOut(ctx, {},
-                 {eventOf("onError", obj({{"code", Json::make(static_cast<std::int64_t>(code))},
-                                          {"name", Json::make(errorName(code))}}))});
+  RoomOutput out = roomOut(ctx);
+  out.reject = LocalReject{code, errorName(code)};
+  return out;
 }
 
 RoomOutput joinRoom(const RoomContext& ctx, const Json& args) {
@@ -249,7 +249,7 @@ bool parseRoomState(const std::string& text, RoomState& out) {
 
 RoomOutput roomOut(RoomContext state, std::vector<OutgoingFrame> send,
                    std::vector<EmittedEvent> emit) {
-  return RoomOutput{std::move(state), std::move(send), std::move(emit)};
+  return RoomOutput{std::move(state), std::move(send), std::move(emit), LocalReject{}};
 }
 
 RoomContext clearedRoom(RoomState state) {
