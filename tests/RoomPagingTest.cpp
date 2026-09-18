@@ -140,3 +140,54 @@ IMRTC_TEST(pagingAutoSubscribeFallback, "按页订阅 —— 认不出的 auto_s
   CHECK_EQ(out.state.autoSubscribe, std::string("all"), "兜底成 all");
   CHECK_EQ(out.send[0].data.find("auto_subscribe")->asString(), std::string("all"), "线路上也是 all");
 }
+
+IMRTC_TEST(pagingHoldsWhileReconnecting, "按页订阅 —— 重连期间迟滞到点也不发退订，清单留着") {
+  const imrtc::RoomContext paged = layer(subscribeAll(meeting(3), 2), "t-1", "none").state;
+  CHECK_EQ(paged.pendingUnsubscribe.size(), std::size_t{1}, "排进待退订");
+
+  const imrtc::RoomOutput cut = imrtc::reduceRoom(
+      paged, imrtc::MachineInput::internal("disconnected", imrtc::obj({})));
+  CHECK_EQ(static_cast<int>(cut.state.state), static_cast<int>(imrtc::RoomState::Reconnecting),
+           "断线进重连");
+
+  const imrtc::RoomOutput fired = imrtc::reduceRoom(
+      cut.state, imrtc::MachineInput::internal("unsubscribe_hysteresis_elapsed",
+                                               imrtc::obj({{"track_id", Json::make("t-1")}})));
+  // 一帧都不许发：退订帧没有回滚路径，扔进死连接会让这条 track 永远卡在 unsubscribing。
+  CHECK_EQ(fired.send.size(), std::size_t{0}, "死连接上一帧都不发");
+  CHECK_EQ(fired.state.subscribe.at("t-1"), std::string("subscribed"), "订阅记账不动");
+  CHECK_EQ(fired.state.pendingUnsubscribe.size(), std::size_t{1}, "还在清单上，等回到 joined 再退");
+}
+
+IMRTC_TEST(pagingRejectDropsPending, "按页订阅 —— 订阅被拒时连带把待退订摘掉") {
+  // 订上 → 翻走排退订 → 这时订阅的 reject 才回来（两件事各走各的，顺序能排到）。
+  imrtc::RoomContext ctx = layer(meeting(2), "t-1", "l").state;
+  ctx.pendingUnsubscribe.push_back("t-1");
+  const imrtc::RoomOutput out = imrtc::reduceRoom(
+      ctx, imrtc::MachineInput::internal("subscribe_failed",
+                                         imrtc::obj({{"track_id", Json::make("t-1")}})));
+  CHECK_EQ(out.state.subscribe.count("t-1"), std::size_t{0}, "订阅记账摘掉");
+  // 不摘的话五秒后那条 unsubscribe 会打在空处——人要是翻回来了，退掉的是刚订上的那一路。
+  CHECK_EQ(out.state.pendingUnsubscribe.size(), std::size_t{0}, "待退订也要摘");
+}
+
+IMRTC_TEST(pagingSkipsUnsubscribing, "按页订阅 —— 已经在退订中的不再排一次迟滞") {
+  imrtc::RoomContext ctx = subscribeAll(meeting(2), 1);
+  ctx.subscribe["t-1"] = "unsubscribing";
+  const imrtc::RoomOutput out = layer(ctx, "t-1", "none");
+  CHECK_EQ(out.send.size(), std::size_t{0}, "一帧都不发");
+  CHECK_EQ(out.state.pendingUnsubscribe.size(), std::size_t{0}, "不排队");
+}
+
+IMRTC_TEST(pagingQuotaNeverUnderflows, "按页订阅 —— 待退订比在订的还多时不回绕成恒满") {
+  /*
+    两边都是 size_t：`countLiveVideo - pendingUnsubscribe.size()` 在队列比在订的还长时
+    会回绕成天文数字，判据恒真，**从此一路视频都订不上**且不抛错。
+    这里造的正是那种局面：订阅记账被摘了，队列里还留着。
+  */
+  imrtc::RoomContext ctx = meeting(2);
+  ctx.pendingUnsubscribe = {"t-9", "t-8", "t-7"};
+  const imrtc::RoomOutput out = layer(ctx, "t-1", "l");
+  CHECK_EQ(out.reject.rejected(), false, "不该被本地拒绝");
+  CHECK_EQ(out.state.subscribe.at("t-1"), std::string("subscribing"), "照样订得上");
+}
