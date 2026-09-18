@@ -6,6 +6,14 @@
 
 ## 当前焦点
 
+**2026-09-18 晚：回前台 / 网络变化立即重连（五端对齐，CLIENT_PARITY `[^netchange]`）。** `test.sh` 全绿 164 例（ASan 同绿），只 macOS。
+- 引擎 `Connection::appForeground` / `networkChanged`（`engine/src/signaling/ConnectionNudge.cpp`）：正等着重连的**下一个 tick** 就连、退避归零；
+  连着的发 ping 探 3 s，到期没下行就走心跳判死同一条路；正在连的失败后不走退避；两次至少隔 2 s。**不在关闭回调里同步 connect**（会析构正在回调的 Transport）。
+- C ABI 追加 `imrtc_v1_set_app_foreground` / `imrtc_v1_notify_network_changed`（导出 34 → 36），包装头同名方法；
+  包装头贴线，值类型拆进 `capi/include/imrtc/CallEngineTypes.hpp`（install / package.sh / 接入指南已跟上）。
+- Qt Demo `EngineBridge::watchSystemSignals`：`applicationStateChanged` → 回前台，`QNetworkInformation` 上线 / 换介质 → 网络变化。Demo 编过，**没手点**。
+- 桌面上「回前台」= App 重新激活；**睡眠唤醒没有专门的信号**，要用户点回来才触发，否则靠心跳。
+
 **2026-09-18 凌晨：会议房 M2 的协议那一份已做完并提交（server `docs/design/MEETING_ROOM_DESIGN.md` §6 表里「desktop 跟协议版本、`auto_subscribe`、收帧上限」那一行）。`test.sh` 八步全绿（152 例），只 macOS。**
 - 协议 2：`sys.hello` 的 `protocol_version` 默认值 1 → 2；收帧上限拆成两个数（发仍 `kMaxFrameBytes` 64 KiB，收按 `kMaxReceivedFrameBytes` 256 KiB）。
 - `room.join.auto_subscribe` 布尔 → 三档字符串 `all | audio | none`（`autoSubscribeModes()`，兜底 `all`）；`RoomContext::autoSubscribe` 跟着从 `bool` 变 `std::string`。
@@ -30,7 +38,7 @@
 6. 异步口子的形状（一次定完）：渲染路径 B 原始帧回调 + `probeMicrophone` / `startLocalPreview` 出 C ABI。
 7. `WebRTCAdapter`（推迟，等 Apple Silicon 或 Windows 机器）。
 8. 零碎：后台来电提醒四条 + 设置页详细日志（archive 09-11）；`Shots` 设置页截图（高度 680）没重新生成；UX_FLOWS §07 关窗语义 / 托盘常驻没排期；日志环形缓冲 + `exportDiagnostics()`；按需 C# / P/Invoke 绑定；README 状态 / 依赖 / 开发几节的数字是旧的。
-9. **体量**（阈值 600，预警 480）：**`CallEngine.hpp` 598、`imrtc_c.h` 588 贴线，再往里加东西先拆**；`demo/MainWindow.cpp` 563。
+9. **体量**（阈值 600，预警 480）：**`imrtc_c.h` 591 贴线，再往里加东西先拆**（`CallEngine.hpp` 09-18 拆出值类型后 540）；`demo/MainWindow.cpp` 563。
 
 ## 已知坑 / 限制
 

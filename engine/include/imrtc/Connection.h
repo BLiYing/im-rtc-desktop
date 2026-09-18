@@ -142,6 +142,14 @@ public:
   void sendFrame(const std::string& type, const std::string& reqId, const Json& data,
                  std::int64_t nowMs);
 
+  /**
+   * appForeground / networkChanged：回到前台（含睡眠唤醒）、系统网络变了——断线后**不再按退避白等**。
+   * 正等着重连的下一个 tick 就连、退避归零；连着的发 ping 探 3 秒，没回音就判死重连；
+   * 正在连的这次失败后不走退避。规则与理由见 `ConnectionNudge.cpp`（与 iOS / Android / Web 同形）。
+   */
+  void appForeground(bool foreground, std::int64_t nowMs);
+  void networkChanged(std::int64_t nowMs);
+
   /** tick 推进时间：心跳、请求超时、重连全靠它。宿主按 ~1 秒的粒度调用即可。 */
   void tick(std::int64_t nowMs);
 
@@ -181,6 +189,15 @@ private:
   /** wallNowMs 是信封 `ts` 用的墙上时间——与 tick 的单调时间线刻意分开。 */
   std::int64_t wallNowMs() const;
   void scheduleReconnect(std::int64_t nowMs);
+  void nudge(const char* rule, std::int64_t nowMs);
+  void reconnectRightAway(const char* rule, std::int64_t nowMs);
+  /** checkProbe 在 tick 里看探测到没到期。 */
+  void checkProbe(std::int64_t nowMs);
+
+  /** 探测等 pong 的时长。与三端同一个数。 */
+  static constexpr std::int64_t kProbeMs = 3000;
+  /** 两次「立刻重连」之间至少隔这么久，防重连风暴。与三端同一个数。 */
+  static constexpr std::int64_t kNudgeMinGapMs = 2000;
 
   /*
     断开多久之后可以断定「服务端那一侧的会话没了」。
@@ -225,6 +242,14 @@ private:
   std::int64_t reconnectAtMs_ = 0;
   /** 彻底放弃重连的闩（被踢、鉴权用尽、主动 close）。 */
   bool reconnectStopped_ = false;
+  /** 探测到期时刻；0 = 没在探。 */
+  std::int64_t probeDeadlineMs_ = 0;
+  bool probeAnswered_ = false;
+  /** 回前台 / 网络变化那一刻正在连、或探测判死要断：这一次失败不走退避。 */
+  bool nudgePending_ = false;
+  /** 上一次「立刻重连」的时刻；`hasNudged_` 为假时没意义。 */
+  std::int64_t lastNudgeAtMs_ = 0;
+  bool hasNudged_ = false;
 };
 
 }  // namespace imrtc

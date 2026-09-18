@@ -109,6 +109,8 @@ void Connection::close() {
   state_ = ConnectionState::Closed;
   reconnectStopped_ = true;
   reconnectAtMs_ = 0;
+  probeDeadlineMs_ = 0;
+  nudgePending_ = false;
   // **只有 logout 撤这条倒计时**：鉴权连续失败那条路要让它走完，
   // 那时服务端那一侧的会话同样会过期，通话同样该收场。
   unrecoverableAtMs_ = 0;
@@ -154,6 +156,7 @@ void Connection::handleHelloOk(const RequestResult& result) {
   authFailures_ = 0;
   reconnectAttempt_ = 0;
   reconnectStopped_ = false;
+  nudgePending_ = false;
   pingIntervalSec_ = hello.pingIntervalSec;
   // 连上了就别再倒计时了——不管 resumed 是真是假，服务端都已经给出裁决。
   unrecoverableAtMs_ = 0;
@@ -233,6 +236,7 @@ void Connection::sendFrame(const std::string& type, const std::string& reqId, co
 void Connection::onTransportMessage(const std::string& raw) {
   // 收到**任何**帧都算对端活着，不只是 pong（§1.3）。
   heartbeat_.noteFrameReceived();
+  probeAnswered_ = true;
 
   Envelope envelope;
   try {
@@ -301,6 +305,7 @@ Json Connection::decodeData(const Envelope& envelope) const {
 
 void Connection::onTransportClosed(int code, const std::string& reason) {
   heartbeat_.stop();
+  probeDeadlineMs_ = 0;
   pending_.failAll(codeValue(ErrorCode::NetworkUnreachable));
 
   // 4403 = 同 uid 同 device_id 在别处登录，或宿主吊销。宿主该回登录页。
@@ -355,6 +360,10 @@ void Connection::scheduleReconnect(std::int64_t nowMs) {
   // **已经排着一次就什么都不做**（不重排、不进档）。一次失败可能从两条路走到这里，
   // 每次都重排的话退避档一次涨两级，几分钟后就退到几十秒一次，看着像「不重连了」。
   if (reconnectStopped_ || reconnectAtMs_ != 0) return;
+  if (nudgePending_) {
+    reconnectRightAway("网络变化或回前台时正在连，失败后立即再连", nowMs);
+    return;
+  }
   reconnectAtMs_ = nowMs + backoffDelayMs(reconnectAttempt_, options_.random);
   ++reconnectAttempt_;
 }
@@ -378,6 +387,7 @@ void Connection::tick(std::int64_t nowMs) {
     case Heartbeat::Action::None:
       break;
   }
+  checkProbe(nowMs);
 
   if (unrecoverableAtMs_ != 0 && nowMs >= unrecoverableAtMs_) {
     unrecoverableAtMs_ = 0;

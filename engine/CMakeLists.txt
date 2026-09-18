@@ -17,6 +17,7 @@ add_library(im_rtc_engine STATIC
   src/signaling/PendingRequests.cpp
   src/signaling/Handshake.cpp
   src/signaling/Connection.cpp
+  src/signaling/ConnectionNudge.cpp
   src/signaling/Discipline.cpp
   src/signaling/FieldSpec.cpp
   src/signaling/FramesSys.cpp

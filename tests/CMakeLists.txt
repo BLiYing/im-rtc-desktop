@@ -14,6 +14,7 @@ add_executable(im_rtc_engine_tests
   HandshakeTest.cpp
   ConnectionTest.cpp
   ReconnectTest.cpp
+  ConnectionNudgeTest.cpp
   CallEngineTest.cpp
   ForceEndTest.cpp
   ActionResultTest.cpp

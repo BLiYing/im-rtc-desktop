@@ -1,10 +1,12 @@
 #include "EngineBridge.h"
 
 #include <QCoreApplication>
+#include <QGuiApplication>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLoggingCategory>
 #include <QNetworkAccessManager>
+#include <QNetworkInformation>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QSettings>
@@ -63,6 +65,35 @@ EngineBridge::EngineBridge(QObject* parent) : QObject(parent) {
   connect(ticker_, &QTimer::timeout, this, [this] {
     if (engine_) engine_->tick();
   });
+  watchSystemSignals();
+}
+
+/*
+  回前台 / 网络变了就告诉引擎——**宿主该写的就是这几行**（引擎不碰 OS，见 imrtc_c.h）。
+  断线后引擎就不再按退避白等：正等着重连的立刻连，连着的先探 3 秒（2026-09-18，五端同形）。
+  桌面上「回前台」= App 重新被激活（含睡眠唤醒后用户点回来）；网络走 Qt 的 QNetworkInformation。
+*/
+void EngineBridge::watchSystemSignals() {
+  if (auto* app = qobject_cast<QGuiApplication*>(QCoreApplication::instance())) {
+    connect(app, &QGuiApplication::applicationStateChanged, this, [this](Qt::ApplicationState state) {
+      if (engine_) engine_->setAppForeground(state == Qt::ApplicationActive);
+    });
+  }
+  if (!QNetworkInformation::loadDefaultBackend()) {
+    qCInfo(lcBridge, "这台机器没有 QNetworkInformation 后端，网络变化靠心跳兜底");
+    return;
+  }
+  QNetworkInformation* info = QNetworkInformation::instance();
+  connect(info, &QNetworkInformation::reachabilityChanged, this,
+          [this](QNetworkInformation::Reachability reachability) {
+            if (engine_ && reachability == QNetworkInformation::Reachability::Online) {
+              engine_->notifyNetworkChanged();
+            }
+          });
+  connect(info, &QNetworkInformation::transportMediumChanged, this,
+          [this](QNetworkInformation::TransportMedium) {
+            if (engine_) engine_->notifyNetworkChanged();
+          });
 }
 
 EngineBridge::~EngineBridge() {

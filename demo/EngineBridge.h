@@ -184,6 +184,8 @@ signals:
   void roomClosed(const QString& roomId, const QString& reason);
 
 private:
+  /** 回前台 / 网络变化转给引擎（见 .cpp）。 */
+  void watchSystemSignals();
   /** 发起类动作的结果回调：失败弹提示 / 只记日志（见 .cpp）。 */
   std::function<void(imrtc::capi::Result<>)> reportFailure(const char* action);
   std::function<void(imrtc::capi::Result<>)> logFailure(const char* action);

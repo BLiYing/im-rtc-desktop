@@ -15,6 +15,7 @@
 | `libim_rtc_engine_capi.dylib` / `im_rtc_engine_capi.dll` | 引擎本体。libwebrtc 静态链在里面 | ✅ |
 | `imrtc/imrtc_c.h` | **纯 C 头**，对外唯一边界。284 行，没有一个 `std::` | ✅ |
 | `imrtc/CallEngine.hpp` | header-only 的 C++ RAII 包装。**它自己也走 C ABI** | 可选 |
+| `imrtc/CallEngineTypes.hpp` | 上面那个包装用的值类型（`Error` / `Result` / …），被它 include，**不用单独引** | 随包装 |
 
 **边界是 C，不是 C++。** 这不是保守，是必须：C++ 没有跨编译器 ABI——
 MSVC 与 MinGW 不通、`/MD` 与 `/MT` 不通、Debug 与 Release 的 CRT 不通、

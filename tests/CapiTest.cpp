@@ -100,6 +100,10 @@ IMRTC_TEST(capiNullHandleIsSafe, "C ABI —— 对空句柄调任何方法都返
   CHECK_EQ(results.calls, 0, "没受理就不回调");
   CHECK_EQ(imrtc_v1_force_end(nullptr), std::int32_t{IMRTC_V1_ERR_BAD_PARAMS}, "force_end");
   CHECK_EQ(imrtc_v1_engine_tick(nullptr), std::int32_t{IMRTC_V1_ERR_BAD_PARAMS}, "tick");
+  CHECK_EQ(imrtc_v1_set_app_foreground(nullptr, 1), std::int32_t{IMRTC_V1_ERR_BAD_PARAMS},
+           "set_app_foreground");
+  CHECK_EQ(imrtc_v1_notify_network_changed(nullptr), std::int32_t{IMRTC_V1_ERR_BAD_PARAMS},
+           "notify_network_changed");
   CHECK_EQ(imrtc_v1_attach_view(nullptr, "bob", nullptr), std::int32_t{IMRTC_V1_ERR_BAD_PARAMS},
            "attach_view");
   CHECK_EQ(imrtc_v1_attach_local_view(nullptr, nullptr), std::int32_t{IMRTC_V1_ERR_BAD_PARAMS},
@@ -202,6 +206,12 @@ IMRTC_TEST(capiLifecycle, "C ABI —— create → set_observer → 调用 → d
   CHECK_EQ(counters.lastCode, std::int32_t{2007}, "该报 not_logged_in");
   CHECK_EQ(imrtc_v1_get_call_state(engine, &state), std::int32_t{IMRTC_V1_OK}, "再查状态");
   CHECK_EQ(state, std::int32_t{IMRTC_V1_CALL_IDLE}, "必须退回 idle");
+
+  // 提示类：没登录时是空操作，照样回 OK、不抛错误回调。
+  const std::int32_t errorsBefore = counters.lastCode;
+  CHECK_EQ(imrtc_v1_set_app_foreground(engine, 1), std::int32_t{IMRTC_V1_OK}, "set_app_foreground");
+  CHECK_EQ(imrtc_v1_notify_network_changed(engine), std::int32_t{IMRTC_V1_OK}, "notify_network_changed");
+  CHECK_EQ(counters.lastCode, errorsBefore, "提示类不该报错");
 
   CHECK_EQ(imrtc_v1_engine_tick(engine), std::int32_t{IMRTC_V1_OK}, "tick");
   CHECK_EQ(imrtc_v1_engine_set_observer(engine, nullptr), std::int32_t{IMRTC_V1_OK}, "注销回调");

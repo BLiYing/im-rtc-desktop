@@ -28,74 +28,11 @@
 #include <utility>
 #include <vector>
 
+#include "imrtc/CallEngineTypes.hpp"
 #include "imrtc/imrtc_c.h"
 
 namespace imrtc {
 namespace capi {
-
-/** Error 是 C 错误码的一层薄封装，`ok()` 为真表示成功。 */
-class Error {
-public:
-  Error() = default;
-  explicit Error(std::int32_t code) : code_(code) {}
-
-  bool ok() const { return code_ == IMRTC_V1_OK; }
-  std::int32_t code() const { return code_; }
-  /** name 返回机读名。指向库内的静态字符串，**不要释放**。 */
-  const char* name() const { return imrtc_v1_error_name(code_); }
-
-private:
-  std::int32_t code_ = IMRTC_V1_OK;
-};
-
-/**
- * Result 是一次发起类调用的结果，对应 `imrtc_v1_result_cb`（2.0.0）。`ok()` 为真时 `value` 是成功值
- * （`call` / `callEx` 是 callId，`login` 是 sessionId）。失败的码**不会**再经 `Observer::onError` 抛一遍。
- */
-template <typename T = void>
-struct Result {
-  std::int32_t code = IMRTC_V1_OK;
-  std::string name;
-  T value{};
-  bool ok() const { return code == IMRTC_V1_OK; }
-};
-
-template <>
-struct Result<void> {
-  std::int32_t code = IMRTC_V1_OK;
-  std::string name;
-  bool ok() const { return code == IMRTC_V1_OK; }
-};
-
-/** 一个正在说话的人，对应 `imrtc_v1_speaker`。volume 0~100。 */
-struct Speaker {
-  std::string uid;
-  std::string participantId;
-  std::int64_t volume = 0;
-};
-
-/** 一个人的网络质量，对应 `imrtc_v1_quality`。level 0~6（0 = unknown）。 */
-struct Quality {
-  std::string uid;
-  std::string participantId;
-  std::int64_t level = 0;
-};
-
-/**
- * `call()` 的可选参数，对应 `imrtc_v1_call_options`（HOST_INTEGRATION_DESIGN §3.3）。
- *
- * 群号 / user_data 本地校验不过时（chatGroupId 超 64 字节/含空白换行、userData 超
- * 4096 字节），`callEx` 的返回值仍是成功——**错误从结果回调出**（先 `onCallEnd(error)`，
- * 再 `done` 收到 1004），不上线路。跟 `imrtc_v1_call` 的「登录状态错误也从回调出」
- * 是同一条约定：C ABI 的返回值只报「这次调用本身合不合法」（空指针、struct_size），
- * 不报「这条业务规则通不通过」。
- */
-struct CallOptions {
-  std::string chatGroupId;
-  std::string userData;
-  /** 0 = 使用协议默认值（30）。 */
-  std::int64_t timeoutSec = 0;
-};
 
 /**
  * Observer 是回调基类。方法都有空实现，只覆盖关心的那几个。
@@ -263,6 +200,11 @@ public:
   Error updateToken(const std::string& token) {
     return call(imrtc_v1_update_token(handle_, token.c_str()));
   }
+  /** 回到前台（含睡眠唤醒）/ 系统网络变了：断线后不再按退避白等。见 imrtc_c.h。 */
+  Error setAppForeground(bool foreground) {
+    return call(imrtc_v1_set_app_foreground(handle_, foreground ? 1 : 0));
+  }
+  Error notifyNetworkChanged() { return call(imrtc_v1_notify_network_changed(handle_)); }
 
   Error call(const std::vector<std::string>& calleeIds, const std::string& mediaType,
              bool isGroup, std::function<void(Result<std::string>)> done = {}) {

@@ -170,4 +170,12 @@ void CallEngine::updateToken(const std::string& token) {
   if (connection_) connection_->updateToken(token);
 }
 
+void CallEngine::setAppForeground(bool foreground) {
+  if (connection_) connection_->appForeground(foreground, options_.clock());
+}
+
+void CallEngine::notifyNetworkChanged() {
+  if (connection_) connection_->networkChanged(options_.clock());
+}
+
 }  // namespace imrtc

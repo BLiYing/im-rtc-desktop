@@ -449,6 +449,9 @@ IMRTC_API int32_t imrtc_v1_login(imrtc_v1_engine* engine, const char* token, imr
 IMRTC_API int32_t imrtc_v1_logout(imrtc_v1_engine* engine);
 /** 换票。**下次重连生效，不打断当前连接**。 */
 IMRTC_API int32_t imrtc_v1_update_token(imrtc_v1_engine* engine, const char* token);
+/** 回到前台（含睡眠唤醒）/ 系统网络变了：断线后不再按退避白等，连着的先探 3 秒。没登录时空操作。 */
+IMRTC_API int32_t imrtc_v1_set_app_foreground(imrtc_v1_engine* engine, imrtc_v1_bool foreground);
+IMRTC_API int32_t imrtc_v1_notify_network_changed(imrtc_v1_engine* engine);
 
 /* ---- 通话 ---- */
 

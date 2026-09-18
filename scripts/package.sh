@@ -16,6 +16,7 @@
 #   LICENSE（MIT）
 #   include/imrtc/imrtc_c.h
 #   include/imrtc/CallEngine.hpp
+#   include/imrtc/CallEngineTypes.hpp（CallEngine.hpp 拆出来的值类型，被它 include）
 #   lib/libim_rtc_engine_capi.dylib
 #   lib/cmake/imrtc/imrtcConfig.cmake …
 #

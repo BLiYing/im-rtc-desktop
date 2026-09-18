@@ -155,6 +155,13 @@ public:
    * 换票是宿主的事——票从宿主的账号体系来，Engine 不认识那套东西。
    */
   void updateToken(const std::string& token);
+  /**
+   * setAppForeground / notifyNetworkChanged：回到前台（**含睡眠唤醒**）、系统网络变了。
+   * 断线后不再按退避白等：正等着重连的下一个 tick 就连；连着的探 3 秒，没回音就重连。
+   * 提示类：没登录时空操作。规则见 `engine/src/signaling/ConnectionNudge.cpp`。
+   */
+  void setAppForeground(bool foreground);
+  void notifyNetworkChanged();
 
   /**
    * call 发起通话。1v1 恰好 1 个被叫；群 ≤8。成功回 `value = call_id`（取自 `call.invite.ok`）。

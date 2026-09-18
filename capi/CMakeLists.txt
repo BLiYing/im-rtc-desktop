@@ -66,11 +66,12 @@ install(TARGETS im_rtc_engine_capi
   LIBRARY DESTINATION lib      # macOS 的 .dylib / Linux 的 .so
   ARCHIVE DESTINATION lib)     # Windows 配套的 .lib 导入库（不是静态库那份）
 
-# 对外头文件只有两个：纯 C 头 + header-only C++ 包装。C++ 内部实现头（capi/src/*.h）
-# 不装——它们是「C++ → C 的转换层」的私有实现，不是交付面。
+# 对外头文件：纯 C 头 + header-only C++ 包装（CallEngineTypes.hpp 是它拆出来的值类型，被它 include）。
+# C++ 内部实现头（capi/src/*.h）不装——它们是「C++ → C 的转换层」的私有实现，不是交付面。
 install(FILES
   include/imrtc/imrtc_c.h
   include/imrtc/CallEngine.hpp
+  include/imrtc/CallEngineTypes.hpp
   DESTINATION include/imrtc)
 
 # LICENSE（MIT，仓根 LICENSE 文件，2026-09-16 用户拍板）装到发布包根目录——

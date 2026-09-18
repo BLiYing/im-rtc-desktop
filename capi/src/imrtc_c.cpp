@@ -180,6 +180,14 @@ std::int32_t imrtc_v1_update_token(imrtc_v1_engine* engine, const char* token) {
   return guard(engine, [token](CallEngine& target) { target.updateToken(cstr(token)); });
 }
 
+std::int32_t imrtc_v1_set_app_foreground(imrtc_v1_engine* engine, imrtc_v1_bool foreground) {
+  return guard(engine, [foreground](CallEngine& target) { target.setAppForeground(foreground != 0); });
+}
+
+std::int32_t imrtc_v1_notify_network_changed(imrtc_v1_engine* engine) {
+  return guard(engine, [](CallEngine& target) { target.notifyNetworkChanged(); });
+}
+
 std::int32_t imrtc_v1_call(imrtc_v1_engine* engine, const char* const* callee_ids,
                            std::uint32_t callee_count, const char* media_type,
                            imrtc_v1_bool is_group, imrtc_v1_result_cb cb, void* user_data) {
