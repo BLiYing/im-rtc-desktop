@@ -40,7 +40,11 @@ MachineInput toInput(const Json& step) {
     return MachineInput::recv(text(*recv, "type"), data == nullptr ? Json::makeObject() : *data);
   }
   if (const Json* internal = step.find("internal")) {
-    return MachineInput::internal(internal->asString());
+    // args 是 internal 步骤的可选字段（缺省空对象），与 act/recv 不同的是它跟
+    // "internal" 平级，不是嵌套在里面——publish_deferred 那三条用例要靠它带 cid/kind/
+    // source/simulcast（room_fsm.json 的 publish_unanswered_is_deferred_and_replayed_after_resume）。
+    const Json* args = step.find("args");
+    return MachineInput::internal(internal->asString(), args == nullptr ? Json::makeObject() : *args);
   }
   imtest::fail("room_fsm.json", "一步里必须有 act / recv / internal 之一");
 }

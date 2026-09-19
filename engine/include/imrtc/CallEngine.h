@@ -335,8 +335,12 @@ private:
   /** failLocally 把「这一帧确实没成」交给调用方（或报 onError），并让状态机收场。 */
   void failLocally(const std::string& type, const Json& data, std::int32_t code,
                    const std::shared_ptr<Settlement>& settlement = nullptr);
-  /** rollback 把「这一帧没成」翻译成状态机认识的内部事件。 */
-  void rollback(const std::string& type, const Json& data);
+  /**
+   * rollback 把「这一帧没成」翻译成状态机认识的内部事件。
+   * `code` 只有 `room.publish` 用得上——没等到应答（`isUnansweredCode`）与被服务端
+   * 真拒了走的是两条不同的路（挂起等重连 vs 判死），见 .cpp 的长注释。
+   */
+  void rollback(const std::string& type, const Json& data, std::int32_t code);
   std::shared_ptr<CallEngineObserver> observer() const { return observer_.lock(); }
 
   CallEngineOptions options_;

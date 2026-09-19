@@ -60,6 +60,20 @@ bool isExitFrame(const std::string& type) {
   return type == frame::kCallHangup || type == frame::kCallReject || type == frame::kCallCancel;
 }
 
+/**
+ * isUnansweredCode：这一问**没能送到 / 没等到回话**的那几个码——不是服务端的答复。
+ *
+ * 与它们相对的是服务端真回了一个 `err`（1xxx）：那才叫被拒，重试救不回来。
+ * 这三个只说明本端与服务端此刻不通（网络不可达 / 请求超时 / 连接都没有），
+ * 而连接回来之后同一问多半就成了——`room.publish` 撞上这几个码时走
+ * `publish_deferred` 挂起等重连，而不是把整条轨道或整通电话判死（见 `rollback`）。
+ */
+bool isUnansweredCode(std::int32_t code) {
+  return code == codeValue(ErrorCode::NetworkUnreachable) ||
+         code == codeValue(ErrorCode::SignalingTimeout) ||
+         code == codeValue(ErrorCode::NotLoggedIn);
+}
+
 ActionResult failureOf(std::int32_t code, const std::string& forType) {
   return ActionResult{code, errorName(code), forType, ""};
 }
@@ -276,9 +290,17 @@ void CallEngine::onRequestFailed(const std::string& type, const Json& data,
     两个例外：
     - **调用方要拿到结果**（2003）：那一帧的成败确实不知道了，调用方不能永远等下去。
     - **退出类照样本地收场**（D2）：用户按的是「结束」，断线不该让界面停在通话里。
+
+    **`room.publish` 也要走 rollback（2026-09-18 加）**：不是为了立刻判死，是为了把
+    `publishing` 记账摘下来塞进缓存——不摘的话它就悬在半空，`disconnected` 随后把房间
+    推进 `reconnecting`，`resumeRoom` 却找不到任何东西可重放，这条轨道永远等不到
+    `publish.ok`。摘不摘、要不要顺手判死整通电话，由 `rollback` 按错误码分（见那边的
+    长注释）；这里只负责别漏调它。
   */
   if (result.errorCode == codeValue(ErrorCode::NetworkUnreachable)) {
-    if (isExitFrame(type) || type == frame::kRoomLeave) rollback(type, data);
+    if (isExitFrame(type) || type == frame::kRoomLeave || type == frame::kRoomPublish) {
+      rollback(type, data, result.errorCode);
+    }
     if (hasCaller) settleFailure(settlement, failure);
     return;
   }
@@ -291,16 +313,16 @@ void CallEngine::failLocally(const std::string& type, const Json& data, std::int
   const ActionResult failure = failureOf(code, type);
   if (settlement && settlement->done && !settlement->delivered) {
     // 有调用方：先让状态机收场（onCallEnd / onRoomLeft 照发），结果排在这些事件之后。
-    rollback(type, data);
+    rollback(type, data, code);
     settleFailure(settlement, failure);
     return;
   }
   // 找不到调用方：onError 在前、收场事件在后，与 2.0.0 之前同序。
   settleFailure(settlement, failure);
-  rollback(type, data);
+  rollback(type, data, code);
 }
 
-void CallEngine::rollback(const std::string& type, const Json& data) {
+void CallEngine::rollback(const std::string& type, const Json& data, std::int32_t code) {
   /*
     几个帧的失败必须让状态机退回 idle，否则界面永远收不了场：
 
@@ -323,14 +345,23 @@ void CallEngine::rollback(const std::string& type, const Json& data) {
     **请求超时（2004）走的也是这条路**——十秒没应答，那通电话确实没建起来。
 
     这条推理漏了一维——**有没有在推流**（静默失败审计 §A）：`room.publish` /
-    `room.subscribe` 被拒（或没送到）原先谁都不认，那条轨道永远停在 publishing /
-    subscribing：`.ok` 不会来，上行从未协商、下行订阅永久悬空，界面显示已接通、
-    对方全程听不见看不见，零提示。
-    - `room.publish` 通话里（`call.state != idle`）被拒：直接强制收场整通电话，
-      reason=error——留在通话里只报错也救不回来，服务端会拒的几种情形（房间没了、
-      重复发布、请求超时）重试也没用。复用 `call_failed` 的合成路径（CallMachine.cpp
-      按此刻状态挑该发的结束帧，含 call.hangup）。
-      没有通话（会议房）时只摘掉那条 publishing 记账，不收场、不额外抛回调。
+    `room.subscribe` 被拒原先谁都不认，那条轨道永远停在 publishing / subscribing：
+    `.ok` 不会来，上行从未协商、下行订阅永久悬空，界面显示已接通、对方全程听不见
+    看不见，零提示。
+    - `room.publish` **没等到应答**（2003 网络不可达 / 2004 请求超时 / 2007 未登录，
+      `isUnansweredCode`）：不是服务端的答复，只说明这一问没能送到，连接回来之后
+      多半就成了——发 `publish_deferred`，房间机把 `publishing` 摘下来塞进缓存，
+      `resumeRoom` 回到 joined 时原路重放（`RoomMachine.cpp` 的 `deferPublish`）。
+      通话与会议房**同一条路**，不再按 `call.state` 分叉：
+      2026-09-18 真机撞的正是老逻辑——`room.publish` 超时被判成 reason=error 强制
+      收场整通电话，而 9 秒后连接就回来、会话也在恢复窗口内 resume 成功了，
+      本来能接着打的一通被自己判了死刑。真连不回来的话 `session_unrecoverable`
+      那条 80 秒倒计时（`ConnectionTest.cpp`）照样会把通话收场，这里不需要抢在它前面。
+    - `room.publish` 被**服务端真拒了**（1xxx，房间没了、重复发布…重试救不回来）：
+      通话里（`call.state != idle`）直接强制收场整通电话，reason=error——留在通话里
+      只报错也救不回来，对方全程听不见看不见。复用 `call_failed` 的合成路径
+      （CallMachine.cpp 按此刻状态挑该发的结束帧，含 call.hangup）。没有通话（会议房）
+      时只摘掉那条 publishing 记账，不收场、不额外抛回调。
     - `room.subscribe` 被拒只摘记账，不收场：最常见的 1301 是订阅与对方停推赛跑输了，
       通话本身没事——留着不摘的话不变量 R3 会把之后每次重订都当成换层，
       再也发不出 room.subscribe。
@@ -347,7 +378,10 @@ void CallEngine::rollback(const std::string& type, const Json& data) {
     // 这一帧只可能是宿主要离房才发的，没有通话时照样本地收场。
     if (context_.room.state != RoomState::Idle && context_.call.state == CallState::Idle) endLocally();
   } else if (type == frame::kRoomPublish) {
-    if (context_.call.state != CallState::Idle) {
+    if (isUnansweredCode(code)) {
+      log(LogLevel::Warn, "发布没等到应答，挂起等重连", {{logfield::kCallId, context_.call.callId}});
+      apply(MachineInput::internal("publish_deferred", data), "");
+    } else if (context_.call.state != CallState::Idle) {
       log(LogLevel::Warn, "发布被拒，结束本端通话", {{logfield::kCallId, context_.call.callId}});
       apply(MachineInput::internal("call_failed"), "");
     } else {

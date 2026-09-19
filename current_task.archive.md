@@ -1229,3 +1229,25 @@ Kit 选人页（M2，桌面没有 Kit，本产品设计已注明不适用）。*
 - `0397c97` **`forceEnd`**：C++ `CallEngine::forceEnd()` + C ABI `imrtc_v1_force_end`（导出 33→34）；idle 下迟到 `invite.ok` / `connected` 补发 cancel / hangup、迟到 `room.join.ok` 补发 leave（原先会被搭成 joined）；时长从本端 onCallBegin 算。
 - `c57b492` 收 `call.ringing` 抛 `onUserRinging`，`imrtc_v1_observer` 尾部追加 `on_user_ringing`（旧 struct_size 照旧可用）。
 - **整体状态**：P5 C ABI + Qt Demo 已交付。**媒体推迟、纯信令模式**：能拨号、进房、收全部状态回调，没有声音和画面。**Windows 一次都没编译过**。
+
+**2026-09-18 晚：回前台 / 网络变化立即重连（五端对齐，CLIENT_PARITY `[^netchange]`）。** `test.sh` 全绿 164 例（ASan 同绿），只 macOS。
+- 引擎 `Connection::appForeground` / `networkChanged`（`engine/src/signaling/ConnectionNudge.cpp`）：正等着重连的**下一个 tick** 就连、退避归零；
+  连着的发 ping 探 3 s，到期没下行就走心跳判死同一条路；正在连的失败后不走退避；两次至少隔 2 s。**不在关闭回调里同步 connect**（会析构正在回调的 Transport）。
+- C ABI 追加 `imrtc_v1_set_app_foreground` / `imrtc_v1_notify_network_changed`（导出 34 → 36），包装头同名方法；
+  包装头贴线，值类型拆进 `capi/include/imrtc/CallEngineTypes.hpp`（install / package.sh / 接入指南已跟上）。
+- Qt Demo `EngineBridge::watchSystemSignals`：`applicationStateChanged` → 回前台，`QNetworkInformation` 上线 / 换介质 → 网络变化。Demo 编过，**没手点**。
+- 桌面上「回前台」= App 重新激活；**睡眠唤醒没有专门的信号**，要用户点回来才触发，否则靠心跳。
+
+**2026-09-18 凌晨：会议房 M2 的协议那一份已做完并提交（server `docs/design/MEETING_ROOM_DESIGN.md` §6 表里「desktop 跟协议版本、`auto_subscribe`、收帧上限」那一行）。`test.sh` 八步全绿（152 例），只 macOS。**
+- 协议 2：`sys.hello` 的 `protocol_version` 默认值 1 → 2；收帧上限拆成两个数（发仍 `kMaxFrameBytes` 64 KiB，收按 `kMaxReceivedFrameBytes` 256 KiB）。
+- `room.join.auto_subscribe` 布尔 → 三档字符串 `all | audio | none`（`autoSubscribeModes()`，兜底 `all`）；`RoomContext::autoSubscribe` 跟着从 `bool` 变 `std::string`。
+- **比原计划多做了一件**：`engine/src/state/RoomPaging.cpp` 的按页订阅翻译。桌面端本期没有会议界面，但这套翻译在引擎里必须有——五端跑同一份 `room_fsm.json`，新增的 `meeting_audio_auto_video_by_page` 那一组不实现就红；而且少了它，`audio` 档的房间里 `setRemoteLayer` 会对一条根本没订阅的流发换层帧，服务端回 1301、画面永远不来。
+- 五秒迟滞按**桌面的做法**走：`CallEngine` 记截止时刻，`tick()` 到点喂内部事件（与 `Heartbeat` 同一套「不持有定时器」）。
+- 新测 `tests/RoomPagingTest.cpp` 6 例（16 路上限、翻回来撤迟滞、通话房护栏都在里面）。
+- **没做**：会议分页画廊的界面（跟随桌面 UI 排期）；Windows 侧照旧一次都没编译过。
+
+**2026-09-17 夜：「调用结果回给调用方」（server `docs/design/ACTION_RESULT_DESIGN.md` → 2.0.0）已改完，未提交，等 code-review。** `test.sh` 八步全绿（146 例，ASan 同绿），只 macOS。
+- C ABI 按 D4 **原地改** 11 个发起类函数签名，末尾 `imrtc_v1_result_cb cb, void* user_data`（cb 为 NULL 失败退回 `on_error`）；导出仍 34 个。C++ 包装加 `std::function<void(Result<T>)> done`。
+- 引擎：状态机本地拒绝改成输出里的 `reject`；发帧 / 结算 / 回滚 / 本地收场挪到 `engine/src/CallEngineRequests.cpp`；补上 accept / join 被拒回 idle。
+- 与 Web 的出入（记在 CLIENT_PARITY `[^actionresult]`）：等应答时断线只回 2003、不回滚发起类；destroy 后调用是未定义行为，改为 destroy 时悬着的结果回 2005。
+- 整体状态不变：**媒体推迟、纯信令模式**；**Windows 一次都没编译过**。`forceEnd` / `onUserRinging`（`0397c97` / `c57b492`）已推送。

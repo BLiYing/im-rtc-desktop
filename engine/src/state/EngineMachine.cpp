@@ -32,16 +32,21 @@ bool isRoomAct(const std::string& op) {
 /**
  * isRoomInternal 认出**只归房间机**的内部事件。
  *
- * 前四条是 `CallEngine::failLocally` 把「房间帧没送到」翻译过来的回滚
- * （静默失败审计 §A 加了 publish_failed / subscribe_failed 两条）；
- * 最后一条是会议房翻页退订的五秒迟滞到点（RoomPaging.h）。
- * **不显式路由的话它们会落到通话机去，被静默丢掉**——症状分别是
- * 「房间永远停在 joining」和「翻走的人五秒后没退订，订阅位一直占着」。
+ * 前四条是 `CallEngine::rollback` 把「房间帧没送到 / 被拒」翻译过来的回滚
+ * （静默失败审计 §A 加了 publish_failed / subscribe_failed 两条）；`publish_deferred`
+ * （发布没等到应答、挂起等重连，2026-09-18 加）同样只归房间机；最后一条是会议房
+ * 翻页退订的五秒迟滞到点（RoomPaging.h）。
+ *
+ * **不显式路由的话它们会落到通话机去，被静默丢掉**——症状分别是「房间永远停在
+ * joining」「翻走的人五秒后没退订，订阅位一直占着」。`publish_deferred` 漏了的症状
+ * 最隐蔽：`CallEngine::rollback` 发得出去、房间机的 `deferPublish` 也认，唯独这张表
+ * 没登记，于是「挂起 → 恢复后补发」全程看起来都对，实际上那条 publish 记账原地悬空、
+ * 从没被摘掉过——这条表就是防这一类静默漏接的唯一闸门，加内部事件时务必同步改这里。
  */
 bool isRoomInternal(const std::string& name) {
-  static const std::vector<std::string> kNames = {"join_failed", "leave_failed", "publish_failed",
-                                                  "subscribe_failed",
-                                                  "unsubscribe_hysteresis_elapsed"};
+  static const std::vector<std::string> kNames = {
+      "join_failed",  "leave_failed",  "publish_failed",
+      "publish_deferred", "subscribe_failed", "unsubscribe_hysteresis_elapsed"};
   return std::find(kNames.begin(), kNames.end(), name) != kNames.end();
 }
 

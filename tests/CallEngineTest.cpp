@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "EngineHarness.h"
+#include "FakeMediaAdapter.h"
 #include "FakeTransport.h"
 #include "TestHarness.h"
 #include "Vectors.h"
@@ -392,6 +393,146 @@ IMRTC_TEST(engineSetRemoteLayerDropsUnknownUid,
   const std::size_t before = harness.net.current().sent.size();
   harness.engine->setRemoteLayer("bob", "h");
   CHECK_EQ(harness.net.current().sent.size(), before, "一帧都不该发");
+}
+
+/**
+ * MediaHarness 是这两条 publish_deferred 用例专用的假宿主：媒体面接上
+ * `FakeMediaAdapter`，让「进房/接通就自动发布麦克风轨」这条真实链路跑起来——
+ * publish_deferred 只有在这条链路上才测得出来，纯信令模式下没有人会发 room.publish。
+ * 复用 `enginetest::Recorder` 拿回调日志。桌面端还没有真实 libwebrtc 适配器
+ * （P5 第四刀），媒体面照 MediaPlaneTest.cpp 的先例用假的。
+ */
+struct MediaHarness {
+  imtest::FakeNet net;
+  std::shared_ptr<imtest::FakeMediaAdapter> media = std::make_shared<imtest::FakeMediaAdapter>();
+  std::shared_ptr<enginetest::Recorder> recorder = std::make_shared<enginetest::Recorder>();
+  std::int64_t now = enginetest::kT0;
+  std::unique_ptr<CallEngine> engine;
+
+  MediaHarness() {
+    CallEngineOptions options;
+    options.url = "wss://rtc.example.com/v1/ws";
+    options.deviceId = "mac-8f3a";
+    options.transportFactory = net.factory();
+    options.random = []() { return 0.5; };
+    options.clock = [this]() { return now; };
+    options.mediaAdapter = media;
+    engine.reset(new CallEngine(options));
+    engine->setObserver(recorder);
+  }
+
+  std::string lastReqId() { return imtest::field(imtest::lastSent(net.current()), "req_id"); }
+  void reply(const std::string& type, Json data) {
+    net.deliver(imtest::replyFrame(type, lastReqId(), std::move(data)));
+  }
+  void event(const std::string& type, Json data) {
+    net.deliver(imtest::replyFrame(type, "", std::move(data)));
+  }
+  /**
+   * findSent 找**当前 socket** 上最后一条某类型的帧。
+   *
+   * resume 成功之后 `renegotiateAfterResume()` 会紧跟着补一条 `room.offer`
+   * （恢复后重协商，与 publish 重放无关），所以不能拿 `lastSent` 断言重发的
+   * `room.publish`——它已经不是这个 socket 上最后一帧了。
+   */
+  Json findSent(const std::string& type) {
+    for (auto it = net.current().sent.rbegin(); it != net.current().sent.rend(); ++it) {
+      const Json frame = Json::parse(*it);
+      if (imtest::field(frame, "type") == type) return frame;
+    }
+    imtest::fail("MediaHarness::findSent", "线路上没有 " + type);
+  }
+  void login() {
+    engine->login("tk-1");
+    net.open();
+    reply(imrtc::okType(imrtc::frame::kHello), imtest::helloOkData("s-1", false));
+  }
+  /** reconnectResumed 把退避推到点、开新 socket、握手 resumed=true——两条用例共用的尾段。 */
+  void reconnectResumed() {
+    now = enginetest::kT0 + 1000;
+    engine->tick();
+    net.open();
+    reply(imrtc::okType(imrtc::frame::kHello), imtest::helloOkData("s-1", true));
+  }
+};
+
+IMRTC_TEST(enginePublishDeferredReplayedAfterResumeInMeeting,
+           "CallEngine —— 会议房 room.publish 没等到应答：断线挂起，resume 后新连接上重发同一 "
+           "cid，房间不散（静默失败审计 §A / 2026-09-18）") {
+  /*
+    **回归**：修之前会议房里 room.publish 的任何失败（含没等到应答的 2003/2004/2007）
+    都直接摘掉 publishing、不重试、不通知宿主——信令抖一下用户就静音，界面上
+    什么都看不出。这条钉住「没等到应答」要挂起等重连，而不是当场判死那条 cid。
+  */
+  MediaHarness h;
+  h.login();
+  h.engine->joinRoom("r-1", "tk");
+  h.reply(imrtc::okType(imrtc::frame::kRoomJoin),
+          Json::parse("{\"room_id\":\"r-1\",\"room_kind\":\"meeting\","
+                      "\"participant_id\":\"p-1\",\"participants\":[],\"tracks\":[]}"));
+
+  CHECK_EQ(h.media->callCount("acquireMicrophone"), 1, "进会议房该自动采麦克风");
+  const Json firstPublish = imtest::lastSent(h.net.current());
+  CHECK_EQ(imtest::field(firstPublish, "type"), std::string("room.publish"), "自动发布麦克风轨");
+  CHECK_EQ(imtest::field(firstPublish, "cid"), std::string("local-mic-1"), "cid");
+  CHECK_EQ(h.engine->roomState(), RoomState::Joined, "此刻已经在房里");
+
+  // 这条 room.publish 还没等到应答（10 秒超时 / 服务端拒绝都没到）就断线了。
+  h.net.remoteClose(imrtc::closecode::kGoingAway, "network");
+  CHECK_EQ(h.engine->roomState(), RoomState::Reconnecting, "断线进 reconnecting，房间没被判死");
+  for (const std::string& entry : h.recorder->log) {
+    CHECK_TRUE(entry.rfind("roomLeft", 0) != 0, "没等到应答不该收场，onRoomLeft 不许抛");
+  }
+
+  h.reconnectResumed();
+
+  CHECK_EQ(h.engine->roomState(), RoomState::Joined, "恢复窗口内 resume，房间回到 joined");
+  const Json replayed = h.findSent(imrtc::frame::kRoomPublish);
+  CHECK_EQ(imtest::field(replayed, "cid"), std::string("local-mic-1"), "新连接上要重发同一路 cid");
+  CHECK_EQ(h.media->callCount("acquireMicrophone"), 1, "重放走的是状态机 reduceRoomAct，不会再问媒体层要一次轨道");
+}
+
+IMRTC_TEST(enginePublishDeferredReplayedAfterResumeInCall,
+           "CallEngine —— 通话中 room.publish 没等到应答：断线挂起，resume 后重发同一 cid，"
+           "通话没被判死（2026-09-18 真机：9 秒后就 resume 成功了）") {
+  /*
+    **回归**：修之前通话里 room.publish 的任何失败都直接 forceEnd 整通电话，
+    reason=error，不分「服务端拒了」与「没等到应答」。真机 18:18:39 room.publish
+    超时、整通被判成 error 收场，而 18:18:48 连接就在恢复窗口内 resume 成功——
+    本来能接着打的一通被自己判了死刑。
+  */
+  MediaHarness h;
+  h.login();
+  h.engine->call({"bob"}, "audio", false);
+  h.reply(imrtc::okType(imrtc::frame::kCallInvite),
+          Json::parse("{\"call_id\":\"call-1\",\"room_id\":\"r-1\"}"));
+  h.event(imrtc::frame::kCallConnected,
+          Json::parse("{\"call_id\":\"call-1\",\"room_id\":\"r-1\",\"room_token\":\"tk\","
+                      "\"media_type\":\"audio\",\"connected_at_ms\":1756876800000,"
+                      "\"accepted_by\":\"bob\"}"));
+  h.reply(imrtc::okType(imrtc::frame::kRoomJoin),
+          Json::parse("{\"room_id\":\"r-1\",\"room_kind\":\"call_1v1\","
+                      "\"participant_id\":\"p-1\",\"participants\":[],\"tracks\":[]}"));
+
+  CHECK_EQ(h.media->callCount("acquireMicrophone"), 1, "接通后该自动采麦克风");
+  const Json firstPublish = imtest::lastSent(h.net.current());
+  CHECK_EQ(imtest::field(firstPublish, "type"), std::string("room.publish"), "自动发布麦克风轨");
+  CHECK_EQ(imtest::field(firstPublish, "cid"), std::string("local-mic-1"), "cid");
+  CHECK_EQ(h.engine->callState(), CallState::Connecting, "媒体还没就绪，没到 connected");
+
+  h.net.remoteClose(imrtc::closecode::kGoingAway, "network");
+  CHECK_EQ(h.engine->callState(), CallState::Connecting, "断线不该让通话被判死");
+  CHECK_EQ(h.engine->roomState(), RoomState::Reconnecting, "房间随断线进 reconnecting");
+  for (const std::string& entry : h.recorder->log) {
+    CHECK_TRUE(entry.rfind("callEnd", 0) != 0, "没等到应答不该 forceEnd，通话不许被收场");
+  }
+
+  h.reconnectResumed();
+
+  CHECK_EQ(h.engine->callState(), CallState::Connecting, "resume 成功，通话还在，等媒体就绪");
+  CHECK_EQ(h.engine->roomState(), RoomState::Joined, "房间也回到 joined");
+  const Json replayed = h.findSent(imrtc::frame::kRoomPublish);
+  CHECK_EQ(imtest::field(replayed, "cid"), std::string("local-mic-1"), "新连接上要重发同一路 cid");
 }
 
 IMRTC_TEST(engineCallbackCoverage, "CallEngine —— 两台状态机能抛的每一个回调名，映射表里都有人接") {

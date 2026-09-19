@@ -151,19 +151,49 @@ RoomOutput bufferIntent(const RoomContext& ctx, const std::string& op, const Jso
 }
 
 /**
- * dropFailedPublish：`room.publish` 被拒（或没送到）时把那条 `publishing` 摘掉
- * （静默失败审计 §A）。
+ * dropFailedPublish：`room.publish` 被**服务端真拒了**时把那条 `publishing` 摘掉
+ * （静默失败审计 §A）。没送到（超时 / 断线 / 未登录）不走这里，走 `deferPublish`。
  *
  * 不摘的话它永远停在 `publishing`：`publish.ok` 不会来，pub offer 永远不产出。
- * **通话里走不到这里**——`CallEngine::failLocally` 直接把整通强制收场（reason=error），
+ * **通话里走不到这里**——`CallEngine::rollback` 直接把整通强制收场（reason=error），
  * 因为推不上去的那一端对方全程听不见看不见，留在通话里只是一块撒谎的界面。
- * 这里只管没有通话的会议房。错误本身在 `failLocally` 里已经抛过了，这里不再重复抛。
+ * 这里只管没有通话的会议房。错误本身在 `rollback` 里已经抛过了，这里不再重复抛。
  */
 RoomOutput dropFailedPublish(const RoomContext& ctx, const std::string& cid) {
   const auto it = ctx.publish.find(cid);
   if (it == ctx.publish.end() || it->second != "publishing") return roomOut(ctx);
   RoomContext next = ctx;
   next.publish.erase(cid);
+  return roomOut(next);
+}
+
+/**
+ * deferPublish：`room.publish` **没等到应答**（2003 网络不可达 / 2004 请求超时 /
+ * 2007 未登录，`CallEngine::isUnansweredCode`）时把这一路挂起来等重连，而不是像
+ * `dropFailedPublish` 那样直接丢掉。
+ *
+ * 与 `dropFailedPublish` 的分别只有一条，但这条是根本的：**服务端拒了**是个答复，
+ * 重试救不回来（房间没了、重复发布），该收场；**没等到应答**根本不是答复，只说明
+ * 「这一问没能送到」，连接回来之后同一问多半就成了。
+ *
+ * 2026-09-18 真机撞的正是后者：`room.publish` 超时被旧逻辑判成 reason=error 强制
+ * 收场了整通电话，而 **9 秒后连接就回来、会话也在恢复窗口内 resume 成功了**——
+ * 本来能接着打的一通，被自己判了死刑。摘掉 `publishing` 之后把同一个意图塞回
+ * `buffered`：`resumeRoom` 回到 `joined` 时 `replayBuffered` 会原路重走一遍
+ * （**走 `reduceRoomAct`，不是补发旧帧**，所以状态与帧永远一致）。重连一直不成功的话，
+ * `session_unrecoverable` 那条 80 秒倒计时（`ConnectionTest.cpp`）照样会把通话收场——
+ * 这里只是不再抢在它前面下手。
+ *
+ * **只认 publishing**：迟到的超时不能把一条已经成功的发布（`published`）摘掉、
+ * 也不能排进重放队列，否则恢复后会重复发布，被服务端拒成重复发布。
+ */
+RoomOutput deferPublish(const RoomContext& ctx, const Json& args) {
+  const std::string cid = str(args, "cid");
+  const auto it = ctx.publish.find(cid);
+  if (it == ctx.publish.end() || it->second != "publishing") return roomOut(ctx);
+  RoomContext next = ctx;
+  next.publish.erase(cid);
+  next.buffered.push_back(BufferedIntent{"publish", args});
   return roomOut(next);
 }
 
@@ -237,6 +267,7 @@ RoomOutput reduceRoomInternal(const RoomContext& ctx, const std::string& name, c
                    {eventOf("onRoomLeft", obj({{"room_id", Json::make(ctx.roomId)}}))});
   }
   if (name == "publish_failed") return dropFailedPublish(ctx, str(args, "cid"));
+  if (name == "publish_deferred") return deferPublish(ctx, args);
   if (name == "subscribe_failed") return dropFailedSubscribe(ctx, str(args, "track_id"));
   if (name == "unsubscribe_hysteresis_elapsed") {
     // 翻页退订的五秒到了。带 track_id 就只退那一条（tick 按 track 记截止时刻），
