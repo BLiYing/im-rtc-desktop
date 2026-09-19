@@ -70,7 +70,16 @@ void IxHttpClient::get(const std::string& url, const std::string& bearerToken, s
 
 void IxHttpClient::enqueue(HttpCompletion done, HttpResponse response) {
   std::lock_guard<std::mutex> guard(mutex_);
-  if (queue_.size() >= kMaxQueuedResults) queue_.pop_front();
+  if (queue_.size() >= kMaxQueuedResults) {
+    // 不能丢掉整条：回调一旦不触发，引擎那头的挂起记录要到析构才收场。
+    // 只把最老那条改成失败并释放应答体，回调照样会在 poll() 里跑到。
+    for (auto& item : queue_) {
+      if (!item.second.error.empty()) continue;
+      item.second = HttpResponse();
+      item.second.error = "result queue overflow";
+      break;
+    }
+  }
   queue_.emplace_back(std::move(done), std::move(response));
 }
 

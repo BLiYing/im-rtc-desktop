@@ -224,6 +224,23 @@ IMRTC_TEST(callHistoryNetworkAndAuthErrors, "通话记录 —— 网络错误 20
   CHECK_EQ(denied.result.code, 1101, "票被拒");
 }
 
+IMRTC_TEST(callHistoryLoginRejected, "通话记录 —— 登录被拒后回 2007，不拿被拒的票发请求") {
+  auto http = std::make_shared<HttpState>();
+  Harness h("mac-8f3a", factoryOf(http));
+  std::int32_t loginCode = 0;
+  h.engine->login("tk-bad", [&loginCode](const imrtc::ActionResult& r) { loginCode = r.code; });
+  h.net.open();
+  h.reply(imrtc::frame::kError,
+          enginetest::Json::parse("{\"code\":1101,\"name\":\"token_invalid\",\"msg\":\"token invalid\","
+                      "\"for_type\":\"sys.hello\",\"retryable\":false}"));
+  CHECK_EQ(loginCode, std::int32_t{1101}, "登录被拒");
+
+  Captured got;
+  h.engine->fetchCallHistory(20, 0, got.sink());
+  CHECK_EQ(got.result.code, 2007, "没登录");
+  CHECK_TRUE(http->requests.empty(), "没发请求");
+}
+
 IMRTC_TEST(callHistoryDestroyedWhilePending, "通话记录 —— 引擎析构时还没回来的查询回 2005") {
   auto http = std::make_shared<HttpState>();
   Captured got;

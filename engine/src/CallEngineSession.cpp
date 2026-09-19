@@ -95,6 +95,8 @@ void CallEngine::login(const std::string& token, ActionCompletion done) {
     lastDisconnectCode_ = code;
     lastDisconnectWillReconnect_ = willReconnect;
     // 首次握手之前连接就断了：login 回 2003（握手被拒的那条已经在 onError 里结算过）。
+    // 这张票没换到会话，别留着——否则 fetchCallHistory 会拿它去撞 401，而不是回 2007。
+    if (loginSettlement_) ticket_.clear();
     settleLogin(ActionResult{codeValue(ErrorCode::NetworkUnreachable),
                              errorName(codeValue(ErrorCode::NetworkUnreachable)), frame::kHello, ""});
     // ws_closed_4403 会抛 onKickedOut + onDisconnected 并把一切清空；
@@ -108,6 +110,7 @@ void CallEngine::login(const std::string& token, ActionCompletion done) {
     if (tearingDown_) return;
     // 首次握手被拒：这是 login 这次调用的结果，交给调用方（没传回调时 settleLogin 退回 onError）。
     if (loginSettlement_ && forType == frame::kHello) {
+      ticket_.clear();  // 票被拒，同上：fetchCallHistory 应回 2007
       settleLogin(ActionResult{code, name, forType, ""});
       return;
     }
