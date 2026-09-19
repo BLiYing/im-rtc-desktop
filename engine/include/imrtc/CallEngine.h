@@ -9,9 +9,11 @@
 #include <vector>
 
 #include "imrtc/ActionResult.h"
+#include "imrtc/CallHistory.h"
 #include "imrtc/CallEngineObserver.h"
 #include "imrtc/Connection.h"
 #include "imrtc/EngineMachine.h"
+#include "imrtc/HttpClient.h"
 #include "imrtc/MediaAdapter.h"
 #include "imrtc/MediaPlane.h"
 #include "imrtc/Transport.h"
@@ -52,6 +54,11 @@ struct CallEngineOptions {
   std::int64_t requestTimeoutMs = 10000;
   /** 必填：造 Transport 的工厂。engine 不认识任何具体的 WS 库。 */
   TransportFactory transportFactory;
+  /**
+   * 造 HttpClient 的工厂，只有 `fetchCallHistory`（通话记录，`GET /v1/calls`）用。
+   * **留空 = 不支持查记录**：`fetchCallHistory` 回 2005。engine 不认识任何具体的 HTTP 库。
+   */
+  HttpClientFactory httpClientFactory;
   /** 退避抖动的随机源。留空用默认实现。 */
   Random01 random;
   /** 单调时钟，驱动心跳/超时/退避。留空用 steadyClock；测试注入假的。 */
@@ -162,6 +169,18 @@ public:
    */
   void setAppForeground(bool foreground);
   void notifyNetworkChanged();
+
+  /**
+   * fetchCallHistory 查自己的通话记录，按发起时间倒序，**游标翻页**（`GET /v1/calls`）。
+   *
+   * `limit` 夹在 1..200，默认 20；`cursor` 首页传 0，下一页传上一页的 `nextCursor`，
+   * `hasNext == false` 表示到底。**必须已登录**（用登录那枚票，含 `updateToken` 换过的），
+   * 否则回 2007；票被拒 1101；网络不通 2003；其它失败 1501；没注入 HttpClient 回 2005。
+   * 服务端只返回本人参与过的通话，所以没有 uid 参数。宿主也可以不用它，自己拿 `onCallEnd` 存。
+   *
+   * 结果恰好回一次，在 `tick()` 里（本地就地拒绝时在返回之前）；引擎析构时还没回来的回 2005。
+   */
+  void fetchCallHistory(std::int64_t limit, std::int64_t cursor, CallHistoryCompletion done);
 
   /**
    * call 发起通话。1v1 恰好 1 个被叫；群 ≤8。成功回 `value = call_id`（取自 `call.invite.ok`）。
@@ -402,6 +421,13 @@ private:
   std::shared_ptr<Settlement> loginSettlement_;
   /** 当前登录的 uid（取自 sys.hello.ok），`call` / `inviteMore` 拦「名单里有自己」用。 */
   std::string uid_;
+  /** 当前在用的接入票（含 `updateToken` 换过的），logout 清空。给同一身份的 REST 调用（通话记录）用。 */
+  std::string ticket_;
+  /** 通话记录用的 HTTP 客户端，第一次查询时才造。 */
+  std::unique_ptr<HttpClient> http_;
+  /** 还没回来的通话记录查询（id → 结果回调）。析构时一律回 2005。 */
+  std::map<std::uint64_t, CallHistoryCompletion> historyPending_;
+  std::uint64_t historySeq_ = 0;
 };
 
 }  // namespace imrtc

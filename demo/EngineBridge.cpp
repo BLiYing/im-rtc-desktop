@@ -448,6 +448,13 @@ void EngineBridge::onRoomClosed(const std::string& roomId, const std::string& re
 
 /* ---- 转发动作 ---- */
 
+qint32 EngineBridge::fetchCallHistory(
+    int limit, qint64 cursor,
+    std::function<void(imrtc::capi::Result<imrtc::capi::CallHistoryPage>)> done) {
+  if (!engine_) return IMRTC_V1_ERR_INVALID_STATE;
+  return engine_->fetchCallHistory(limit, cursor, std::move(done)).code();
+}
+
 qint32 EngineBridge::startCall(const QStringList& calleeIds, const QString& mediaType,
                                bool isGroup) {
   if (!engine_) return IMRTC_V1_ERR_INVALID_STATE;

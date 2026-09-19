@@ -196,6 +196,28 @@ public:
       return imrtc_v1_login(handle_, token.c_str(), cb, ud);
     });
   }
+  /**
+   * fetchCallHistory 查自己的通话记录（`GET /v1/calls`），按发起时间倒序，游标翻页。
+   * `limit` 夹在 1..200；`cursor` 首页传 0，下一页传上一页的 `nextCursor`，`hasNext()` 为假就是到底。
+   * 必须已登录；只返回本人参与过的通话。`done` **必须传**（没有 onError 兜底）；没受理时就地收到同一个码。
+   * 见 imrtc_c.h 的 `imrtc_v1_call_history_cb`。
+   */
+  Error fetchCallHistory(std::int32_t limit, std::int64_t cursor,
+                         std::function<void(Result<CallHistoryPage>)> done) {
+    if (!done) return call(IMRTC_V1_ERR_BAD_PARAMS);
+    std::unique_ptr<PendingHistory> pending(new PendingHistory{std::move(done)});
+    const std::int32_t code =
+        imrtc_v1_fetch_call_history(handle_, limit, cursor, &Engine::cbHistory, pending.get());
+    if (code == IMRTC_V1_OK) {
+      static_cast<void>(pending.release());  // 所有权交给 C 那层，cbHistory 里删
+    } else {
+      Result<CallHistoryPage> result;
+      result.code = code;
+      result.name = imrtc_v1_error_name(code);
+      pending->fn(result);
+    }
+    return call(code);
+  }
   Error logout() { return call(imrtc_v1_logout(handle_)); }
   Error updateToken(const std::string& token) {
     return call(imrtc_v1_update_token(handle_, token.c_str()));
@@ -319,6 +341,42 @@ private:
   static void cbResult(void* u, std::int32_t code, const char* name, const char* value) {
     std::unique_ptr<PendingResult> pending(static_cast<PendingResult*>(u));
     if (pending && pending->fn) pending->fn(code, name, value);
+  }
+
+  /** PendingHistory 同 PendingResult：结果回来时自己删掉自己（恰好一次）。 */
+  struct PendingHistory { std::function<void(Result<CallHistoryPage>)> fn; };
+
+  static void cbHistory(void* u, std::int32_t code, const char* name,
+                        const imrtc_v1_call_record* records, std::uint32_t count,
+                        std::int64_t nextCursor) {
+    std::unique_ptr<PendingHistory> pending(static_cast<PendingHistory*>(u));
+    if (!pending || !pending->fn) return;
+    Result<CallHistoryPage> result;
+    result.code = code;
+    result.name = text(name);
+    result.value.nextCursor = nextCursor;
+    for (std::uint32_t i = 0; records != nullptr && i < count; ++i) {
+      const imrtc_v1_call_record& in = records[i];
+      CallHistoryRecord out;
+      out.callId = text(in.call_id);
+      out.roomId = text(in.room_id);
+      out.caller = text(in.caller);
+      out.mediaType = text(in.media_type);
+      out.isGroup = in.is_group != 0;
+      out.reason = text(in.reason);
+      out.endedBy = text(in.ended_by);
+      out.durationSec = in.duration_sec;
+      out.startedAtMs = in.started_at_ms;
+      out.connectedAtMs = in.connected_at_ms;
+      out.endedAtMs = in.ended_at_ms;
+      out.userData = text(in.user_data);
+      out.chatGroupId = text(in.chat_group_id);
+      for (std::uint32_t m = 0; in.members != nullptr && m < in.member_count; ++m) {
+        out.members.push_back(CallHistoryMember{text(in.members[m].uid), text(in.members[m].state)});
+      }
+      result.value.records.push_back(std::move(out));
+    }
+    pending->fn(result);
   }
 
   static void fillValue(Result<>&, const char*) {}

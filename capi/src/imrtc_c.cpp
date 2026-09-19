@@ -10,6 +10,7 @@
 #include "imrtc/CallEngine.h"
 #include "imrtc/Errors.h"
 #include "imrtc/Log.h"
+#include "imrtc/IxHttpClient.h"
 #include "imrtc/IxTransport.h"
 
 #include "CApiConvert.h"
@@ -37,6 +38,7 @@ using imrtc::capi_detail::fromLogLevel;
 using imrtc::capi_detail::isValidLayer;
 using imrtc::capi_detail::toBool;
 using imrtc::capi_detail::toCompletion;
+using imrtc::capi_detail::toHistoryCompletion;
 using imrtc::capi_detail::toLogLevel;
 using imrtc::capi_detail::toStrings;
 
@@ -107,6 +109,9 @@ std::int32_t imrtc_v1_engine_create(const imrtc_v1_options* options,
     if (options->request_timeout_ms > 0) engineOptions.requestTimeoutMs = options->request_timeout_ms;
     engineOptions.transportFactory = []() -> std::unique_ptr<imrtc::Transport> {
       return std::unique_ptr<imrtc::Transport>(new imrtc::IxTransport());
+    };
+    engineOptions.httpClientFactory = []() -> std::unique_ptr<imrtc::HttpClient> {
+      return std::unique_ptr<imrtc::HttpClient>(new imrtc::IxHttpClient());
     };
 
     std::unique_ptr<imrtc_v1_engine> handle(new imrtc_v1_engine());
@@ -186,6 +191,15 @@ std::int32_t imrtc_v1_set_app_foreground(imrtc_v1_engine* engine, imrtc_v1_bool 
 
 std::int32_t imrtc_v1_notify_network_changed(imrtc_v1_engine* engine) {
   return guard(engine, [](CallEngine& target) { target.notifyNetworkChanged(); });
+}
+
+std::int32_t imrtc_v1_fetch_call_history(imrtc_v1_engine* engine, std::int32_t limit,
+                                         std::int64_t cursor, imrtc_v1_call_history_cb cb,
+                                         void* user_data) {
+  if (cb == nullptr) return IMRTC_V1_ERR_BAD_PARAMS;
+  return guard(engine, [=](CallEngine& target) {
+    target.fetchCallHistory(limit, cursor, toHistoryCompletion(cb, user_data));
+  });
 }
 
 std::int32_t imrtc_v1_call(imrtc_v1_engine* engine, const char* const* callee_ids,

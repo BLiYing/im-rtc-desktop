@@ -12,7 +12,10 @@
  */
 
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QString>
+#include <QTimeZone>
+#include <functional>
 
 struct CallRecord;
 
@@ -27,7 +30,10 @@ QString duration(qint64 seconds);
  */
 QString callerEndText(const QString& reason);
 
-/** 通话记录里那一行摘要：呼出 · 03:21 / 未接来电 · 视频 / 群通话 · 6 人。 */
+/** 记录行第一行：1v1 是对方 uid（不知道就「（未知）」），群通话是「群通话 · N 人」（N 已含主叫）。 */
+QString recordTitle(const CallRecord& record);
+
+/** 记录行第二行（不含时间）：呼出 · 03:21 / 来电 · 12:40 / 未接来电 · 视频 / 呼出 · 已取消。群通话同一套。 */
 QString recordSummary(const CallRecord& record);
 
 /**
@@ -36,7 +42,16 @@ QString recordSummary(const CallRecord& record);
  */
 QString incomingInviteText(bool isVideo, bool isGroup);
 
-/** 记录行的时间列：今天显示 hh:mm，昨天显示「昨天」，更早显示 M月d日。 */
+/**
+ * 记录行的时间文案（四端统一）：按**发起时间**、`zone` 时区的自然日判断——
+ * 今天 `HH:mm`；昨天 `昨天 HH:mm`；今年更早 `M月d日 HH:mm`；往年 `yyyy年M月d日 HH:mm`。
+ * 记录时间不早于 `nowMs`（时钟偏差）按今天处理。时分由 `hourMinute` 出（生产用系统短时间格式，
+ * 测试传固定格式），本函数只管日期档位。纯函数。
+ */
+QString callTime(qint64 startedAtMs, qint64 nowMs, const QTimeZone& zone,
+                 const std::function<QString(const QDateTime&)>& hourMinute);
+
+/** 记录行右侧的时间列：`callTime` + 本地时区 + 系统 locale 的短时间格式。 */
 QString recordTimestamp(const CallRecord& record);
 
 }  // namespace callstrings

@@ -33,6 +33,7 @@
 #include <QObject>
 #include <QString>
 #include <QStringList>
+#include <functional>
 #include <memory>
 
 #include "imrtc/CallEngine.hpp"
@@ -97,6 +98,12 @@ public:
   qint32 inviteMore(const QStringList& calleeIds);
   qint32 joinRoom(const QString& roomId, const QString& roomToken);
   qint32 leaveRoom();
+  /**
+   * 查自己的通话记录（SDK 的 `fetchCallHistory`，游标翻页）。返回错误码，0 = 受理，
+   * 结果经 `done` 回来（GUI 线程，`tick()` 里）；非 0 = 根本没受理，`done` 不会再被调。
+   */
+  qint32 fetchCallHistory(int limit, qint64 cursor,
+                          std::function<void(imrtc::capi::Result<imrtc::capi::CallHistoryPage>)> done);
   /**
    * 渲染路径 A（设计 §8.3）：把某个 uid 的远端画面挂到宿主的原生窗口上。
    * macOS 传 `NSView*`、Windows 传 `HWND`；**传 nullptr 卸载**。

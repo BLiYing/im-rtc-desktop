@@ -55,6 +55,7 @@ CallRecord record(const QString& peer, bool outgoing, bool connected, const QStr
   r.reason = reason;
   r.durationSec = duration;
   r.endedAt = QDateTime::currentDateTime().addSecs(-60 * minutesAgo);
+  r.startedAt = r.endedAt.addSecs(-r.durationSec);
   return r;
 }
 
@@ -99,22 +100,19 @@ int main(int argc, char** argv) {
 
   // ---- 通话记录屏（喂几条假记录，覆盖各种 reason）----
   CallHistory history;
-  // **从旧到新喂**：`add()` 是 prepend，真实使用中通话按时间先后结束，
-  // 所以喂进来的顺序也必须是旧→新，否则列表会倒过来。
-  for (const CallRecord& r : {
-           record(QStringLiteral("frank"), true, false, QStringLiteral("offline"), 0,
-                  QStringLiteral("audio"), 130),
-           record(QStringLiteral("erin"), true, false, QStringLiteral("busy"), 0,
-                  QStringLiteral("audio"), 95),
-           record(QStringLiteral("dave"), true, false, QStringLiteral("cancel"), 0,
-                  QStringLiteral("audio"), 80),
-           record(QStringLiteral("carol"), false, false, QStringLiteral("no_answer"), 0,
-                  QStringLiteral("video"), 40),
-           record(QStringLiteral("bob"), true, true, QStringLiteral("hangup"), 201,
-                  QStringLiteral("audio"), 5),
-       }) {
-    history.add(r);
-  }
+  // 记录页现在从服务端拉；离线截图工具没有服务端，直接摆一批假记录（新 → 旧）。
+  history.showSample({
+      record(QStringLiteral("bob"), true, true, QStringLiteral("hangup"), 201,
+             QStringLiteral("audio"), 5),
+      record(QStringLiteral("carol"), false, false, QStringLiteral("no_answer"), 0,
+             QStringLiteral("video"), 40),
+      record(QStringLiteral("dave"), true, false, QStringLiteral("cancel"), 0,
+             QStringLiteral("audio"), 80),
+      record(QStringLiteral("erin"), true, false, QStringLiteral("busy"), 0,
+             QStringLiteral("audio"), 95),
+      record(QStringLiteral("frank"), true, false, QStringLiteral("offline"), 0,
+             QStringLiteral("audio"), 130),
+  });
   HistoryPage historyPage(&history);
   historyPage.resize(380, 560);
   shoot(&historyPage, dir, QStringLiteral("03-history%1").arg(suffix));

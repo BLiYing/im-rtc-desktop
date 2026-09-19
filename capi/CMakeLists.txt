@@ -70,6 +70,7 @@ install(TARGETS im_rtc_engine_capi
 # C++ 内部实现头（capi/src/*.h）不装——它们是「C++ → C 的转换层」的私有实现，不是交付面。
 install(FILES
   include/imrtc/imrtc_c.h
+  include/imrtc/imrtc_c_history.h
   include/imrtc/CallEngine.hpp
   include/imrtc/CallEngineTypes.hpp
   DESTINATION include/imrtc)

@@ -10,6 +10,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include "imrtc/imrtc_c.h"
 
@@ -78,6 +79,41 @@ struct CallOptions {
   std::string userData;
   /** 0 = 使用协议默认值（30）。 */
   std::int64_t timeoutSec = 0;
+};
+
+/** 通话记录里的一位成员，对应 `imrtc_v1_call_member`。 */
+struct CallHistoryMember {
+  std::string uid;
+  std::string state;
+};
+
+/**
+ * 一条通话记录，对应 `imrtc_v1_call_record`。`reason` 是通话的最终结局，**不分角色**：
+ * 要显示「已取消」还是「对方已取消」，用 `caller` 与自己的 uid 比出角色再定文案。
+ */
+struct CallHistoryRecord {
+  std::string callId;
+  std::string roomId;
+  std::string caller;
+  std::string mediaType;  ///< "audio" / "video"
+  bool isGroup = false;
+  std::string reason;
+  std::string endedBy;
+  std::int64_t durationSec = 0;
+  std::int64_t startedAtMs = 0;
+  std::int64_t connectedAtMs = 0;
+  std::int64_t endedAtMs = 0;
+  std::string userData;
+  std::string chatGroupId;
+  std::vector<CallHistoryMember> members;
+};
+
+/** 一页通话记录（按发起时间倒序）。`nextCursor == 0` 表示已经到底。 */
+struct CallHistoryPage {
+  std::vector<CallHistoryRecord> records;
+  std::int64_t nextCursor = 0;
+
+  bool hasNext() const { return nextCursor != 0; }
 };
 
 }  // namespace capi

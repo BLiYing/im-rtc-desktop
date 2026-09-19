@@ -44,6 +44,12 @@ std::vector<std::string> toStrings(const char* const* items, std::uint32_t count
  */
 imrtc::ActionCompletion toCompletion(imrtc_v1_result_cb cb, void* userData);
 
+/**
+ * toHistoryCompletion 把 C 的通话记录回调包成引擎的 CallHistoryCompletion：
+ * 记录摊成 C 结构体数组（字符串指向引擎那份，只在回调期间有效）。cb 不能为 NULL。
+ */
+imrtc::CallHistoryCompletion toHistoryCompletion(imrtc_v1_call_history_cb cb, void* userData);
+
 /** toLogLevel / fromLogLevel 在两套枚举之间互转。数值同序，但不许靠这个偷懒。 */
 imrtc_v1_log_level toLogLevel(imrtc::LogLevel level);
 imrtc::LogLevel fromLogLevel(imrtc_v1_log_level level);

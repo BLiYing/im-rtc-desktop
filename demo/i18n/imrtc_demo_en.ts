@@ -201,10 +201,6 @@
         <translation>This cannot be undone. Clear it?</translation>
     </message>
     <message>
-        <source>群通话</source>
-        <translation>Group call</translation>
-    </message>
-    <message>
         <source>通话记录</source>
         <translation>Call history</translation>
     </message>
@@ -604,12 +600,20 @@ libwebrtc: not integrated yet (planned pin: m150.7871.3.2 / M150).
         <translation>Outgoing · not connected</translation>
     </message>
     <message>
-        <source>昨天</source>
-        <translation>Yesterday</translation>
+        <source>昨天 %1</source>
+        <translation>Yesterday %1</translation>
     </message>
     <message>
         <source>M月d日</source>
         <translation>MMM d</translation>
+    </message>
+    <message>
+        <source>yyyy年M月d日</source>
+        <translation>MMM d, yyyy</translation>
+    </message>
+    <message>
+        <source>（未知）</source>
+        <translation>(Unknown)</translation>
     </message>
     <message>
         <source>邀请你加入群通话</source>

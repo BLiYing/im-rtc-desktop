@@ -28,7 +28,7 @@ if(NOT MSVC)
   target_compile_options(ixwebsocket PRIVATE -w)
 endif()
 
-add_library(im_rtc_transport_ix STATIC src/IxTransport.cpp)
+add_library(im_rtc_transport_ix STATIC src/IxTransport.cpp src/IxHttpClient.cpp)
 
 target_include_directories(im_rtc_transport_ix PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 # imrtc_warnings 只挂在我们自己的目标上——第三方源码用它自己的标准。

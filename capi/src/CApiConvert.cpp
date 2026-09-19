@@ -24,6 +24,42 @@ imrtc::ActionCompletion toCompletion(imrtc_v1_result_cb cb, void* userData) {
   };
 }
 
+imrtc::CallHistoryCompletion toHistoryCompletion(imrtc_v1_call_history_cb cb, void* userData) {
+  return [cb, userData](const imrtc::ActionResult& result, const imrtc::CallHistoryPage& page) {
+    if (!result.ok()) {
+      cb(userData, result.code, result.name.c_str(), nullptr, 0, 0);
+      return;
+    }
+    // 成员数组要活到回调返回：先按记录数预留，再逐条摊开，指针不会因扩容失效。
+    std::vector<std::vector<imrtc_v1_call_member>> members(page.records.size());
+    std::vector<imrtc_v1_call_record> records(page.records.size());
+    for (std::size_t i = 0; i < page.records.size(); ++i) {
+      const imrtc::CallHistoryRecord& source = page.records[i];
+      for (const imrtc::CallHistoryMember& member : source.members) {
+        members[i].push_back(imrtc_v1_call_member{member.uid.c_str(), member.state.c_str()});
+      }
+      imrtc_v1_call_record& out = records[i];
+      out.call_id = source.callId.c_str();
+      out.room_id = source.roomId.c_str();
+      out.caller = source.caller.c_str();
+      out.media_type = source.mediaType.c_str();
+      out.is_group = fromBool(source.isGroup);
+      out.reason = source.reason.c_str();
+      out.ended_by = source.endedBy.c_str();
+      out.duration_sec = source.durationSec;
+      out.started_at_ms = source.startedAtMs;
+      out.connected_at_ms = source.connectedAtMs;
+      out.ended_at_ms = source.endedAtMs;
+      out.user_data = source.userData.c_str();
+      out.chat_group_id = source.chatGroupId.c_str();
+      out.members = members[i].empty() ? nullptr : members[i].data();
+      out.member_count = static_cast<std::uint32_t>(members[i].size());
+    }
+    cb(userData, 0, "", records.empty() ? nullptr : records.data(),
+       static_cast<std::uint32_t>(records.size()), page.hasNext ? page.nextCursor : 0);
+  };
+}
+
 std::vector<std::string> toStrings(const char* const* items, std::uint32_t count) {
   std::vector<std::string> out;
   if (items == nullptr) return out;

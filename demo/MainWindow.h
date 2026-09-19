@@ -85,8 +85,6 @@ private:
   void toast(const QString& message);
   /** 提示条离窗顶多远：横幅开着就排在它下面，不然会盖住横幅上的按钮。 */
   int toastTop() const;
-  /** 把手上这通电话的信息落成一条记录。只在 onCallEnd 里调。 */
-  void commitRecord(const QString& callId, const QString& reason, qint64 durationSec);
 
   EngineBridge* bridge_ = nullptr;
   /** 日志回传。登录成功那一刻装上，**在连服务端之前**（握手的那几条最该留下）。 */
@@ -118,10 +116,6 @@ private:
   QString autoRoom_;
   /** `--room new` 建完之后要不要立刻进房（手点「新建会议房」时不进）。 */
   bool autoRoomJoinPending_ = false;
-
-  /** 手上这通电话。onCallEnd 之后清空。 */
-  CallRecord pending_;
-  bool hasPending_ = false;
 
   bool fakeVideo_ = false;
   bool autoAccept_ = false;

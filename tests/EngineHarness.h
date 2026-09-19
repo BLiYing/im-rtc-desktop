@@ -70,11 +70,12 @@ struct Harness {
   std::int64_t now = kT0;
   std::unique_ptr<CallEngine> engine;
 
-  explicit Harness(const std::string& deviceId = "mac-8f3a") {
+  explicit Harness(const std::string& deviceId = "mac-8f3a", imrtc::HttpClientFactory http = {}) {
     CallEngineOptions options;
     options.url = "wss://rtc.example.com/v1/ws";
     options.deviceId = deviceId;
     options.transportFactory = net.factory();
+    options.httpClientFactory = std::move(http);
     options.random = []() { return 0.5; };
     options.clock = [this]() { return now; };
     engine.reset(new CallEngine(options));

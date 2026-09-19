@@ -6,6 +6,8 @@
 
 ## 当前焦点
 
+- **09-19 新增 `fetchCallHistory`**（引擎 `CallEngineHistory.cpp` + 可注入 `HttpClient`，真实实现 `IxHttpClient`；C ABI `imrtc_v1_fetch_call_history`，类型拆在 `imrtc_c_history.h`；包装头 `CallEngine.hpp` 已接；`GET /v1/calls`，游标翻页，`next_cursor == 0` 即到底，只返回本人）：`./scripts/test.sh` 8 步全过（178 个引擎用例含 10 条通话记录，Demo 测试含 `CallHistoryModelTest`，Darwin）；Demo 通话记录页改成调它，本地拼记录那套已删。**没验**：Demo 真连服务端翻页、Windows。 同日记录页对齐 Android 版式（圆角卡片、图标 / 名字加两行摘要 / 右侧时间，群通话第一行「群通话 · N 人」），时间按发起时间四档（今天 `HH:mm` / `昨天 HH:mm` / `M月d日 HH:mm` / `yyyy年M月d日 HH:mm`，`callstrings::callTime` 纯函数 + `HistoryTimeTest` 11 条，界面未截图目测）。**Demo 测试要显式构建才会跑**：`cmake -S . -B build/demo-check -DIMRTC_BUILD_DEMO=ON -DCMAKE_PREFIX_PATH=~/Qt/6.8.3/macos && cmake --build build/demo-check`，再跑 `build/demo-check/demo/imrtc_demo_*_test`（7 组全过）；`./scripts/test.sh` 第 8 步在 `macos-clang` 预设下跑的是旧二进制，不会编 Demo 新代码。
+
 **2026-09-19：握手等应答超时不再干等服务端读超时。** `Connection::handleHelloOk` 失败时，若是本地 `SignalingTimeout`
 就摘监听、以 1001 `hello timeout` 关掉并自己走一次 `onTransportClosed`（按退避重连）；服务端明确拒绝的仍把关闭码留给服务端。
 起因是 Web 真机在 `silence` 注入下抓到同一类缺口（协议 §1.2 已补规则）。新测 `helloTimeoutClosesAndReconnects`（deferClose 下验迟到的 close 不重复收场），撤掉修复会失败。

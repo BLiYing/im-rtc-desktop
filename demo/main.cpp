@@ -26,7 +26,7 @@
  *
  * `--profile` 是给「同一台机器上开两个实例互打」用的。macOS 的
  * QStandardPaths **不理会 $HOME**（它走的是密码库里的真实家目录），
- * 所以靠环境变量隔离不了——两个实例会写同一份 call-history.json 互相覆盖。
+ * 所以靠环境变量隔离不了——两个实例会共用同一份 QSettings（含 device_id）互相覆盖。
  * 换 applicationName 才是有效的隔离方式。
  */
 

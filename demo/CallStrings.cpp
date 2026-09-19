@@ -2,7 +2,9 @@
 
 #include <QDate>
 #include <QDateTime>
+#include <QLocale>
 #include <QObject>
+#include <QTimeZone>
 
 #include "CallHistory.h"
 
@@ -48,16 +50,15 @@ QString callerEndText(const QString& reason) {
   return tr("通话已结束");
 }
 
-QString recordSummary(const CallRecord& record) {
+QString recordTitle(const CallRecord& record) {
   if (record.isGroup) {
-    // 文案表最后一组：群通话 · 6 人 · 12:40
-    const QString people = tr("%1 人").arg(record.members.size());
-    if (record.connected && record.durationSec > 0) {
-      return tr("群通话 · %1 · %2").arg(people, duration(record.durationSec));
-    }
-    return tr("群通话 · %1").arg(people);
+    // 「N 人」已含主叫（CallHistory::toRecord 补的）；至少按 1 起算。
+    return tr("群通话 · %1").arg(tr("%1 人").arg(qMax<qsizetype>(record.members.size(), 1)));
   }
+  return record.peer.isEmpty() ? tr("（未知）") : record.peer;
+}
 
+QString recordSummary(const CallRecord& record) {
   // 接通过就报时长——network 断线也算接通，时长按已接通部分计（文案表「断线」行）。
   if (record.connected) {
     const QString head = record.outgoing ? tr("呼出") : tr("来电");
@@ -83,13 +84,25 @@ QString incomingInviteText(bool isVideo, bool isGroup) {
   return isVideo ? tr("邀请你视频通话") : tr("邀请你语音通话");
 }
 
+QString callTime(qint64 startedAtMs, qint64 nowMs, const QTimeZone& zone,
+                 const std::function<QString(const QDateTime&)>& hourMinute) {
+  const QDateTime started = QDateTime::fromMSecsSinceEpoch(startedAtMs, zone);
+  const QDateTime now = QDateTime::fromMSecsSinceEpoch(nowMs, zone);
+  const QString time = hourMinute(started);
+  const QDate day = started.date();
+  const QDate today = now.date();
+  if (startedAtMs >= nowMs || day == today) return time;
+  if (day == today.addDays(-1)) return tr("昨天 %1").arg(time);
+  const QString pattern = day.year() == today.year() ? tr("M月d日") : tr("yyyy年M月d日");
+  return QStringLiteral("%1 %2").arg(started.toString(pattern), time);
+}
+
 QString recordTimestamp(const CallRecord& record) {
-  if (!record.endedAt.isValid()) return QString();
-  const QDate today = QDate::currentDate();
-  const QDate day = record.endedAt.date();
-  if (day == today) return record.endedAt.toString(QStringLiteral("HH:mm"));
-  if (day == today.addDays(-1)) return tr("昨天");
-  return record.endedAt.toString(tr("M月d日"));
+  if (!record.startedAt.isValid()) return QString();
+  return callTime(record.startedAt.toMSecsSinceEpoch(), QDateTime::currentMSecsSinceEpoch(),
+                  QTimeZone::systemTimeZone(), [](const QDateTime& when) {
+                    return QLocale::system().toString(when.time(), QLocale::ShortFormat);
+                  });
 }
 
 }  // namespace callstrings

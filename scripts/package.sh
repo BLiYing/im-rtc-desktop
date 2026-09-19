@@ -15,6 +15,7 @@
 # 装出来的布局（第三方解压后 `find_package(imrtc)` 直接用）：
 #   LICENSE（MIT）
 #   include/imrtc/imrtc_c.h
+#   include/imrtc/imrtc_c_history.h（imrtc_c.h 拆出来的通话记录部分，被它 include）
 #   include/imrtc/CallEngine.hpp
 #   include/imrtc/CallEngineTypes.hpp（CallEngine.hpp 拆出来的值类型，被它 include）
 #   lib/libim_rtc_engine_capi.dylib

@@ -226,6 +226,7 @@ void CallEngine::notifyMediaReady() { apply(MachineInput::internal("media_ready"
 
 void CallEngine::tick() {
   if (media_) media_->poll();
+  if (http_) http_->poll();
   if (connection_) connection_->tick(options_.clock());
   fireExpiredUnsubscribes();
 }

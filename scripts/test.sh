@@ -35,7 +35,14 @@ echo "== 2/8 日志纪律 =="
 
 echo ""
 echo "== 3/8 CMake 配置（preset: ${PRESET}）=="
-cmake --preset "$PRESET"
+# IMRTC_BUILD_DEMO=ON ./scripts/test.sh 会连 Demo 一起配置、编译，第 8 步才有得跑。
+# 不设就沿用缓存里的值（默认关）。
+DEMO_ARGS=()
+if [ "${IMRTC_BUILD_DEMO:-}" = "ON" ]; then
+  DEMO_ARGS=(-DIMRTC_BUILD_DEMO=ON)
+  [ -n "${IMRTC_QT_PREFIX:-}" ] && DEMO_ARGS+=(-DCMAKE_PREFIX_PATH="$IMRTC_QT_PREFIX")
+fi
+cmake --preset "$PRESET" ${DEMO_ARGS[@]+"${DEMO_ARGS[@]}"}
 
 echo ""
 echo "== 4/8 编译 =="
@@ -63,18 +70,22 @@ echo "== 7/8 C++ 包装头回调覆盖 =="
 echo ""
 echo "== 8/8 Demo 界面测试 =="
 # Demo 默认不构建，所以这一步通常是跳过的。有它的时候必须跑：
+# **只在本次配置里 Demo 是开着的才跑**——第 4 步刚把它编译过，测的一定是当前源码；
+# 关着的时候磁盘上残留的旧二进制不能碰（踩过：改了 Demo 源码，跑的却是旧产物，全绿）。
 # 它守的是「看代码看不出来、跑真服务端才暴露」的那类规则。
 # **不要写死某一个文件名**：测试目标是按用例分文件的，写死会在改名后
 # 静默跑一个过时的二进制（踩过一次）。这里遍历，一个都不许漏。
 found=0
+DEMO_ON=$(grep -c '^IMRTC_BUILD_DEMO:BOOL=ON' "build/${PRESET}/CMakeCache.txt" || true)
 for t in "build/${PRESET}/demo/"imrtc_demo_*_test; do
+  [ "$DEMO_ON" -gt 0 ] || break
   [ -x "$t" ] || continue
   found=$((found + 1))
   # **不能 offscreen**：原生子窗口那组要真窗口才有 backing scale。
   "$t"
 done
 if [ "$found" -eq 0 ]; then
-  echo "  （没构建 Demo，跳过——打开 -DIMRTC_BUILD_DEMO=ON 才有）"
+  echo "  （没构建 Demo，跳过——IMRTC_BUILD_DEMO=ON ./scripts/test.sh 才有；残留的旧二进制不跑）"
 else
   echo "  跑了 ${found} 组。"
 fi

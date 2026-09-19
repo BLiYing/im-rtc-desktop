@@ -29,7 +29,10 @@
 MainWindow::MainWindow(QWidget* parent) : QWidget(parent) {
   bridge_ = new EngineBridge(this);
   history_ = new CallHistory(this);
-  history_->load();
+  // 通话记录从服务端拉（SDK 的 fetchCallHistory）；引擎没起来时 bridge 回「没受理」。
+  history_->setFetcher([this](int limit, qint64 cursor, CallHistory::Done done) {
+    return bridge_->fetchCallHistory(limit, cursor, std::move(done));
+  });
 
   buildUi();
   wireLogin();
@@ -159,6 +162,7 @@ void MainWindow::wireLogin() {
   });
 
   connect(dial_, &DialPage::logoutRequested, this, [this] {
+    history_->reset();  // 先作废在路上的查询，再拆引擎
     bridge_->disconnectFromServer();
     hideOverlay();
     stack_->setCurrentWidget(login_);
@@ -191,6 +195,8 @@ void MainWindow::wireConnection() {
             dial_->setDialingEnabled(true);
             overlay_->setSelfUid(uid_);
             overlay_->onReconnecting(false);
+            history_->setSelfUid(uid_);
+            history_->refresh();
 
             // 只自动做一次：重连也会走到这里，不清空的话会变成自动重拨。
             if (!autoCallees_.isEmpty()) {
@@ -263,14 +269,6 @@ void MainWindow::wireCall() {
       toast(tr("拨不出去：%1（%2）").arg(code).arg(QString::fromLatin1(imrtc_v1_error_name(code))));
       return;
     }
-    pending_ = CallRecord{};
-    pending_.peer = isGroup ? QString() : ids.first();
-    pending_.members = ids;
-    pending_.isGroup = isGroup;
-    pending_.mediaType = mediaType;
-    pending_.outgoing = true;
-    hasPending_ = true;
-
     overlay_->beginOutgoing(ids, mediaType, isGroup);
     showOverlay();
     dial_->setDialingEnabled(false);
@@ -293,16 +291,9 @@ void MainWindow::wireCall() {
                  const QString& userData, const QString& inviter) {
             // Demo 暂不展示群号/user_data（HOST_INTEGRATION_DESIGN §3.4 的选人页留给
             // 宿主自己的 provider）；EngineBridge 已经把它们打进日志，联调够用。
+            Q_UNUSED(callId);
             Q_UNUSED(chatGroupId);
             Q_UNUSED(userData);
-            pending_ = CallRecord{};
-            pending_.callId = callId;
-            pending_.peer = caller;
-            pending_.members = callees;
-            pending_.isGroup = isGroup;
-            pending_.mediaType = mediaType;
-            pending_.outgoing = false;
-            hasPending_ = true;
 
             // 浮层先备好来电态但不显示：点开横幅才换过去。
             overlay_->beginIncoming(caller, callees, mediaType, isGroup);
@@ -319,12 +310,11 @@ void MainWindow::wireCall() {
   connect(bridge_, &EngineBridge::callBegan, this,
           [this](const QString& callId, const QString& roomId, const QString& role,
                  const QString& caller, const QString& chatGroupId, const QString& userData) {
+            Q_UNUSED(callId);
             Q_UNUSED(roomId);
             Q_UNUSED(caller);
             Q_UNUSED(chatGroupId);
             Q_UNUSED(userData);
-            pending_.callId = callId;
-            pending_.connected = true;
             overlay_->markConnected(role);
             alert_->clear();
             if (banner_->isVisible()) showOverlay();  // 在横幅上接的：接通了才换成浮层
@@ -346,8 +336,9 @@ void MainWindow::wireCall() {
   connect(bridge_, &EngineBridge::callEnded, this,
           [this](const QString& callId, const QString& reason, qint64 durationSec,
                  const QString& endedBy) {
+            Q_UNUSED(callId);
             Q_UNUSED(endedBy);
-            commitRecord(callId, reason, durationSec);
+            history_->refresh();  // 记录在服务端 call.ended 那一刻已落库，去查一定查得到
             overlay_->markEnded(reason, durationSec);
             // 还在横幅上就结束了（对方取消 / 自己拒绝）：收起即可，不弹结束态——与 Web 一致。
             banner_->hide();
@@ -376,15 +367,9 @@ void MainWindow::wireCall() {
   connect(bridge_, &EngineBridge::callMissed, this,
           [this](const QString& callId, const QString& caller, const QString& reason) {
             // 通话中被第三个人呼叫，服务端已经替我们回了忙线——**不要弹来电页**。
-            CallRecord missed;
-            missed.callId = callId;
-            missed.peer = caller;
-            missed.mediaType = QStringLiteral("audio");
-            missed.outgoing = false;
-            missed.connected = false;
-            missed.reason = reason;
-            missed.endedAt = QDateTime::currentDateTime();
-            history_->add(missed);
+            Q_UNUSED(callId);
+            Q_UNUSED(reason);
+            history_->refresh();
             toast(tr("通话中，已自动回复 %1 忙线").arg(caller));
           });
   connect(bridge_, &EngineBridge::handledOnOtherDevice, this,
@@ -499,17 +484,6 @@ void MainWindow::wireRoom() {
             hideOverlay();
             dial_->setDialingEnabled(true);
           });
-}
-
-void MainWindow::commitRecord(const QString& callId, const QString& reason, qint64 durationSec) {
-  if (!hasPending_) return;
-  pending_.callId = callId.isEmpty() ? pending_.callId : callId;
-  pending_.reason = reason;
-  // **时长用回调给的值**，不是自己拿时间戳减（不变量 I8）。
-  pending_.durationSec = durationSec;
-  pending_.endedAt = QDateTime::currentDateTime();
-  history_->add(pending_);
-  hasPending_ = false;
 }
 
 void MainWindow::showOverlay() {

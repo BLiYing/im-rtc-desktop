@@ -473,3 +473,60 @@ IMRTC_TEST(capiErrorIsUsable, "C ABI —— 包装层的 Error 能问出机读�
   CHECK_TRUE(!failed.ok(), "非零就是失败");
   CHECK_EQ(std::string(failed.name()), std::string("invalid_state"), "机读名");
 }
+
+namespace {
+
+struct HistoryResult {
+  int calls = 0;
+  std::int32_t code = 0;
+  std::string name;
+  std::uint32_t count = 99;
+};
+
+void onHistoryCb(void* user, std::int32_t code, const char* name, const imrtc_v1_call_record* records,
+                 std::uint32_t count, std::int64_t) {
+  HistoryResult* result = static_cast<HistoryResult*>(user);
+  ++result->calls;
+  result->code = code;
+  result->name = name == nullptr ? "" : name;
+  result->count = count;
+  if (count == 0 && records != nullptr) result->count = 98;  // 失败 / 空页时指针必须是 NULL
+}
+
+}  // namespace
+
+IMRTC_TEST(capiFetchCallHistory, "C ABI —— 通话记录：空句柄 / NULL 回调不受理；没登录就地回 2007；包装层同一条路") {
+  HistoryResult result;
+  CHECK_EQ(imrtc_v1_fetch_call_history(nullptr, 20, 0, &onHistoryCb, &result),
+           std::int32_t{IMRTC_V1_ERR_BAD_PARAMS}, "空句柄");
+  CHECK_EQ(result.calls, 0, "没受理就不回调");
+
+  imrtc_v1_options options = makeOptions();
+  imrtc_v1_engine* engine = nullptr;
+  CHECK_EQ(imrtc_v1_engine_create(&options, &engine), std::int32_t{IMRTC_V1_OK}, "create");
+  CHECK_EQ(imrtc_v1_fetch_call_history(engine, 20, 0, nullptr, &result), std::int32_t{IMRTC_V1_ERR_BAD_PARAMS},
+           "回调不能为 NULL");
+  CHECK_EQ(result.calls, 0, "NULL 回调没受理");
+
+  // 没登录：受理了，结果在返回之前就地回 2007（本地拒绝，不需要 tick）。
+  CHECK_EQ(imrtc_v1_fetch_call_history(engine, 20, 0, &onHistoryCb, &result), std::int32_t{IMRTC_V1_OK}, "受理");
+  CHECK_EQ(result.calls, 1, "恰好回一次");
+  CHECK_EQ(result.code, 2007, "没登录");
+  CHECK_EQ(result.name, std::string("not_logged_in"), "机读名");
+  CHECK_EQ(static_cast<int>(result.count), 0, "失败没有记录");
+  imrtc_v1_engine_destroy(engine);
+
+  // 包装层走同一条路；没受理（done 为空）时返回 BAD_PARAMS 且不悬着。
+  imrtc::capi::Engine wrapped("ws://127.0.0.1:1/v1/ws", "mac-abi-4");
+  int doneCalls = 0;
+  std::int32_t doneCode = 0;
+  const imrtc::capi::Error accepted = wrapped.fetchCallHistory(
+      20, 0, [&](imrtc::capi::Result<imrtc::capi::CallHistoryPage> r) {
+        ++doneCalls;
+        doneCode = r.code;
+      });
+  CHECK_TRUE(accepted.ok(), "包装层受理");
+  CHECK_EQ(doneCalls, 1, "包装层恰好回一次");
+  CHECK_EQ(doneCode, std::int32_t{2007}, "包装层 2007");
+  CHECK_EQ(wrapped.fetchCallHistory(20, 0, {}).code(), std::int32_t{IMRTC_V1_ERR_BAD_PARAMS}, "没传 done 不受理");
+}

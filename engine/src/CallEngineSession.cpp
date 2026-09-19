@@ -40,6 +40,7 @@ void CallEngine::login(const std::string& token, ActionCompletion done) {
     return;
   }
   beginLogin(std::move(done));
+  ticket_ = token;
 
   ConnectionOptions connectionOptions;
   connectionOptions.url = options_.url;
@@ -133,6 +134,7 @@ void CallEngine::logout() {
     三条，而宿主只想要一条通话终局。
   */
   tearingDown_ = true;
+  ticket_.clear();
   // 还在等握手就 logout：login 回 2005。
   settleLogin(ActionResult{codeValue(ErrorCode::InvalidState), errorName(codeValue(ErrorCode::InvalidState)),
                            frame::kHello, ""});
@@ -167,6 +169,7 @@ void CallEngine::logout() {
 }
 
 void CallEngine::updateToken(const std::string& token) {
+  if (connection_) ticket_ = token;
   if (connection_) connection_->updateToken(token);
 }
 

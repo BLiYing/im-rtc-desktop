@@ -96,6 +96,12 @@ CallEngine::~CallEngine() {
     ActionCompletion done = std::move(settlement->done);
     done(ActionResult{code, errorName(code), "", ""});
   }
+  // 通话记录查询同理（http_ 还活着，不会再有应答回来）。
+  std::map<std::uint64_t, CallHistoryCompletion> history;
+  history.swap(historyPending_);
+  for (auto& entry : history) {
+    if (entry.second) entry.second(ActionResult{code, errorName(code), "", ""}, CallHistoryPage());
+  }
 }
 
 void CallEngine::beginLogin(ActionCompletion done) {
