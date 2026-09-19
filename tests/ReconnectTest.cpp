@@ -352,3 +352,30 @@ IMRTC_TEST(sessionUnrecoverableCancelledOnResume, "恢复窗口 —— 重连成
   harness.connection->tick(kT0 + 200000);
   CHECK_EQ(harness.unrecoverable, 0, "已经连回来了还报不可恢复，会把正在进行的通话杀掉");
 }
+
+/*
+  **握手等应答超时没有 close 会跟来**：下行半死时服务端收到了 hello、回的帧没到，
+  它那头没有理由断。重连只挂在 close 上，不自己收场就要干等服务端 45 秒读超时。
+  2026-09-19 Web 真机（服务端 silence 注入）抓到，Android 一直是 closeAndReconnect。
+  deferClose 打开：真实 Transport 的关闭事件是下一次 poll() 才放出来的，
+  那一条迟到的不许再收一次场（退避档会一次涨两级）。
+*/
+IMRTC_TEST(helloTimeoutClosesAndReconnects, "握手超时 —— 本端关掉那条连接，照常退避重连") {
+  Harness harness;
+  harness.net.deferClose = true;
+  harness.connection->connect(kT0);
+  harness.net.open();
+
+  const std::int64_t timeoutMs = ConnectionOptions().requestTimeoutMs;
+  harness.connection->tick(kT0 + timeoutMs + 1);
+  CHECK_EQ(harness.net.at(0).closed, true, "超时的那条要本端关掉");
+  CHECK_EQ(harness.net.at(0).closeCode, 1001, "不能用 1000（那是 logout，服务端不留恢复窗口）");
+  CHECK_EQ(harness.disconnected.size(), std::size_t{1}, "抛一次 onDisconnected");
+  CHECK_EQ(harness.disconnected[0], std::string("1001/retry"), "且会重连");
+
+  harness.connection->tick(kT0 + timeoutMs + 2);  // 迟到的关闭事件在这一次 poll 里放出来
+  CHECK_EQ(harness.disconnected.size(), std::size_t{1}, "旧连接迟到的 close 不许再收一次场");
+
+  harness.connection->tick(kT0 + timeoutMs + 1 + imrtc::backoffDelayMs(0, []() { return 0.5; }));
+  CHECK_EQ(harness.net.socketCount(), std::size_t{2}, "退避第一档到点就该重连，不等服务端读超时");
+}

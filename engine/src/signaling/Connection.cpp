@@ -143,10 +143,21 @@ void Connection::sendHello(std::int64_t nowMs) {
 
 void Connection::handleHelloOk(const RequestResult& result) {
   if (!result.ok) {
-    // 握手失败不在这里重连：随后必有一条 close（服务端 100ms 内断开，§1.2），
+    // 服务端拒了握手不在这里重连：随后必有一条 close（服务端 100ms 内断开，§1.2），
     // 由 onTransportClosed 统一按关闭码决定重连与否。两处都排会让退避档一次涨两级。
     emitError(result.errorCode, frame::kHello);
     abortIfHandshakeRejected(result);
+    /*
+      **本地等应答超时是例外：没有 close 会跟来。** 超时说明下行半死（服务端收到了 hello、
+      回的帧没到），服务端那头没有理由断；重连又只挂在 close 上，不自己收场就要干等服务端
+      45 秒读超时，恢复窗口白白耗掉。摘掉监听再关，旧连接迟到的 close 就进不来，
+      只由这里走一次 onTransportClosed。与 Android closeAndReconnect 同一个处置（2026-09-19）。
+    */
+    if (result.errorCode == codeValue(ErrorCode::SignalingTimeout) && transport_) {
+      transport_->setListener(nullptr);
+      transport_->close(closecode::kGoingAway, "hello timeout");
+      onTransportClosed(closecode::kGoingAway, "hello timeout");
+    }
     return;
   }
 
