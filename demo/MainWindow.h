@@ -71,6 +71,8 @@ private:
   void wireConnection();
   void wireCall();
   void wireRoom();
+  /** 已在一场通话里：弹提示并返回 true，调用方直接 return（不拨、不进房、不换界面）。 */
+  bool blockIfBusy();
   void retranslateUi();
 
   void showOverlay();

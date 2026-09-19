@@ -38,6 +38,7 @@ private slots:
   void groupCallHangsUp();
   void oneToOneHangsUp();
   void outgoingCancels();
+  void busyGuardFollowsPhase();
   void incomingRejects();
   void captionsFollowHeadcount();
   void clickIsWiredToTheRule();
@@ -67,6 +68,27 @@ void OverlayActionsTest::groupCallHangsUp() {
   overlay.markConnected(QStringLiteral("caller"));
   // 这一行就是踩过的坑：群通话**不是** LeaveRoom。
   QCOMPARE(overlay.dangerAction(), CallOverlay::DangerAction::Hangup);
+}
+
+/**
+ * 「已在通话中又开始另一场」的守门判据（真机事故 2026-09-19，Android：1v1 收成小窗后去发起群通话，
+ * 界面被换成另一通、没有提示）。横幅在屏上（来电响铃）、浮层在屏上且不是结束画面都算「已在一场里」；
+ * 结束画面是上一通的收尾停留，不挡新的一场。
+ */
+void OverlayActionsTest::busyGuardFollowsPhase() {
+  using P = CallOverlay::Phase;
+  QVERIFY(!CallOverlay::blocksNewCall(false, false, P::Outgoing));  // 什么都没在屏上：放行
+  QVERIFY(CallOverlay::blocksNewCall(true, false, P::Outgoing));    // 来电横幅在响
+  for (const P phase : {P::Outgoing, P::Incoming, P::Connected}) {
+    QVERIFY(CallOverlay::blocksNewCall(false, true, phase));
+  }
+  QVERIFY(!CallOverlay::blocksNewCall(false, true, P::Ended));
+
+  CallOverlay overlay;
+  overlay.beginOutgoing({QStringLiteral("bob")}, QStringLiteral("audio"), false);
+  QCOMPARE(overlay.phase(), P::Outgoing);
+  overlay.markConnected(QStringLiteral("caller"));
+  QCOMPARE(overlay.phase(), P::Connected);
 }
 
 void OverlayActionsTest::oneToOneHangsUp() {

@@ -260,6 +260,7 @@ void MainWindow::wireConnection() {
 
 void MainWindow::wireCall() {
   const auto startCall = [this](const QStringList& ids, const QString& mediaType, bool isGroup) {
+    if (blockIfBusy()) return;
     if (ids.isEmpty()) {
       toast(tr("先填一个对方 ID。"));
       return;
@@ -451,11 +452,14 @@ void MainWindow::wireRoom() {
       toast(tr("先填房间号，或点「新建会议房」。"));
       return;
     }
+    if (blockIfBusy()) return;
     // 会议房要先换一枚进房票——通话那条路的票由服务端在 call.connected 里下发。
     bridge_->fetchRoomToken(httpBase_, roomId);
   });
   connect(bridge_, &EngineBridge::roomTokenReady, this,
           [this](const QString& roomId, const QString& roomToken) {
+            // 换票是异步的：点「加入房间」之后到票回来之前，用户可能已经拨出或收到了来电。
+            if (blockIfBusy()) return;
             const qint32 code = bridge_->joinRoom(roomId, roomToken);
             if (code != IMRTC_V1_OK) {
               toast(tr("进房失败：%1（%2）")
@@ -484,6 +488,14 @@ void MainWindow::wireRoom() {
             hideOverlay();
             dial_->setDialingEnabled(true);
           });
+}
+
+bool MainWindow::blockIfBusy() {
+  if (!CallOverlay::blocksNewCall(banner_->isVisible(), overlay_->isVisible(), overlay_->phase())) {
+    return false;
+  }
+  toast(callstrings::busyNoticeText());
+  return true;
 }
 
 void MainWindow::showOverlay() {

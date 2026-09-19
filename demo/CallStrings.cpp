@@ -34,6 +34,10 @@ QString duration(qint64 seconds) {
       .arg(rest, 2, 10, QLatin1Char('0'));
 }
 
+QString busyNoticeText() {
+  return tr("你正在通话中，请先结束当前通话");
+}
+
 QString callerEndText(const QString& reason) {
   // 与文案表「主叫侧」那一列逐行对应。
   if (reason == QLatin1String("cancel")) return tr("已取消");

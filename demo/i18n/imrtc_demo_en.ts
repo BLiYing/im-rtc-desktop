@@ -500,6 +500,10 @@ libwebrtc: not integrated yet (planned pin: m150.7871.3.2 / M150).
 <context>
     <name>callstrings</name>
     <message>
+        <source>你正在通话中，请先结束当前通话</source>
+        <translation>You are already in a call. Please end it first.</translation>
+    </message>
+    <message>
         <source>已取消</source>
         <translation>Cancelled</translation>
     </message>

@@ -56,6 +56,17 @@ class CallOverlay : public QWidget {
 public:
   enum class Phase { Outgoing, Incoming, Connected, Ended };
 
+  /**
+   * 此刻算不算「已经在一场里」（**开始新的一场之前的守门判据**，与另外三端的 `newCallAllowed` 同一条）：
+   * 来电横幅在屏上，或浮层在屏上且不是结束画面。结束画面是上一通的收尾停留，不挡新的一场。
+   * 公开是为了能直接测。
+   */
+  static bool blocksNewCall(bool bannerVisible, bool overlayVisible, Phase phase) {
+    return bannerVisible || (overlayVisible && phase != Phase::Ended);
+  }
+
+  Phase phase() const { return phase_; }
+
   /** 红按钮在当前状态下到底该调哪个方法。 */
   enum class DangerAction { None, Cancel, Reject, Hangup, LeaveRoom };
 

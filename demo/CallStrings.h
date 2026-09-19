@@ -30,6 +30,9 @@ QString duration(qint64 seconds);
  */
 QString callerEndText(const QString& reason);
 
+/** 已在一场通话里又想开始新的一场时的提示（与另外三端同一句）。 */
+QString busyNoticeText();
+
 /** 记录行第一行：1v1 是对方 uid（不知道就「（未知）」），群通话是「群通话 · N 人」（N 已含主叫）。 */
 QString recordTitle(const CallRecord& record);
 
