@@ -33,6 +33,9 @@
 
 ## 已知坑 / 限制
 
+- **没有头像 / 名字解析口子（暂缓，2026-09-19 核对）**：engine / capi 无 profile 概念，Qt Demo 的来电横幅、1v1 大头像页与名字（`CallOverlay::applyPhase`）、格子（`CallOverlayMembers.cpp` 的 `setIdentity(uid, uid)`）全部直接用 uid，`paintAvatar` 只画首字母色块、无图片入口。1v1 标题栏是固定文案不显示对方。
+  要做时照 server `docs/design/HOST_PROFILE_DISPLAY_DESIGN.md` §3、§10 的清单（7 处界面、头像叠放、底色按 uid、读宿主数据不自建缓存），iOS 已补齐可对照。没有真实桌面宿主前不做。
+
 **发布打包 / Demo 三档**
 - 版本号唯一来源 `engine/include/imrtc/Version.h` 的 `kSdkVersion`；下次发版：改它 → tag → `./scripts/package.sh` → `gh release create`。`imrtcConfigVersion.cmake` 是 `SameMajorVersion`，还没被第二个小版本验证过。
 - `check-abi.sh` 对 universal dylib 改认「第一列是十六进制偏移量」的行：改这个脚本要拿 `dist/` 里的 universal 库回归，别只拿 debug 单架构库。
