@@ -128,7 +128,7 @@ void Connection::onTransportOpen() { sendHello(nowMs_); }
 
 void Connection::sendHello(std::int64_t nowMs) {
   // 从**已填好默认值的实例**起手（§2.4 规则 2 的发送侧陷阱）：
-  // protocol_version 的默认值是 1，从零值起手会发出 0 去换一个 1006。
+  // protocol_version 的默认值是 2（FramesSys.cpp），从零值起手会发出 0 去换一个 1006。
   Json hello = newFrameData(helloFields());
   hello.set("token", Json::make(options_.token));
   hello.set("device_id", Json::make(options_.deviceId));
