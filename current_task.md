@@ -9,10 +9,16 @@
 **2026-09-19：握手等应答超时不再干等服务端读超时。** `Connection::handleHelloOk` 失败时，若是本地 `SignalingTimeout`
 就摘监听、以 1001 `hello timeout` 关掉并自己走一次 `onTransportClosed`（按退避重连）；服务端明确拒绝的仍把关闭码留给服务端。
 起因是 Web 真机在 `silence` 注入下抓到同一类缺口（协议 §1.2 已补规则）。新测 `helloTimeoutClosesAndReconnects`（deferClose 下验迟到的 close 不重复收场），撤掉修复会失败。
-`test.sh` 全绿，**只有单测，没上真机**。09-18 的 `publish_deferred` 已提交，详情移入 archive。
+`test.sh` 全绿，**只有单测，没上真机**。09-18 的 `publish_deferred` 已提交。
+
+**同批（09-18 晚～09-19，均已推送、只有单测）**：
+- **发布没等到应答不再判死**（`19c1ebb`）：2003 / 2004 / 2007 通话与会议房都发 `publish_deferred`，挂起等重连后补发；原先 2003 分支不给 `room.publish` 调 rollback，`publishing` 原地悬空、重连也不重放。
+- **回前台 / 网络变化立即重连**（`fd9c16b`）：`Connection::appForeground` / `networkChanged`（`ConnectionNudge.cpp`），两次至少隔 2 s；C ABI 追加 `imrtc_v1_set_app_foreground` / `imrtc_v1_notify_network_changed`（34 → 36）；Qt Demo 接了 `applicationStateChanged` 与 `QNetworkInformation`（编过、未手点）。
+状态见 CLIENT_PARITY `[^pubdefer]` `[^netchange]`（桌面均 🟡）。
 
 ## 下一步
 
+0. **`ping_interval_sec` 钳到 [5,60]（缺省 / 非正数按 15）**：Android、iOS 已做，桌面没做（`Connection.cpp` 的 `handleHelloOk` 直接 `readInt(data, "ping_interval_sec")`）。做的时候配单测，同值。
 1. **Windows 过一遍**：编译 + 手点；`install()` / `imrtcConfig.cmake` / `find_package`（`.lib` 进 ARCHIVE、`.dll` 进 RUNTIME 只是照惯例写的）；`imrtc_v1_call_ex` 与结构体尾部追加字段 `dumpbin /exports` + 联调。等机器 / 集成方。
 2. **C ABI 与三端余下一处不对等**：observer 没有「票快到期」回调（得先在 engine 造到期计时器，形状没定）。`forceEnd` 已补（`0397c97`），Demo 红键还没接看门狗。
 3. **宿主对接 M1/M8 收尾**：Demo 没有「按 call_id 加入」入口与群号 / user_data 展示。
