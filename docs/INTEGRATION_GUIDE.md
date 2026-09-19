@@ -68,6 +68,28 @@ engine.tick();
 **token 从哪来**：你自己的服务端调 `/v1/tokens` 换。Demo 走的是服务端内置的
 免密登录（`-demo-login`），**那只在开发构建里有**，不要照抄进生产。
 
+### 1.1 没有后台时联调（**仅调试**）
+
+登录需要一枚票，正式做法是你的**后端**用 `POST /v1/tokens` 换票。后端还没准备好时，可以拿控制台发的
+**调试密钥**（`key_id` 以 `dbg-` 开头）在本机直接签一枚票，先把信令与界面接通：
+
+```c
+imrtc_v1_debug_token_options o = {0};
+o.struct_size = sizeof(o);
+o.app_id = "10000001";  o.key_id = "dbg-1";  o.secret = "<控制台给的调试 secret>";
+o.uid = "alice";        /* 可选：o.device_id、o.ttl_sec（0 = 12 小时，钳到 60..2592000 秒（30 天）） */
+char token[512];
+if (imrtc_v1_debug_sign_token(&o, token, sizeof(token), NULL) == IMRTC_V1_OK)
+  imrtc_v1_login(engine, token, on_login, NULL);
+```
+
+- 头文件是 `imrtc_c_debug.h`（`imrtc_c.h` 已带上）；C++ 侧对应 `imrtc::signDebugToken`（`DebugToken.h`）。
+- `uid` 不许为空 / 含空白 / 超 64 字节，`key_id` 必须是 `dbg-` 开头（生产密钥填进来会被拒，返回 `1004`）。
+- 每次调用引擎都会打一条 warn 日志，提醒「仅联调」。
+- **不能带进生产**：调试 secret 一旦进了客户端就等于公开。**上线前必须删掉这段，改成你后端的 `/v1/tokens` 换票**，
+  换票之后 `imrtc_v1_login` / `imrtc_v1_update_token` 的用法一字不改。规则全文见
+  `im-rtc-server/docs/design/DEBUG_KEY_DESIGN.md`。
+
 ---
 
 ## 2. 三条会让你崩溃的规矩

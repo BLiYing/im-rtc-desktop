@@ -530,3 +530,35 @@ IMRTC_TEST(capiFetchCallHistory, "C ABI —— 通话记录：空句柄 / NULL �
   CHECK_EQ(doneCode, std::int32_t{2007}, "包装层 2007");
   CHECK_EQ(wrapped.fetchCallHistory(20, 0, {}).code(), std::int32_t{IMRTC_V1_ERR_BAD_PARAMS}, "没传 done 不受理");
 }
+
+IMRTC_TEST(capiDebugSignToken, "C ABI —— 调试签票：成功写缓冲区；非法入参 / 缓冲区太小 / struct_size 偏小一律 BAD_PARAMS") {
+  imrtc_v1_debug_token_options options{};
+  options.struct_size = sizeof(options);
+  options.app_id = "10000001";
+  options.key_id = "dbg-1";
+  options.secret = "0123456789abcdef0123456789abcdef";
+  options.uid = "alice";
+  options.now_unix = 1790000000;
+
+  char out[512];
+  std::uint32_t length = 0;
+  CHECK_EQ(imrtc_v1_debug_sign_token(&options, out, sizeof(out), &length), std::int32_t{IMRTC_V1_OK}, "成功");
+  CHECK_EQ(static_cast<std::size_t>(length), std::strlen(out), "out_len 不含 NUL");
+  CHECK_TRUE(std::string(out).rfind("eyJ", 0) == 0, "是 JWT");
+
+  char tiny[8];
+  std::uint32_t needed = 0;
+  CHECK_EQ(imrtc_v1_debug_sign_token(&options, tiny, sizeof(tiny), &needed), std::int32_t{IMRTC_V1_ERR_BAD_PARAMS},
+           "缓冲区太小");
+  CHECK_EQ(static_cast<std::size_t>(needed), std::strlen(out), "告知需要的长度");
+
+  CHECK_EQ(imrtc_v1_debug_sign_token(nullptr, out, sizeof(out), &length), std::int32_t{IMRTC_V1_ERR_BAD_PARAMS}, "options 为空");
+  options.key_id = "v1";
+  CHECK_EQ(imrtc_v1_debug_sign_token(&options, out, sizeof(out), &length), std::int32_t{IMRTC_V1_ERR_BAD_PARAMS}, "非 dbg- 密钥");
+  options.key_id = "dbg-1";
+  options.uid = nullptr;
+  CHECK_EQ(imrtc_v1_debug_sign_token(&options, out, sizeof(out), &length), std::int32_t{IMRTC_V1_ERR_BAD_PARAMS}, "uid 为空");
+  options.uid = "alice";
+  options.struct_size = 4;
+  CHECK_EQ(imrtc_v1_debug_sign_token(&options, out, sizeof(out), &length), std::int32_t{IMRTC_V1_ERR_BAD_PARAMS}, "struct_size 偏小");
+}

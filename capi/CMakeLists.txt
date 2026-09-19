@@ -10,6 +10,7 @@ set(IMRTC_CAPI_SOURCES
   src/imrtc_c.cpp
   src/CApiConvert.cpp
   src/CObserver.cpp
+  src/CDebugToken.cpp
 )
 
 add_library(im_rtc_engine_capi SHARED ${IMRTC_CAPI_SOURCES})
@@ -71,6 +72,7 @@ install(TARGETS im_rtc_engine_capi
 install(FILES
   include/imrtc/imrtc_c.h
   include/imrtc/imrtc_c_history.h
+  include/imrtc/imrtc_c_debug.h
   include/imrtc/CallEngine.hpp
   include/imrtc/CallEngineTypes.hpp
   DESTINATION include/imrtc)

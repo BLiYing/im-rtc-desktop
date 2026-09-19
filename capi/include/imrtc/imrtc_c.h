@@ -590,5 +590,7 @@ IMRTC_API const char* imrtc_v1_version(void);
 
 /* 通话记录查询拆在独立头里（体量红线，CONVENTIONS §2）；用宿主只 include 本头即可。 */
 #include "imrtc_c_history.h"
+/* 调试密钥本地签票（仅联调）同理。 */
+#include "imrtc_c_debug.h"
 
 #endif /* IMRTC_V1_C_H */

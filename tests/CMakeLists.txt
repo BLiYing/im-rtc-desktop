@@ -19,6 +19,7 @@ add_executable(im_rtc_engine_tests
   ForceEndTest.cpp
   ActionResultTest.cpp
   CallHistoryTest.cpp
+  DebugTokenTest.cpp
   MediaPlaneTest.cpp
 )
 
