@@ -28,7 +28,7 @@ BIN="./build/${PRESET}/tools/imrtc_smoke"
 
 [ -x "$BIN" ] || { echo "先编译：cmake --build --preset ${PRESET}"; exit 2; }
 
-echo "== 取 demo 票（$USERNAME）=="
+echo "== 取 demo 票（${USERNAME}）=="
 # 免密登录只在开发构建可用（rtc-server -demo-login，拍板 §11-9）。
 TOKEN=$(curl -fsS -X POST "$RTC_HTTP/v1/demo/login" \
   -H 'Content-Type: application/json' \

@@ -41,6 +41,22 @@ namespace capi {
  * 与 C 那张函数指针表一一对应；参数用 `std::string` 是**拷贝**——
  * C 那边承诺指针只在回调期间有效，拷一份才敢往后传。
  */
+/** `Observer::onCallSummary` 的参数（字段含义见 imrtc_c.h 的 imrtc_v1_call_summary）。 */
+struct CallSummaryInfo {
+  std::string callId;
+  std::string reason;
+  imrtc_v1_end_reason reasonCode = IMRTC_V1_END_ERROR;
+  std::int64_t durationSec = 0;
+  std::string endedBy;
+  std::string mediaType;
+  bool isGroup = false;
+  std::string chatGroupId;
+  std::string caller;
+  std::string role;
+  std::string peer;
+  std::string userData;
+};
+
 class Observer {
 public:
   virtual ~Observer() = default;
@@ -89,6 +105,11 @@ public:
                          imrtc_v1_end_reason reasonCode) {
     (void)callId; (void)reason; (void)durationSec; (void)endedBy; (void)reasonCode;
   }
+  /**
+   * 通话事实汇总（通话记录设计 §4），紧跟 onCallEnd、每通拿到 call_id 的电话恰好一次。
+   * 宿主要发通话记录消息的话，只在 `role == "caller"` 时发。
+   */
+  virtual void onCallSummary(const CallSummaryInfo& summary) { (void)summary; }
   /** 通话中被第三个人呼叫、服务端已替你回了忙线。**不是**一次需要你处理的来电。 */
   virtual void onCallMissed(const std::string& callId, const std::string& caller,
                             const std::string& reason) {
@@ -166,6 +187,7 @@ public:
     table.on_call_received = &Engine::cbCallReceived;
     table.on_call_begin = &Engine::cbCallBegin;
     table.on_call_end = &Engine::cbCallEnd;
+    table.on_call_summary = &Engine::cbCallSummary;
     table.on_call_missed = &Engine::cbCallMissed;
     table.on_call_cancelled = &Engine::cbCallCancelled;
     table.on_call_rejected = &Engine::cbCallRejected;
@@ -467,6 +489,24 @@ private:
     if (o == nullptr || end == nullptr) return;
     o->onCallEnd(text(end->call_id), text(end->reason), end->duration_sec, text(end->ended_by),
                 end->reason_code);
+  }
+  static void cbCallSummary(void* u, const imrtc_v1_call_summary* s) {
+    Observer* o = self(u);
+    if (o == nullptr || s == nullptr) return;
+    CallSummaryInfo info;
+    info.callId = text(s->call_id);
+    info.reason = text(s->reason);
+    info.reasonCode = s->reason_code;
+    info.durationSec = s->duration_sec;
+    info.endedBy = text(s->ended_by);
+    info.mediaType = text(s->media_type);
+    info.isGroup = s->is_group != 0;
+    info.chatGroupId = text(s->chat_group_id);
+    info.caller = text(s->caller);
+    info.role = text(s->role);
+    info.peer = text(s->peer);
+    info.userData = text(s->user_data);
+    o->onCallSummary(info);
   }
   static void cbCallMissed(void* u, const imrtc_v1_call_missed* missed) {
     Observer* o = self(u);

@@ -76,6 +76,10 @@ public:
                 static_cast<long long>(durationSec), endedBy.c_str(), callId.c_str());
     finished = true;
   }
+  void onCallSummary(const imrtc::capi::CallSummaryInfo& s) override {
+    std::printf("  ✓ onCallSummary    role=%s peer=%s duration=%lld（call=%s）\n", s.role.c_str(),
+                s.peer.c_str(), static_cast<long long>(s.durationSec), s.callId.c_str());
+  }
   void onCallReceived(const std::string& callId, const std::string& caller,
                       const std::vector<std::string>&, const std::string& mediaType, bool,
                       const std::string& chatGroupId, const std::string&,

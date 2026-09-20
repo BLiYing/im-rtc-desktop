@@ -83,6 +83,26 @@ void CObserver::onCallEnd(const CallEnd& end) {
   table_.on_call_end(table_.user_data, &out);
 }
 
+void CObserver::onCallSummary(const CallSummary& summary) {
+  // 旧宿主的 struct_size 不含它：imrtc_observer_create 拷表时缺的尾部已补零，这里就是 NULL。
+  if (!table_.on_call_summary) return;
+  imrtc_v1_call_summary out{};
+  out.struct_size = sizeof(out);
+  out.call_id = summary.callId.c_str();
+  out.reason = summary.reason.c_str();
+  out.reason_code = toEndReason(summary.reasonCode);
+  out.duration_sec = summary.durationSec;
+  out.ended_by = summary.endedBy.c_str();
+  out.media_type = summary.mediaType.c_str();
+  out.is_group = fromBool(summary.isGroup);
+  out.chat_group_id = summary.chatGroupId.c_str();
+  out.caller = summary.caller.c_str();
+  out.role = summary.role.c_str();
+  out.peer = summary.peer.c_str();
+  out.user_data = summary.userData.c_str();
+  table_.on_call_summary(table_.user_data, &out);
+}
+
 void CObserver::onCallMissed(const CallMissed& missed) {
   if (!table_.on_call_missed) return;
   imrtc_v1_call_missed out{};

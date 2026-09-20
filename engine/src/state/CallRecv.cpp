@@ -77,6 +77,7 @@ CallOutput handleIncoming(const CallContext& ctx, const Json& data) {
   next.callerUid = str(data, "caller");
   next.chatGroupId = str(data, "chat_group_id");
   next.userData = str(data, "user_data");
+  next.peerUid = next.isGroup ? std::string() : next.callerUid;
 
   /*
     inviter 是**这次邀请是谁发的**：首次邀请就是主叫本人，`call.invite_more` 拉进来的人

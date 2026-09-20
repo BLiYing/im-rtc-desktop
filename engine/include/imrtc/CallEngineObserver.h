@@ -104,6 +104,33 @@ struct CallEnd {
   EndReason reasonCode = EndReason::Error;
 };
 
+/**
+ * CallSummary 对应 `onCallSummary`（通话记录设计 §4）：这通电话的事实一次给齐。
+ * **紧跟 `onCallEnd`、每通拿到 call_id 的电话恰好一次**；未接通、被拒、`*_elsewhere` 也来。
+ * 宿主要发通话记录消息的话，只在 `role == "caller"` 时发，不用自己比对 uid。
+ * 本地就地拒掉 / 发不出去的 `call()` 不触发。
+ */
+struct CallSummary {
+  std::string callId;
+  /** §6 的封闭枚举，陌生值已折成 "error"。 */
+  std::string reason;
+  EndReason reasonCode = EndReason::Error;
+  /** 服务端给的秒数，未接通恒 0。 */
+  std::int64_t durationSec = 0;
+  std::string endedBy;
+  /** "audio" / "video"。 */
+  std::string mediaType;
+  bool isGroup = false;
+  std::string chatGroupId;
+  std::string caller;
+  /** "caller" / "callee"。 */
+  std::string role;
+  /** 1v1 的对端 uid；群通话为空串。 */
+  std::string peer;
+  /** 主叫拨号时透传的宿主私有字符串，原样返回。 */
+  std::string userData;
+};
+
 /** CallMissed 对应 `onCallMissed`：通话中被第三个人呼叫，服务端已自动回了忙线。 */
 struct CallMissed {
   std::string callId;
@@ -153,6 +180,8 @@ public:
   virtual void onCallBegin(const CallBegin& begin) { (void)begin; }
   /** **所有结束分支的唯一出口**。宿主只监听它也必须能完整记录一通电话。 */
   virtual void onCallEnd(const CallEnd& end) { (void)end; }
+  /** 紧跟 `onCallEnd` 的通话事实汇总，见 `CallSummary`。 */
+  virtual void onCallSummary(const CallSummary& summary) { (void)summary; }
   /** 通话中有人打进来、已被自动回忙线。界面据此提示一句谁来过电话。 */
   virtual void onCallMissed(const CallMissed& missed) { (void)missed; }
   /** 便利事件：主叫取消。**随后必有一条 onCallEnd**（不变量 I2）。 */

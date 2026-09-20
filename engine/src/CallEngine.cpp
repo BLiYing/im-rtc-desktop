@@ -389,6 +389,7 @@ void CallEngine::apply(const MachineInput& input, const std::string& replyReqId)
  */
 void CallEngine::dispatchOutput(EngineOutput output, const std::string& replyReqId,
                                 const std::shared_ptr<Settlement>& settlement) {
+  if (context_.call.state != CallState::Idle) lastActiveCall_ = context_.call;
   context_ = std::move(output.state);
   // 翻页退订的截止时刻**每轮对账一次**，不在各条来路上各记各删（见 syncUnsubscribeDeadlines）。
   syncUnsubscribeDeadlines();
@@ -435,9 +436,36 @@ void CallEngine::emitAll(const std::vector<EmittedEvent>& events) {
     }
     if (event.cb == "onCallReceived") joinedAtInvite_ = strArray(event.args, "joined_ids");
     emitEvent(event);
+    if (event.cb == "onCallEnd") emitCallSummary(event);
     if (event.cb == "onRoomJoined") reconcileJoinedAtInvite(event);
   }
   reactToEvents(events);
+}
+
+/*
+  通话记录设计 §4：紧跟 onCallEnd、每通有 call_id 的电话恰好一次。用结束前记下的上下文拼；
+  拼完就清掉，免得随后一条本地合成的 onCallEnd（没有通话）捡到上一通的残留。
+*/
+void CallEngine::emitCallSummary(const EmittedEvent& end) {
+  const CallContext call = std::move(lastActiveCall_);
+  lastActiveCall_ = CallContext{};
+  std::string callId = str(end.args, "call_id");
+  if (callId.empty()) callId = call.callId;
+  if (call.state == CallState::Idle || callId.empty()) return;
+  std::string caller = call.callerUid;
+  if (caller.empty() && call.role == "caller") caller = uid_;
+  emitEvent(eventOf("onCallSummary",
+                    obj({{"call_id", Json::make(callId)},
+                         {"reason", Json::make(str(end.args, "reason"))},
+                         {"duration_sec", Json::make(num(end.args, "duration_sec"))},
+                         {"ended_by", Json::make(str(end.args, "ended_by"))},
+                         {"media_type", Json::make(call.mediaType)},
+                         {"is_group", Json::make(call.isGroup)},
+                         {"chat_group_id", Json::make(call.chatGroupId)},
+                         {"caller", Json::make(caller)},
+                         {"role", Json::make(call.role)},
+                         {"peer", Json::make(call.peerUid)},
+                         {"user_data", Json::make(call.userData)}})));
 }
 
 /*

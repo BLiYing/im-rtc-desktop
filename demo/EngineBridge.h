@@ -210,6 +210,7 @@ private:
   void onCallBegin(const std::string& callId, const std::string& roomId, const std::string& role,
                    const std::string& caller, const std::string& chatGroupId,
                    const std::string& userData) override;
+  void onCallSummary(const imrtc::capi::CallSummaryInfo& summary) override;
   void onCallEnd(const std::string& callId, const std::string& reason, std::int64_t durationSec,
                  const std::string& endedBy, imrtc_v1_end_reason reasonCode) override;
   void onCallMissed(const std::string& callId, const std::string& caller,

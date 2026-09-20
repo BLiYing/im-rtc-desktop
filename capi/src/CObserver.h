@@ -32,6 +32,7 @@ public:
   void onCallReceived(const CallInvite& invite) override;  // invite.inviter：谁把你拉进来的
   void onCallBegin(const CallBegin& begin) override;
   void onCallEnd(const CallEnd& end) override;
+  void onCallSummary(const CallSummary& summary) override;
   void onCallMissed(const CallMissed& missed) override;
 
   void onCallCancelled(const std::string& uid) override;

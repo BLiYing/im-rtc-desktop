@@ -340,6 +340,7 @@ private:
   /** reactToEvents 让媒体面跟着通话/房间的生命周期走（进房推流、终局归零）。 */
   void reactToEvents(const std::vector<EmittedEvent>& events);
   /** reconcileJoinedAtInvite 见 CallEngine.cpp。 */
+  void emitCallSummary(const EmittedEvent& end);
   void reconcileJoinedAtInvite(const EmittedEvent& joined);
   /** videoTrackOf 找某个 uid 的远端视频轨道；没有则空串。 */
   std::string videoTrackOf(const std::string& uid) const;
@@ -417,6 +418,8 @@ private:
   std::int64_t callStartedAtMs_ = 0;
   /** 来电时服务端说「此刻已在通话里的人」。进房快照到了就拿它对账，然后清空（只对被叫有值）。 */
   std::vector<std::string> joinedAtInvite_;
+  /** 上一步之前的通话上下文（非 Idle 才记）：`onCallEnd` 落地后对端 / 群号 / 角色已清零，summary 要用它。 */
+  CallContext lastActiveCall_;
   /** 重入期间攒下的调用结果，排在 deferredEmits_ 之后放（状态事件先于结果）。 */
   std::vector<std::pair<std::shared_ptr<Settlement>, ActionResult>> deferredResults_;
   /** 还没交出结果的调用。析构时一律回 2005（R5：每次被受理的调用恰好回一次）。 */

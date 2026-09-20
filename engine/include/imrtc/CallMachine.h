@@ -60,6 +60,8 @@ struct CallContext {
   std::string chatGroupId;
   /** 同上，user_data。 */
   std::string userData;
+  /** 1v1 的对端 uid（主叫 = 被叫，被叫 = 主叫）；群通话为空。只为 `onCallSummary` 记下。 */
+  std::string peerUid;
 };
 
 using CallOutput = MachineOutput<CallContext>;

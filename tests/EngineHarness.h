@@ -42,12 +42,20 @@ public:
   }
   /** 每条 onError 的 for_type，与 log 里的 error 条目同序。 */
   std::vector<std::string> errorForTypes;
+  /** onCallSummary 不进 log：既有用例按整条 log 比对，summary 单独收，且用 `endOrder` 验它紧跟 onCallEnd。 */
+  void onCallSummary(const imrtc::CallSummary& summary) override {
+    summaries.push_back(summary);
+    endOrder.push_back("summary");
+  }
+  std::vector<imrtc::CallSummary> summaries;
+  std::vector<std::string> endOrder;
   void onCallBegin(const imrtc::CallBegin& begin) override {
     log.push_back("callBegin:" + begin.callId + "/" + begin.role);
   }
   void onCallEnd(const imrtc::CallEnd& end) override {
     log.push_back("callEnd:" + end.reason + "/" + std::to_string(end.durationSec));
     lastCallEndReasonCode = end.reasonCode;
+    endOrder.push_back("end");
   }
   imrtc::EndReason lastCallEndReasonCode = imrtc::EndReason::Error;
   void onCallMissed(const imrtc::CallMissed& missed) override {

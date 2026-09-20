@@ -310,6 +310,7 @@ void EngineBridge::onCallReceived(const std::string& callId, const std::string& 
                                   const std::string& inviter,
                                   const std::vector<std::string>& joinedIds) {
   assertOnGuiThread("onCallReceived");
+  (void)joinedIds;  // Demo 的格子布局暂不用它；SDK 已把数据给齐（宿主自己摆格子时用）
   // 通话生命周期的三条日志：联调时「到底谁没收到」全靠它们定位。
   qCInfo(lcBridge, "onCallReceived call=%s caller=%s inviter=%s media=%s group=%d chat_group=%s",
          callId.c_str(), caller.c_str(), inviter.c_str(), mediaType.c_str(), isGroup ? 1 : 0,
@@ -337,6 +338,14 @@ void EngineBridge::onCallEnd(const std::string& callId, const std::string& reaso
   qCInfo(lcBridge, "onCallEnd call=%s reason=%s reason_code=%d duration=%lld", callId.c_str(),
          reason.c_str(), static_cast<int>(reasonCode), static_cast<long long>(durationSec));
   emit callEnded(qs(callId), qs(reason), durationSec, qs(endedBy));
+}
+
+void EngineBridge::onCallSummary(const imrtc::capi::CallSummaryInfo& summary) {
+  assertOnGuiThread("onCallSummary");
+  // 通话记录消息由宿主 IM 层按 role == caller 发；Demo 没有 IM，只留一行日志。
+  qCInfo(lcBridge, "onCallSummary call=%s role=%s peer=%s group=%d duration=%lld",
+         summary.callId.c_str(), summary.role.c_str(), summary.peer.c_str(), summary.isGroup ? 1 : 0,
+         static_cast<long long>(summary.durationSec));
 }
 
 void EngineBridge::onCallMissed(const std::string& callId, const std::string& caller,

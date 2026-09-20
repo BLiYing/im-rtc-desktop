@@ -285,6 +285,32 @@ typedef struct imrtc_v1_call_end {
   imrtc_v1_end_reason reason_code;
 } imrtc_v1_call_end;
 
+/**
+ * 通话事实汇总，对应 on_call_summary（通话记录设计 §4）。**紧跟 on_call_end、每通拿到 call_id 的
+ * 电话恰好一次**；宿主要发通话记录消息的话，只在 role == "caller" 时发。
+ */
+typedef struct imrtc_v1_call_summary {
+  uint32_t struct_size;
+  const char* call_id;
+  /** §6 的封闭枚举，陌生值已折成 "error"。 */
+  const char* reason;
+  imrtc_v1_end_reason reason_code;
+  /** 服务端给的秒数，未接通恒 0。 */
+  int64_t duration_sec;
+  const char* ended_by;
+  /** "audio" / "video"。 */
+  const char* media_type;
+  imrtc_v1_bool is_group;
+  const char* chat_group_id;
+  const char* caller;
+  /** "caller" / "callee"。 */
+  const char* role;
+  /** 1v1 的对端 uid；群通话为空串。 */
+  const char* peer;
+  /** 主叫拨号时透传的宿主私有字符串，原样返回。 */
+  const char* user_data;
+} imrtc_v1_call_summary;
+
 /** 通话中被第三个人呼叫、已被自动回忙线，对应 on_call_missed。 */
 typedef struct imrtc_v1_call_missed {
   uint32_t struct_size;
@@ -365,6 +391,10 @@ typedef struct imrtc_v1_observer {
    * on_user_reject / on_user_no_response 收掉。
    */
   void (*on_user_ringing)(void* user_data, const char* uid);
+
+  /* 以下 2026-09-20 追加，规矩同上：旧宿主的 struct_size 不含它，引擎当它是 NULL。 */
+  /** 通话事实汇总，紧跟 on_call_end。见 imrtc_v1_call_summary。 */
+  void (*on_call_summary)(void* user_data, const imrtc_v1_call_summary* summary);
 } imrtc_v1_observer;
 
 /** 构造参数。**填 struct_size**。 */

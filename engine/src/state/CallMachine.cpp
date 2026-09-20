@@ -76,6 +76,10 @@ CallOutput startCall(const CallContext& ctx, const Json& args) {
   // 记下来供 handleConnected 回落——call.connected 缺席这两个字段时用得上（兼容旧服务端）。
   next.chatGroupId = chatGroupId;
   next.userData = userData;
+  {
+    const std::vector<std::string> callees = strArray(args, "callee_ids");
+    next.peerUid = (isGroup || callees.empty()) ? std::string() : callees.front();
+  }
 
   Json frameData = obj({{"callee_ids", std::move(calleeIds)},
                         {"media_type", Json::make(mediaType)},

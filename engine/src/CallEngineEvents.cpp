@@ -93,6 +93,14 @@ bool dispatchObserverEvent(CallEngineObserver& out, const EmittedEvent& event) {
     const std::string reason = str(args, "reason");
     target->onCallEnd(CallEnd{str(args, "call_id"), reason, num(args, "duration_sec"),
                               str(args, "ended_by"), endReasonOf(reason)});
+  } else if (cb == "onCallSummary") {
+    const std::string reason = str(args, "reason");
+    target->onCallSummary(CallSummary{str(args, "call_id"), reason, endReasonOf(reason),
+                                      num(args, "duration_sec"), str(args, "ended_by"),
+                                      str(args, "media_type"), boolean(args, "is_group"),
+                                      str(args, "chat_group_id"), str(args, "caller"),
+                                      str(args, "role"), str(args, "peer"),
+                                      str(args, "user_data")});
   } else if (cb == "onCallMissed") {
     target->onCallMissed(
         CallMissed{str(args, "call_id"), str(args, "caller"), str(args, "reason")});

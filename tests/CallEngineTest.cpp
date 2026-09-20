@@ -596,3 +596,46 @@ IMRTC_TEST(engineRoomSnapshotReconcilesJoinedAtInvite,
   CHECK_TRUE(has("userLeave:bob"), "bob 在响铃阶段走了，要补 onUserLeave");
   CHECK_TRUE(!has("userLeave:alice"), "alice 还在房里，不能被收掉");
 }
+
+IMRTC_TEST(engineCallSummaryForCallerOneToOne,
+           "CallEngine —— 通话事实汇总：主叫 1v1 未接通，peer 是被叫、caller 回落自己，只来一条且紧跟 onCallEnd（2026-09-20）") {
+  Harness harness;
+  harness.login();
+  harness.engine->call({"bob"}, "video", false);
+  harness.reply(imrtc::okType(imrtc::frame::kCallInvite),
+                Json::parse("{\"call_id\":\"call-1\",\"room_id\":\"r-1\"}"));
+  const char* ended = "{\"call_id\":\"call-1\",\"reason\":\"no_answer\",\"duration_sec\":0,\"ended_by\":\"\"}";
+  harness.event(imrtc::frame::kCallEnded, Json::parse(ended));
+  harness.event(imrtc::frame::kCallEnded, Json::parse(ended));  // 迟到的重复帧
+  CHECK_EQ(harness.recorder->endOrder, (std::vector<std::string>{"end", "summary"}), "summary 紧跟 onCallEnd，且只一条");
+  const imrtc::CallSummary& s = harness.recorder->summaries.at(0);
+  CHECK_EQ(s.callId, std::string("call-1"), "call_id");
+  CHECK_EQ(s.reason, std::string("no_answer"), "reason");
+  CHECK_EQ(s.role, std::string("caller"), "role");
+  CHECK_EQ(s.peer, std::string("bob"), "1v1 的 peer 是被叫");
+  CHECK_EQ(s.mediaType, std::string("video"), "media_type");
+  CHECK_TRUE(!s.caller.empty(), "主叫没接通就结束，caller 回落自己的 uid");
+}
+
+IMRTC_TEST(engineCallSummaryForCalleeGroup,
+           "CallEngine —— 通话事实汇总：被叫群通话，role=callee、peer 为空、时长取服务端值（2026-09-20）") {
+  Harness harness;
+  harness.login();
+  harness.event(imrtc::frame::kCallIncoming,
+                Json::parse("{\"call_id\":\"call-1\",\"room_id\":\"r-1\",\"caller\":\"bob\","
+                            "\"callee_ids\":[\"alice\"],\"media_type\":\"audio\",\"is_group\":true,"
+                            "\"chat_group_id\":\"g-1\",\"user_data\":\"u\"}"));
+  harness.event(imrtc::frame::kCallEnded,
+                Json::parse("{\"call_id\":\"call-1\",\"reason\":\"hangup\",\"duration_sec\":42,"
+                            "\"ended_by\":\"bob\"}"));
+  CHECK_EQ(harness.recorder->summaries.size(), std::size_t{1}, "恰好一条");
+  const imrtc::CallSummary& s = harness.recorder->summaries.at(0);
+  CHECK_EQ(s.role, std::string("callee"), "role");
+  CHECK_EQ(s.caller, std::string("bob"), "caller");
+  CHECK_EQ(s.peer, std::string(), "群通话 peer 为空");
+  CHECK_TRUE(s.isGroup, "is_group");
+  CHECK_EQ(s.chatGroupId, std::string("g-1"), "chat_group_id");
+  CHECK_EQ(s.userData, std::string("u"), "user_data");
+  CHECK_EQ(s.durationSec, std::int64_t{42}, "时长取服务端值");
+  CHECK_EQ(s.endedBy, std::string("bob"), "ended_by");
+}
