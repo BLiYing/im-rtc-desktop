@@ -164,6 +164,8 @@ add_custom_command(TARGET my_app POST_BUILD
   engine 与测试不该因为一个 Demo 就依赖 Qt
 - **《接入指南》**：[docs/INTEGRATION_GUIDE.md](docs/INTEGRATION_GUIDE.md)，
   给「要把它装进自己 Windows / macOS 应用」的人看，不必读引擎源码
+- **在线指南**：启动 im-rtc-server 后访问 `/guide/desktop`（本机默认 `http://127.0.0.1:8787/guide/desktop`）——
+  与上面那份**互补**：在线版是四端统一的接入步骤与 API 速查，本仓这份讲 C ABI 的规矩、渲染路径与构建平台
 
 约 10100 行 C++17。`./scripts/test.sh` **65 个用例全绿**（macOS），
 ASan / UBSan / TSan 都干净。
