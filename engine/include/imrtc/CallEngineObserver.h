@@ -60,6 +60,12 @@ struct CallInvite {
    * 服务端没带（旧版本）时 Engine 已回落成 `caller`，宿主不用自己兜底。
    */
   std::string inviter;
+  /**
+   * 此刻已经在通话里的人（2026-09-20，不含自己）。展开页据此把他们摆成正常格子，
+   * `calleeIds` 里不在其中的才是「呼叫中…」。服务端没带（旧版本）时为空，宿主回落成只有 `caller`。
+   * 进房时引擎会对这份名单对账：响铃阶段离场的人补一条 `onUserLeave`。
+   */
+  std::vector<std::string> joinedIds;
 };
 
 /** CallBegin 对应 `onCallBegin`：双方在这一刻同时开始计时。 */

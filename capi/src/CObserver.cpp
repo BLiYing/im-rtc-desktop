@@ -36,6 +36,10 @@ void CObserver::onCallReceived(const CallInvite& invite) {
   ids.reserve(invite.calleeIds.size());
   for (const std::string& id : invite.calleeIds) ids.push_back(id.c_str());
 
+  std::vector<const char*> joined;
+  joined.reserve(invite.joinedIds.size());
+  for (const std::string& id : invite.joinedIds) joined.push_back(id.c_str());
+
   imrtc_v1_call_invite out{};
   out.struct_size = sizeof(out);
   out.call_id = invite.callId.c_str();
@@ -47,6 +51,8 @@ void CObserver::onCallReceived(const CallInvite& invite) {
   out.chat_group_id = invite.chatGroupId.c_str();
   out.user_data = invite.userData.c_str();
   out.inviter = invite.inviter.c_str();
+  out.joined_ids = joined.empty() ? nullptr : joined.data();
+  out.joined_count = static_cast<std::uint32_t>(joined.size());
   table_.on_call_received(table_.user_data, &out);
 }
 

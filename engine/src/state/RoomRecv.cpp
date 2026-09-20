@@ -41,8 +41,13 @@ std::string kindOf(const Json& data) { return str(data, "kind") == "video" ? "vi
 
 /** handleJoinOk 用快照把房间一次性搭起来：先成员，再他们的 Track。 */
 RoomOutput handleJoinOk(const RoomContext& ctx, const Json& data) {
-  std::vector<EmittedEvent> emit = {
-      eventOf("onRoomJoined", obj({{"room_id", Json::make(str(data, "room_id"))}}))};
+  // uids = 进房这一刻房里已有的人（快照）。引擎靠它对账响铃阶段记下的「已在通话的人」，见 CallEngine::emitAll。
+  Json present = Json::makeArray();
+  if (const Json* snapshot = data.find("participants")) {
+    for (const Json& participant : snapshot->items()) present.push(Json::make(str(participant, "uid")));
+  }
+  std::vector<EmittedEvent> emit = {eventOf(
+      "onRoomJoined", obj({{"room_id", Json::make(str(data, "room_id"))}, {"uids", std::move(present)}}))};
 
   RoomContext next = ctx;
   next.state = RoomState::Joined;

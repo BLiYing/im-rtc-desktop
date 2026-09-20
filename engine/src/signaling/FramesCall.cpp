@@ -58,6 +58,9 @@ const FrameFields& incomingFields() {
       // invite_more 拉人进来时 inviter 才是按下「添加成员」的那个人。空串 = 旧服务端不带，
       // 由 handleIncoming 回落成 caller。
       stringField("inviter"),
+      // 此刻已在通话里的人（不含收件人，2026-09-20）。**必须列在这里**：解码只认表里的字段。
+      // 空 = 旧服务端不带，宿主回落成「只有 caller 在通话里」。
+      stringArrayField("joined_ids"),
   };
   return kFields;
 }

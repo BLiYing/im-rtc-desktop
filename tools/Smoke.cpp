@@ -79,7 +79,7 @@ public:
   void onCallReceived(const std::string& callId, const std::string& caller,
                       const std::vector<std::string>&, const std::string& mediaType, bool,
                       const std::string& chatGroupId, const std::string&,
-                      const std::string& inviter) override {
+                      const std::string& inviter, const std::vector<std::string>&) override {
     // inviter 与 caller 分开打：群里被 invite_more 拉进来时这两个人不是同一个。
     std::printf("  ✓ onCallReceived   call=%s caller=%s inviter=%s media=%s group=%s\n",
                 callId.c_str(), caller.c_str(), inviter.c_str(), mediaType.c_str(),

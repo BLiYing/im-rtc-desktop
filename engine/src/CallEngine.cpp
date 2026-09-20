@@ -429,10 +429,30 @@ void CallEngine::emitAll(const std::vector<EmittedEvent>& events) {
   for (const EmittedEvent& event : events) {
     // 本端进这通电话的那一刻：forceEnd 本地算时长用它，中途被拉进来的人不算上整通的时长。
     if (event.cb == "onCallBegin") callStartedAtMs_ = options_.clock();
-    if (event.cb == "onCallEnd") callStartedAtMs_ = 0;
+    if (event.cb == "onCallEnd") {
+      callStartedAtMs_ = 0;
+      joinedAtInvite_.clear();
+    }
+    if (event.cb == "onCallReceived") joinedAtInvite_ = strArray(event.args, "joined_ids");
     emitEvent(event);
+    if (event.cb == "onRoomJoined") reconcileJoinedAtInvite(event);
   }
   reactToEvents(events);
+}
+
+/*
+  响铃阶段本端不在房里，别人离场收不到 onUserLeave。进房快照到了，来电时记下的「已在通话的人」里
+  不在快照中的，就是那段时间走掉的——补一条 onUserLeave，宿主收掉他们的格子。只做一次。
+*/
+void CallEngine::reconcileJoinedAtInvite(const EmittedEvent& joined) {
+  if (joinedAtInvite_.empty()) return;
+  const std::vector<std::string> present = strArray(joined.args, "uids");
+  std::vector<std::string> stale;
+  stale.swap(joinedAtInvite_);
+  for (const std::string& uid : stale) {
+    if (std::find(present.begin(), present.end(), uid) != present.end()) continue;
+    emitEvent(eventOf("onUserLeave", obj({{"uid", Json::make(uid)}})));
+  }
 }
 
 void CallEngine::emitOrDefer(EmittedEvent event) {

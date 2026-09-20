@@ -92,6 +92,11 @@ CallOutput handleIncoming(const CallContext& ctx, const Json& data) {
     calleeIds.push(Json::make(uid));
   }
 
+  Json joinedIds = Json::makeArray();
+  for (const std::string& uid : strArray(data, "joined_ids")) {
+    joinedIds.push(Json::make(uid));
+  }
+
   return callOut(next, {},
                  {eventOf("onCallReceived",
                           obj({{"call_id", Json::make(next.callId)},
@@ -99,6 +104,8 @@ CallOutput handleIncoming(const CallContext& ctx, const Json& data) {
                                {"inviter", Json::make(inviter)},
                                // **原样带上**：群通话里被叫要靠它摆占位格。
                                {"callee_ids", std::move(calleeIds)},
+                               // 此刻已在通话里的人；旧服务端不带 = 空。
+                               {"joined_ids", std::move(joinedIds)},
                                {"media_type", Json::make(mediaType)},
                                {"is_group", Json::make(next.isGroup)},
                                // 群号与 user_data：被叫靠它决定「添加成员」列谁（§3.2）。

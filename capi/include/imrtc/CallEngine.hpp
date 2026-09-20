@@ -21,6 +21,7 @@
  * （Qt 用 `QMetaObject::invokeMethod` 或 `Qt::QueuedConnection`）。
  */
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -68,9 +69,10 @@ public:
                               const std::vector<std::string>& calleeIds,
                               const std::string& mediaType, bool isGroup,
                               const std::string& chatGroupId, const std::string& userData,
-                              const std::string& inviter) {
+                              const std::string& inviter,
+                              const std::vector<std::string>& joinedIds) {
     (void)callId; (void)caller; (void)calleeIds; (void)mediaType; (void)isGroup;
-    (void)chatGroupId; (void)userData; (void)inviter;
+    (void)chatGroupId; (void)userData; (void)inviter; (void)joinedIds;
   }
   /**
    * `caller` / `chatGroupId` / `userData` 取 `call.connected` 里的值，为空时回落到
@@ -445,9 +447,14 @@ private:
     if (o == nullptr || invite == nullptr) return;
     std::vector<std::string> ids;
     for (std::uint32_t i = 0; i < invite->callee_count; ++i) ids.push_back(text(invite->callee_ids[i]));
+    // 2026-09-20 追加的字段：旧引擎给的结构体不含它们，先看 struct_size 够不够再读。
+    std::vector<std::string> joined;
+    if (invite->struct_size >= offsetof(imrtc_v1_call_invite, joined_count) + sizeof(invite->joined_count)) {
+      for (std::uint32_t i = 0; i < invite->joined_count; ++i) joined.push_back(text(invite->joined_ids[i]));
+    }
     o->onCallReceived(text(invite->call_id), text(invite->caller), ids, text(invite->media_type),
                       invite->is_group != 0, text(invite->chat_group_id), text(invite->user_data),
-                      text(invite->inviter));
+                      text(invite->inviter), joined);
   }
   static void cbCallBegin(void* u, const imrtc_v1_call_begin* begin) {
     Observer* o = self(u);

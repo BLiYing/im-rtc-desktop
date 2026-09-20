@@ -571,3 +571,28 @@ IMRTC_TEST(engineCallbackCoverage, "CallEngine —— 两台状态机能抛的�
   bogus.args = Json::makeObject();
   CHECK_EQ(imrtc::dispatchObserverEvent(sink, bogus), false, "未知回调名必须报 false");
 }
+
+IMRTC_TEST(engineRoomSnapshotReconcilesJoinedAtInvite,
+           "CallEngine —— 响铃阶段离场的人：进房快照里没有他，引擎补一条 onUserLeave（2026-09-20）") {
+  Harness harness;
+  harness.login();
+  // 来电时 alice、bob 在通话里；carol（本端）被拉进来。接听前 bob 挂了，所以快照里只有 alice。
+  harness.event(imrtc::frame::kCallIncoming,
+                Json::parse("{\"call_id\":\"call-1\",\"room_id\":\"r-1\",\"caller\":\"alice\","
+                            "\"inviter\":\"alice\",\"callee_ids\":[\"bob\",\"carol\"],"
+                            "\"joined_ids\":[\"alice\",\"bob\"],\"media_type\":\"audio\",\"is_group\":true}"));
+  CHECK_EQ(harness.recorder->lastJoinedIds, (std::vector<std::string>{"alice", "bob"}),
+           "joined_ids 要穿过帧解码抛给宿主");
+
+  harness.event(imrtc::frame::kCallConnected,
+                Json::parse("{\"call_id\":\"call-1\",\"room_id\":\"r-1\",\"room_token\":\"tk\","
+                            "\"media_type\":\"audio\",\"is_group\":true,"
+                            "\"connected_at_ms\":1756876812000,\"accepted_by\":\"carol\"}"));
+  harness.reply(imrtc::okType(imrtc::frame::kRoomJoin),
+                Json::parse("{\"room_id\":\"r-1\",\"room_kind\":\"call_group\","
+                            "\"participant_id\":\"p-3\",\"participants\":[{\"uid\":\"alice\"}],\"tracks\":[]}"));
+  const auto& log = harness.recorder->log;
+  const auto has = [&](const std::string& entry) { return std::find(log.begin(), log.end(), entry) != log.end(); };
+  CHECK_TRUE(has("userLeave:bob"), "bob 在响铃阶段走了，要补 onUserLeave");
+  CHECK_TRUE(!has("userLeave:alice"), "alice 还在房里，不能被收掉");
+}

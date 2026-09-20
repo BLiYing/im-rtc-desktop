@@ -214,6 +214,13 @@ typedef struct imrtc_v1_call_invite {
    * 界面上「谁邀请你」要显示这个。服务端没带（旧版本）时引擎已回落成 caller。
    */
   const char* inviter;
+  /*
+    以下两个字段是 2026-09-20 追加的（只追加、不改旧字段，CONVENTIONS §2 红线 2）。
+    旧宿主的结构体更小，读不到它们也不会崩。
+  */
+  /** 此刻已经在通话里的人（不含自己）。展开页据此摆正常格子，callee_ids 里不在其中的才是「呼叫中…」。 */
+  const char* const* joined_ids;
+  uint32_t joined_count;
 } imrtc_v1_call_invite;
 
 /** 通话接通，对应 on_call_begin。 */

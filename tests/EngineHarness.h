@@ -42,9 +42,6 @@ public:
   }
   /** 每条 onError 的 for_type，与 log 里的 error 条目同序。 */
   std::vector<std::string> errorForTypes;
-  void onCallReceived(const imrtc::CallInvite& invite) override {
-    log.push_back("callReceived:" + invite.callId + "/" + invite.caller + "/" + invite.mediaType);
-  }
   void onCallBegin(const imrtc::CallBegin& begin) override {
     log.push_back("callBegin:" + begin.callId + "/" + begin.role);
   }
@@ -58,6 +55,12 @@ public:
   }
   void onUserAccept(const std::string& uid) override { log.push_back("userAccept:" + uid); }
   void onUserEnter(const std::string& uid) override { log.push_back("userEnter:" + uid); }
+  void onUserLeave(const std::string& uid) override { log.push_back("userLeave:" + uid); }
+  void onCallReceived(const imrtc::CallInvite& invite) override {
+    log.push_back("callReceived:" + invite.callId + "/" + invite.caller + "/" + invite.mediaType);
+    lastJoinedIds = invite.joinedIds;
+  }
+  std::vector<std::string> lastJoinedIds;
   void onRoomJoined(const std::string& roomId) override { log.push_back("roomJoined:" + roomId); }
   void onRoomLeft(const std::string& roomId) override { log.push_back("roomLeft:" + roomId); }
 

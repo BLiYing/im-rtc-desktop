@@ -307,7 +307,8 @@ void EngineBridge::onCallReceived(const std::string& callId, const std::string& 
                                   const std::vector<std::string>& calleeIds,
                                   const std::string& mediaType, bool isGroup,
                                   const std::string& chatGroupId, const std::string& userData,
-                                  const std::string& inviter) {
+                                  const std::string& inviter,
+                                  const std::vector<std::string>& joinedIds) {
   assertOnGuiThread("onCallReceived");
   // 通话生命周期的三条日志：联调时「到底谁没收到」全靠它们定位。
   qCInfo(lcBridge, "onCallReceived call=%s caller=%s inviter=%s media=%s group=%d chat_group=%s",

@@ -205,7 +205,8 @@ private:
   void onCallReceived(const std::string& callId, const std::string& caller,
                       const std::vector<std::string>& calleeIds, const std::string& mediaType,
                       bool isGroup, const std::string& chatGroupId, const std::string& userData,
-                      const std::string& inviter) override;
+                      const std::string& inviter,
+                      const std::vector<std::string>& joinedIds) override;
   void onCallBegin(const std::string& callId, const std::string& roomId, const std::string& role,
                    const std::string& caller, const std::string& chatGroupId,
                    const std::string& userData) override;
