@@ -14,7 +14,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # 版本号唯一来源：engine/include/imrtc/Version.h 的 kSdkVersion
 # （C ABI 的 imrtc_v1_version() 与各 Options 的 sdk 默认串都从那取）。
 # 这里用 file(STRINGS) 抠出同一个值给 install() 用的 imrtcConfigVersion.cmake，
-# 免得第三处又写死 "1.0.0"、迟早对不上。
+# 免得第三处又写死版本号、迟早对不上。
 file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/engine/include/imrtc/Version.h" _imrtc_version_line
      REGEX "kSdkVersion\\[\\] = \"[0-9]+\\.[0-9]+\\.[0-9]+\"")
 string(REGEX REPLACE ".*\"([0-9]+\\.[0-9]+\\.[0-9]+)\".*" "\\1" IMRTC_VERSION "${_imrtc_version_line}")
@@ -64,7 +64,7 @@ if(IMRTC_SDK_DIR)
     message(FATAL_ERROR "IMRTC_SDK_DIR 只改 Demo 的链接方式，请同时加 -DIMRTC_BUILD_DEMO=ON")
   endif()
   message(STATUS "Demo 用的 SDK：发布包 ${IMRTC_SDK_DIR}")
-  # 两档版本号都是 1.0.0，光看版本分不出源码档/发布包档——真正能分辨的只有这行 STATUS。
+  # 两档版本号相同，光看版本分不出源码档/发布包档——真正能分辨的只有这行 STATUS。
   find_package(imrtc ${IMRTC_VERSION} CONFIG REQUIRED PATHS "${IMRTC_SDK_DIR}" NO_DEFAULT_PATH)
   add_subdirectory(demo)
 else()

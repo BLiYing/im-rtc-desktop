@@ -68,7 +68,7 @@ engine 与 31 个用例照样能编能跑（少掉的 5 个是 IxTransport 的�
 `LICENSE`，与本仓根目录同一份），布局：
 
 ```
-imrtc-desktop-1.0.0-macos/
+imrtc-desktop-2.0.0-macos/
 ├── LICENSE                        # MIT
 ├── include/imrtc/imrtc_c.h        # 纯 C 头，对外唯一边界
 ├── include/imrtc/CallEngine.hpp   # header-only C++ RAII 包装（可选，方便 C++ 宿主）
@@ -82,9 +82,9 @@ imrtc-desktop-1.0.0-macos/
 
 ```cmake
 # CMakeLists.txt
-find_package(imrtc 1.0.0 CONFIG REQUIRED
-             PATHS /path/to/imrtc-desktop-1.0.0-macos NO_DEFAULT_PATH)
-# 也可以不传 PATHS，改用 -DCMAKE_PREFIX_PATH=/path/to/imrtc-desktop-1.0.0-macos 配置
+find_package(imrtc 2.0.0 CONFIG REQUIRED
+             PATHS /path/to/imrtc-desktop-2.0.0-macos NO_DEFAULT_PATH)
+# 也可以不传 PATHS，改用 -DCMAKE_PREFIX_PATH=/path/to/imrtc-desktop-2.0.0-macos 配置
 
 add_executable(my_app main.cpp)
 target_link_libraries(my_app PRIVATE imrtc::capi)   # 头文件路径随目标自动带上，不用再手写 include_directories

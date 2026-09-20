@@ -16,8 +16,10 @@
 #   LICENSE（MIT）
 #   include/imrtc/imrtc_c.h
 #   include/imrtc/imrtc_c_history.h（imrtc_c.h 拆出来的通话记录部分，被它 include）
+#   include/imrtc/imrtc_c_call_events.h（imrtc_c.h 拆出来的通话事件载荷结构体，被它 include）
 #   include/imrtc/CallEngine.hpp
 #   include/imrtc/CallEngineTypes.hpp（CallEngine.hpp 拆出来的值类型，被它 include）
+#   include/imrtc/CallEngineObserver.hpp（CallEngine.hpp 拆出来的回调基类，被它 include）
 #   lib/libim_rtc_engine_capi.dylib
 #   lib/cmake/imrtc/imrtcConfig.cmake …
 #

@@ -53,7 +53,7 @@
   ```bash
   ./scripts/install-hooks.sh                     # 新 clone 跑一次
   ./scripts/test.sh                              # 唯一测试入口：体量 + 配置 + 编译 + 单测 + ABI
-  ./scripts/package.sh                           # 打发布包：dist/imrtc-desktop-1.0.0-macos.zip
+  ./scripts/package.sh                           # 打发布包：dist/imrtc-desktop-2.0.0-macos.zip
   IMRTC_SDK=local  ./scripts/demo.sh             # Demo 链本机包（先跑 package.sh）
   IMRTC_SDK=public ./scripts/demo.sh             # Demo 链 GitHub Release 包
   cmake --preset macos-clang && cmake --build --preset macos-clang

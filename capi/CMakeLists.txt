@@ -73,8 +73,10 @@ install(FILES
   include/imrtc/imrtc_c.h
   include/imrtc/imrtc_c_history.h
   include/imrtc/imrtc_c_debug.h
+  include/imrtc/imrtc_c_call_events.h
   include/imrtc/CallEngine.hpp
   include/imrtc/CallEngineTypes.hpp
+  include/imrtc/CallEngineObserver.hpp
   DESTINATION include/imrtc)
 
 # LICENSE（MIT，仓根 LICENSE 文件，2026-09-16 用户拍板）装到发布包根目录——
@@ -90,8 +92,8 @@ include(CMakePackageConfigHelpers)
 
 # 兼容性策略：SameMajorVersion。C ABI 红线 2 是「只许追加字段、永不重排删除」，
 # 所以同大版本内新版 dylib 对旧版头文件永远向后兼容；大版本号只在协议不兼容时才升
-# （CLAUDE.md）。于是 find_package(imrtc 1.0.0) 应当接受任何 1.x.y（x/y ≥ 请求值），
-# 拒绝 2.0.0——那正是 SameMajorVersion 的语义，不用手写 CheckVersion 段。
+# （CLAUDE.md）。于是 find_package(imrtc 2.0.0) 应当接受任何 2.x.y（x/y ≥ 请求值），
+# 拒绝 1.x 与 3.0.0——那正是 SameMajorVersion 的语义，不用手写 CheckVersion 段。
 write_basic_package_version_file(
   "${CMAKE_CURRENT_BINARY_DIR}/imrtcConfigVersion.cmake"
   VERSION ${IMRTC_VERSION}
