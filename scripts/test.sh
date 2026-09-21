@@ -34,6 +34,10 @@ echo "== 2/8 日志纪律 =="
 ./scripts/check-logging.sh
 
 echo ""
+echo "== 2b i18n：翻译完整、与跨端文案表一致 =="
+python3 scripts/i18n_sync.py --check
+
+echo ""
 echo "== 3/8 CMake 配置（preset: ${PRESET}）=="
 # IMRTC_BUILD_DEMO=ON ./scripts/test.sh 会连 Demo 一起配置、编译，第 8 步才有得跑。
 # 不设就沿用缓存里的值（默认关）。

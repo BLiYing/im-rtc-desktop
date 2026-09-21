@@ -21,7 +21,7 @@
     </message>
     <message>
         <source>群通话 · %1 人</source>
-        <translation>Group call · %1 people</translation>
+        <translation>Group call · %1</translation>
     </message>
     <message>
         <source>视频通话</source>
@@ -65,7 +65,7 @@
     </message>
     <message>
         <source>接听</source>
-        <translation>Answer</translation>
+        <translation>Accept</translation>
     </message>
     <message>
         <source>拒绝</source>
@@ -81,7 +81,7 @@
     </message>
     <message>
         <source>挂断</source>
-        <translation>Hang up</translation>
+        <translation>End</translation>
     </message>
     <message>
         <source>纯信令模式 · 没有声音和画面</source>
@@ -152,7 +152,7 @@
     </message>
     <message>
         <source>房间号</source>
-        <translation>Room number</translation>
+        <translation>Room ID</translation>
     </message>
     <message>
         <source>8827-1190</source>
@@ -192,6 +192,32 @@
 </context>
 <context>
     <name>HistoryPage</name>
+    <message>
+        <source>加载中…</source>
+        <translation>Loading…</translation>
+    </message>
+    <message>
+        <source>加载更多</source>
+        <translation>Load more</translation>
+    </message>
+    <message>
+        <source>加载失败：%1，点「刷新」重试</source>
+        <translation>Failed to load: %1. Click Refresh to retry.</translation>
+    </message>
+    <message>
+        <source>还没有通话记录。
+
+这一页从服务端拉（SDK 的 fetchCallHistory）：
+对方、方向、媒体类型、结束原因、时长。</source>
+        <translation>No call history yet.
+
+This page is fetched from the server (SDK fetchCallHistory):
+peer, direction, media type, end reason, duration.</translation>
+    </message>
+    <message>
+        <source>刷新</source>
+        <translation>Refresh</translation>
+    </message>
     <message>
         <source>清空通话记录</source>
         <translation>Clear call history</translation>
@@ -235,7 +261,7 @@ who, which direction, which media, why it ended, how long it lasted.</translatio
     </message>
     <message>
         <source>接听</source>
-        <translation>Answer</translation>
+        <translation>Accept</translation>
     </message>
     <message>
         <source>纯信令模式：媒体还没接入，这个按钮现在不会有任何效果。</source>
@@ -322,6 +348,22 @@ The desktop product offers only the “your own UI” path — this demo is its 
 </context>
 <context>
     <name>MainWindow</name>
+    <message>
+        <source>票据已失效，请重新登录以换取新票。</source>
+        <translation>Your ticket has expired. Sign in again to get a new one.</translation>
+    </message>
+    <message>
+        <source>接入参数不合规（如 device_id 含非法字符），请检查配置。</source>
+        <translation>Invalid connection parameters (for example, device_id contains illegal characters). Check your configuration.</translation>
+    </message>
+    <message>
+        <source>您的账号已在别处登录。</source>
+        <translation>Your account has signed in elsewhere.</translation>
+    </message>
+    <message>
+        <source>加人失败：%1（%2）</source>
+        <translation>Failed to add someone: %1 (%2)</translation>
+    </message>
     <message>
         <source>请填用户 ID。</source>
         <translation>Please enter a user ID.</translation>
@@ -486,7 +528,7 @@ libwebrtc: not integrated yet (planned pin: m150.7871.3.2 / M150).
     <name>VideoTile</name>
     <message>
         <source>我</source>
-        <translation>You</translation>
+        <translation>Me</translation>
     </message>
     <message>
         <source>呼叫中…</source>
@@ -501,7 +543,7 @@ libwebrtc: not integrated yet (planned pin: m150.7871.3.2 / M150).
     <name>callstrings</name>
     <message>
         <source>你正在通话中，请先结束当前通话</source>
-        <translation>You are already in a call. Please end it first.</translation>
+        <translation>You're already on a call. End it first.</translation>
     </message>
     <message>
         <source>已取消</source>
@@ -517,11 +559,11 @@ libwebrtc: not integrated yet (planned pin: m150.7871.3.2 / M150).
     </message>
     <message>
         <source>对方忙线中</source>
-        <translation>They are busy</translation>
+        <translation>User is busy</translation>
     </message>
     <message>
         <source>对方不在线</source>
-        <translation>They are offline</translation>
+        <translation>Offline</translation>
     </message>
     <message>
         <source>已在其他设备接听</source>
@@ -561,7 +603,7 @@ libwebrtc: not integrated yet (planned pin: m150.7871.3.2 / M150).
     </message>
     <message>
         <source>来电</source>
-        <translation>Incoming</translation>
+        <translation>Incoming call</translation>
     </message>
     <message>
         <source>已拒绝</source>
@@ -621,15 +663,15 @@ libwebrtc: not integrated yet (planned pin: m150.7871.3.2 / M150).
     </message>
     <message>
         <source>邀请你加入群通话</source>
-        <translation>is inviting you to a group call</translation>
+        <translation>Invites you to a group call</translation>
     </message>
     <message>
         <source>邀请你视频通话</source>
-        <translation>is inviting you to a video call</translation>
+        <translation>Invites you to a video call</translation>
     </message>
     <message>
         <source>邀请你语音通话</source>
-        <translation>is inviting you to a voice call</translation>
+        <translation>Invites you to a voice call</translation>
     </message>
 </context>
 <context>
@@ -637,6 +679,53 @@ libwebrtc: not integrated yet (planned pin: m150.7871.3.2 / M150).
     <message>
         <source>跟随系统</source>
         <translation>Follow system</translation>
+    </message>
+</context>
+<context>
+    <name>main</name>
+    <message>
+        <source>im-rtc 桌面端参考实现（经 C ABI 调引擎）</source>
+        <translation>im-rtc desktop reference implementation (drives the engine through the C ABI)</translation>
+    </message>
+    <message>
+        <source>预填服务器地址。</source>
+        <translation>Prefill the server address.</translation>
+    </message>
+    <message>
+        <source>预填用户 ID，并自动登录。</source>
+        <translation>Prefill the user ID and sign in automatically.</translation>
+    </message>
+    <message>
+        <source>连上之后自动拨这些人，逗号分隔；多于一个即群通话。</source>
+        <translation>Call these people after connecting, comma-separated; more than one makes a group call.</translation>
+    </message>
+    <message>
+        <source>--call 用视频，默认语音。</source>
+        <translation>Use video for --call (default is voice).</translation>
+    </message>
+    <message>
+        <source>独立的设置与通话记录，用于同机开两个实例互打。</source>
+        <translation>Separate settings and call history, for running two instances on one machine.</translation>
+    </message>
+    <message>
+        <source>收到来电就接，联调用。</source>
+        <translation>Accept incoming calls automatically (for integration testing).</translation>
+    </message>
+    <message>
+        <source>接通 / 进房 N 秒后自动退出，联调用。</source>
+        <translation>Exit N seconds after connecting or joining (for integration testing).</translation>
+    </message>
+    <message>
+        <source>接通后立刻加一个人进来，联调用。</source>
+        <translation>Invite one more person right after connecting (for integration testing).</translation>
+    </message>
+    <message>
+        <source>进会议房；new 表示先建一个。</source>
+        <translation>Join a meeting room; "new" creates one first.</translation>
+    </message>
+    <message>
+        <source>每个格子都当成有画面并贴测试图案，验渲染路径 A 的宿主侧。</source>
+        <translation>Treat every tile as having video and paint a test pattern, to verify the host side of render path A.</translation>
     </message>
 </context>
 </TS>
