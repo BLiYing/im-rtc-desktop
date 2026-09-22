@@ -289,11 +289,11 @@ IMRTC_TEST(capiErrorNamesAreStatic, "C ABI —— error_name / version 返回静
   // 那种指针出了函数就悬空了。
   CHECK_TRUE(imrtc_v1_error_name(2005) == imrtc_v1_error_name(2005), "静态串，指针稳定");
   CHECK_TRUE(std::strlen(imrtc_v1_version()) > 0, "version 非空");
-  // 五端统一版本（现为 2.0.0）。升版本时这条跟着改——它就是用来逼人记得同步另外四端的。
-  CHECK_EQ(std::string(imrtc_v1_version()), std::string("2.0.0"), "SDK 版本");
+  // 五端统一版本（现为 2.1.0）。升版本时这条跟着改——它就是用来逼人记得同步另外四端的。
+  CHECK_EQ(std::string(imrtc_v1_version()), std::string("2.1.0"), "SDK 版本");
   CHECK_TRUE(imrtc_v1_version() == imrtc_v1_version(), "静态串，指针稳定");
-  CHECK_EQ(imrtc::CallEngineOptions{}.sdk, std::string("desktop/2.0.0"), "引擎 sdk 默认串同源");
-  CHECK_EQ(imrtc::ConnectionOptions{}.sdk, std::string("desktop/2.0.0"), "连接 sdk 默认串同源");
+  CHECK_EQ(imrtc::CallEngineOptions{}.sdk, std::string("desktop/2.1.0"), "引擎 sdk 默认串同源");
+  CHECK_EQ(imrtc::ConnectionOptions{}.sdk, std::string("desktop/2.1.0"), "连接 sdk 默认串同源");
 }
 
 namespace {

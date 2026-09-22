@@ -8,6 +8,6 @@ namespace imrtc {
  *
  * 是编译期常量、不是函数，所以不会多出任何导出符号（`scripts/check-abi.sh` 守着）。
  */
-inline constexpr char kSdkVersion[] = "2.0.0";
+inline constexpr char kSdkVersion[] = "2.1.0";
 
 }  // namespace imrtc
