@@ -100,7 +100,7 @@
     </message>
     <message>
         <source>退出</source>
-        <translation>Sign out</translation>
+        <translation>Log out</translation>
     </message>
     <message>
         <source>设置</source>
@@ -108,11 +108,11 @@
     </message>
     <message>
         <source>单人通话</source>
-        <translation>One-to-one call</translation>
+        <translation>1:1 call</translation>
     </message>
     <message>
         <source>对方 ID</source>
-        <translation>Their user ID</translation>
+        <translation>Callee ID</translation>
     </message>
     <message>
         <source>例如 bob</source>
@@ -283,7 +283,7 @@ who, which direction, which media, why it ended, how long it lasted.</translatio
     </message>
     <message>
         <source>登录</source>
-        <translation>Sign in</translation>
+        <translation>Log in</translation>
     </message>
     <message>
         <source>im-rtc Demo</source>
@@ -659,7 +659,7 @@ libwebrtc: not integrated yet (planned pin: m150.7871.3.2 / M150).
     </message>
     <message>
         <source>（未知）</source>
-        <translation>(Unknown)</translation>
+        <translation>(unknown)</translation>
     </message>
     <message>
         <source>邀请你加入群通话</source>
