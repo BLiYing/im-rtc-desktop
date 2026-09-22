@@ -6,6 +6,8 @@
 
 ## 当前焦点
 
+- **09-22 SDK 2.1.0 已发版**（tag `9479158`，**首个桌面 GitHub Release**，补上 2.0.0 当时缺的那次；仍只有 macOS universal zip，无 Windows 包；C ABI 仍无音视频）。协议版本未变（仍为 2）。**英文版式还没在真机上看过**，是已知缺口。
+
 - **09-21 多语言补齐**：桌面原本就有 Qt `tr()` + 语言切换，这次补了 20 条没翻的（登录错误、通话记录页、命令行帮助），并把与跨端文案表中文相同的 13 条对齐到表里的英文（如 Answer→Accept、Hang up→End）。`scripts/i18n_sync.py --check` 进了 `test.sh` 步 2b；`IMRTC_BUILD_DEMO=ON ./scripts/test.sh` 全过（lrelease 164 条 0 未完成）。**没有实机看过英文版式**。设计见 server `docs/design/I18N_DESIGN.md`。
 
 - **09-19 新增 `fetchCallHistory`**（引擎 `CallEngineHistory.cpp` + 可注入 `HttpClient`，真实实现 `IxHttpClient`；C ABI `imrtc_v1_fetch_call_history`，类型拆在 `imrtc_c_history.h`；包装头 `CallEngine.hpp` 已接；`GET /v1/calls`，游标翻页，`next_cursor == 0` 即到底，只返回本人）：`./scripts/test.sh` 8 步全过（178 个引擎用例含 10 条通话记录，Demo 测试含 `CallHistoryModelTest`，Darwin）；Demo 通话记录页改成调它，本地拼记录那套已删。**没验**：Demo 真连服务端翻页、Windows。 同日记录页对齐 Android 版式（圆角卡片、图标 / 名字加两行摘要 / 右侧时间，群通话第一行「群通话 · N 人」），时间按发起时间四档（今天 `HH:mm` / `昨天 HH:mm` / `M月d日 HH:mm` / `yyyy年M月d日 HH:mm`，`callstrings::callTime` 纯函数 + `HistoryTimeTest` 11 条，界面未截图目测）。**Demo 测试要显式构建才会跑**：`cmake -S . -B build/demo-check -DIMRTC_BUILD_DEMO=ON -DCMAKE_PREFIX_PATH=~/Qt/6.8.3/macos && cmake --build build/demo-check`，再跑 `build/demo-check/demo/imrtc_demo_*_test`（7 组全过）；`./scripts/test.sh` 第 8 步在 `macos-clang` 预设下跑的是旧二进制，不会编 Demo 新代码。
@@ -26,7 +28,7 @@
 1. **Windows 过一遍**：编译 + 手点；`install()` / `imrtcConfig.cmake` / `find_package`（`.lib` 进 ARCHIVE、`.dll` 进 RUNTIME 只是照惯例写的）；`imrtc_v1_call_ex` 与结构体尾部追加字段 `dumpbin /exports` + 联调。等机器 / 集成方。
 2. **C ABI 与三端余下一处不对等**：observer 没有「票快到期」回调（得先在 engine 造到期计时器，形状没定）。`forceEnd` 已补（`0397c97`），Demo 红键还没接看门狗。
 3. **宿主对接 M1/M8 收尾**：Demo 没有「按 call_id 加入」入口与群号 / user_data 展示。
-4. **2.0.0**：code-review 通过后等用户通知发版（改 `Version.h` → tag → `package.sh` → release）；Demo 的 login 没接结果回调（失败退回 `on_error`）。
+4. Demo 的 login 没接结果回调（失败退回 `on_error`）。
 5. 静默失败清单（P0×2 / P1×4 / P2×6）：`../im-rtc-server/docs/ops/silent-failure/desktop.md`。第一条界面层没接（`MainWindow` 没按 `will_reconnect` 分情况展示），第二条没动。
 6. 异步口子的形状（一次定完）：渲染路径 B 原始帧回调 + `probeMicrophone` / `startLocalPreview` 出 C ABI。
 7. `WebRTCAdapter`（推迟，等 Apple Silicon 或 Windows 机器）。
@@ -55,7 +57,7 @@
   ```bash
   ./scripts/install-hooks.sh                     # 新 clone 跑一次
   ./scripts/test.sh                              # 唯一测试入口：体量 + 配置 + 编译 + 单测 + ABI
-  ./scripts/package.sh                           # 打发布包：dist/imrtc-desktop-2.0.0-macos.zip
+  ./scripts/package.sh                           # 打发布包：dist/imrtc-desktop-2.1.0-macos.zip
   IMRTC_SDK=local  ./scripts/demo.sh             # Demo 链本机包（先跑 package.sh）
   IMRTC_SDK=public ./scripts/demo.sh             # Demo 链 GitHub Release 包
   cmake --preset macos-clang && cmake --build --preset macos-clang
