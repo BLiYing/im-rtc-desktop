@@ -31,7 +31,7 @@
 4. Demo 的 login 没接结果回调（失败退回 `on_error`）。
 5. 静默失败清单（P0×2 / P1×4 / P2×6）：`../im-rtc-server/docs/ops/silent-failure/desktop.md`。第一条界面层没接（`MainWindow` 没按 `will_reconnect` 分情况展示），第二条没动。
 6. 异步口子的形状（一次定完）：渲染路径 B 原始帧回调 + `probeMicrophone` / `startLocalPreview` 出 C ABI。
-7. `WebRTCAdapter`（推迟，等 Apple Silicon 或 Windows 机器）。
+7. `WebRTCAdapter`（推迟，等 Apple Silicon 或 Windows 机器）。**macOS x86_64 音视频能否补上的完整调研见 [docs/design/WEBRTC_MACOS_X86_64_INVESTIGATION.md](docs/design/WEBRTC_MACOS_X86_64_INVESTIGATION.md)**（09-22～09-23）：shiguredo/`webrtc-sdk`/`bengreenier`/`stasel` 均已排除；`tg_owt`（Telegram Desktop 的 WebRTC 分支，BSD-3-Clause）技术可行但代价是跑一遍 Telegram 自己的原生依赖构建链（~35GB+、FFmpeg 默认 LGPL 待决策）；GitHub Actions 的 Intel macOS runner 已收紧（`macos-13` 下架、`macos-14` 11-02 停止支持，仅剩付费 `macos-15-large`）。**未动手，待决策文档里列的三个开放问题。**
 8. 零碎：后台来电提醒四条 + 设置页详细日志（archive 09-11）；`Shots` 设置页截图（高度 680）没重新生成；UX_FLOWS §07 关窗语义 / 托盘常驻没排期；日志环形缓冲 + `exportDiagnostics()`；按需 C# / P/Invoke 绑定；README 状态 / 依赖 / 开发几节的数字是旧的。
 9. **体量**（阈值 600，预警 480）：**`imrtc_c.h` 591 贴线，再往里加东西先拆**（`CallEngine.hpp` 09-18 拆出值类型后 540）；`demo/MainWindow.cpp` 563。
 
